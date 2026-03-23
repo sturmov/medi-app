@@ -1,0 +1,1954 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PsychoApp – Dokumentacja Psychologiczna</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/compat.css">
+</head>
+<body>
+
+<!-- ===== TOP BAR ===== -->
+<header class="top-bar">
+    <div class="top-bar__left">
+        <button
+            type="button"
+            class="sidebar-toggle"
+            id="sidebar-toggle"
+            aria-label="Otwórz nawigację"
+            aria-controls="sidebar"
+            aria-expanded="false"
+        >☰</button>
+        <div class="top-bar__brand">PsychoApp</div>
+    </div>
+    <div class="top-bar__actions">
+        <button type="button" class="btn btn--secondary btn--sm" id="btn-connect-folder">📁 Połącz folder pacjentów</button>
+        <div class="top-bar__save-indicator" id="save-indicator">💾 Autozapis</div>
+    </div>
+</header>
+
+<div class="folder-gate" id="folder-gate" style="display:none;" aria-live="polite" aria-label="Wymagane połączenie folderu">
+    <div class="folder-gate__card">
+        <h2 class="folder-gate__title">Aby rozpocząć pracę, przypnij folder pacjentów</h2>
+        <p class="folder-gate__text" id="folder-gate-status">Brak przypiętego folderu z danymi.</p>
+        <button type="button" class="btn btn--primary" id="btn-connect-folder-gate">📁 Połącz folder pacjentów</button>
+    </div>
+</div>
+
+<div class="patient-banner" id="patient-banner" style="display:none;" aria-live="polite">
+    <span class="patient-banner__label">Aktualny pacjent:</span>
+    <span class="patient-banner__minor-dot" id="patient-banner-minor" title="Pacjent niepełnoletni" aria-label="Pacjent niepełnoletni" style="display:none;">●</span>
+    <span class="patient-banner__name" id="patient-banner-name"></span>
+</div>
+
+<!-- ===== SIDEBAR ===== -->
+<nav class="sidebar" id="sidebar">
+    <ul class="sidebar__nav">
+        <li class="sidebar__item active" data-view="view-patients">
+            <span class="sidebar__icon">📋</span>
+            <span class="sidebar__label">Pacjenci</span>
+        </li>
+        <li class="sidebar__item" data-view="view-interview">
+            <span class="sidebar__icon">🏥</span>
+            <span class="sidebar__label">Wywiad Kliniczny</span>
+        </li>
+        <li class="sidebar__item" data-view="view-mse">
+            <span class="sidebar__icon">🧩</span>
+            <span class="sidebar__label">Badanie MSE</span>
+        </li>
+        <li class="sidebar__item" data-view="view-soap">
+            <span class="sidebar__icon">📝</span>
+            <span class="sidebar__label">Sesje SOAP</span>
+        </li>
+        <li class="sidebar__item" data-view="view-tests">
+            <span class="sidebar__icon">📊</span>
+            <span class="sidebar__label">Testy</span>
+        </li>
+        <li class="sidebar__item" data-view="view-plan">
+            <span class="sidebar__icon">📑</span>
+            <span class="sidebar__label">Plan Terapii</span>
+        </li>
+    </ul>
+</nav>
+
+<div class="sidebar-overlay" id="sidebar-overlay" aria-hidden="true"></div>
+
+<!-- ===== MAIN CONTENT ===== -->
+<main id="main-content">
+
+<!-- ========================================= -->
+<!-- VIEW: PATIENTS                            -->
+<!-- ========================================= -->
+<div class="view active" id="view-patients">
+
+    <div class="view__header">
+        <h1>Lista Pacjentów</h1>
+        <button type="button" class="btn btn--primary" id="btn-new-patient">Nowy Pacjent</button>
+    </div>
+
+    <div class="form-group">
+        <input type="text" id="patient-search" class="input" placeholder="Szukaj pacjenta (imię, nazwisko, PESEL)..." data-field="patientSearch">
+    </div>
+
+    <div id="patient-list" class="patient-list"></div>
+
+    <div id="patient-summary" class="patient-summary" style="display:none;">
+        <div class="card">
+            <h2 class="card__title">Dane pacjenta</h2>
+            <div class="card__body">
+                <div class="patient-summary__primary">
+                    <div class="patient-summary__name" id="summary-name"></div>
+                    <div class="patient-summary__phone" id="summary-phone"></div>
+                </div>
+                <div class="patient-summary__details" id="summary-details"></div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn--primary" id="btn-edit-patient">Edytuj dane</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Patient Detail Form -->
+    <form id="patient-form" class="patient-form" style="display:none;">
+
+        <!-- Card: Dane osobowe -->
+        <div class="card">
+            <h2 class="card__title">Dane osobowe</h2>
+            <div class="card__body" id="patient-personal-fields">
+                <div class="form-group" id="kodPacjenta-group" style="display:none;">
+                    <label for="kodPacjenta">Kod pacjenta</label>
+                    <input type="text" id="kodPacjenta" name="kodPacjenta" data-field="kodPacjenta" class="input" placeholder="P001">
+                </div>
+                <div class="form-group">
+                    <label for="imie">Imię</label>
+                    <input type="text" id="imie" name="imie" data-field="imie" class="input" placeholder="Imię pacjenta">
+                </div>
+                <div class="form-group">
+                    <label for="nazwisko">Nazwisko</label>
+                    <input type="text" id="nazwisko" name="nazwisko" data-field="nazwisko" class="input" placeholder="Nazwisko pacjenta">
+                </div>
+                <div class="form-group">
+                    <label for="telefon">Telefon</label>
+                    <input type="tel" id="telefon" name="telefon" data-field="telefon" class="input" placeholder="Numer telefonu">
+                </div>
+                <div class="form-group">
+                    <label for="pesel">PESEL</label>
+                    <input type="text" id="pesel" name="pesel" data-field="pesel" class="input" placeholder="Numer PESEL" maxlength="11">
+                </div>
+                <div class="form-group">
+                    <label for="dataUrodzenia">Data urodzenia</label>
+                    <input type="date" id="dataUrodzenia" name="dataUrodzenia" data-field="dataUrodzenia" class="input">
+                    <small class="form-hint" id="wiekPacjentaInfo">Wiek: —</small>
+                </div>
+                <div class="form-group">
+                    <label for="plec">Płeć</label>
+                    <select id="plec" name="plec" data-field="plec" class="input">
+                        <option value="">-- Wybierz --</option>
+                        <option value="Kobieta">Kobieta</option>
+                        <option value="Mężczyzna">Mężczyzna</option>
+                        <option value="Inna">Inna</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" name="email" data-field="email" class="input" placeholder="Adres e-mail">
+                </div>
+                <div class="form-group">
+                    <label for="adres">Adres</label>
+                    <textarea id="adres" name="adres" data-field="adres" class="input" rows="3" placeholder="Adres zamieszkania"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- Card: Kontakt w nagłych wypadkach -->
+        <div class="card">
+            <h2 class="card__title">Kontakt w nagłych wypadkach</h2>
+            <div class="card__body">
+                <div class="form-group">
+                    <label for="kontaktNaglyImie">Imię i nazwisko</label>
+                    <input type="text" id="kontaktNaglyImie" name="kontaktNaglyImie" data-field="kontaktNaglyImie" class="input" placeholder="Imię i nazwisko osoby kontaktowej">
+                </div>
+                <div class="form-group">
+                    <label for="kontaktNaglyTelefon">Telefon</label>
+                    <input type="tel" id="kontaktNaglyTelefon" name="kontaktNaglyTelefon" data-field="kontaktNaglyTelefon" class="input" placeholder="Numer telefonu osoby kontaktowej">
+                </div>
+                <div class="form-group">
+                    <label for="kontaktNaglyRelacja">Relacja</label>
+                    <input type="text" id="kontaktNaglyRelacja" name="kontaktNaglyRelacja" data-field="kontaktNaglyRelacja" class="input" placeholder="np. rodzic, małżonek, przyjaciel">
+                </div>
+            </div>
+        </div>
+
+        <!-- Card: Dane rodziców/opiekunów (nieletni) -->
+        <div class="card">
+            <h2 class="card__title">Dane rodziców/opiekunów (nieletni)</h2>
+            <div class="card__body">
+                <div class="form-group">
+                    <label for="matkaTelefon">Telefon matki/opiekunki</label>
+                    <input type="tel" id="matkaTelefon" name="matkaTelefon" data-field="matkaTelefon" class="input" placeholder="Numer telefonu matki">
+                </div>
+                <div class="form-group">
+                    <label for="matkaEmail">Email matki/opiekunki</label>
+                    <input type="email" id="matkaEmail" name="matkaEmail" data-field="matkaEmail" class="input" placeholder="Adres e-mail matki">
+                </div>
+                <div class="form-group">
+                    <label for="ojciecTelefon">Telefon ojca/opiekuna</label>
+                    <input type="tel" id="ojciecTelefon" name="ojciecTelefon" data-field="ojciecTelefon" class="input" placeholder="Numer telefonu ojca">
+                </div>
+                <div class="form-group">
+                    <label for="ojciecEmail">Email ojca/opiekuna</label>
+                    <input type="email" id="ojciecEmail" name="ojciecEmail" data-field="ojciecEmail" class="input" placeholder="Adres e-mail ojca">
+                </div>
+                <div class="form-group form-group--checkbox">
+                    <input type="checkbox" id="ograniczonePrawa" name="ograniczonePrawa" data-field="ograniczonePrawa">
+                    <label for="ograniczonePrawa">Ograniczone prawa rodzicielskie</label>
+                </div>
+                <div class="form-group">
+                    <label for="ograniczonePrawaSzczegoly">Szczegóły ograniczeń</label>
+                    <textarea id="ograniczonePrawaSzczegoly" name="ograniczonePrawaSzczegoly" data-field="ograniczonePrawaSzczegoly" class="input" rows="3" placeholder="Opisz szczegóły ograniczonych praw rodzicielskich"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- Card: Zgody -->
+        <div class="card">
+            <h2 class="card__title">Zgody</h2>
+            <div class="card__body">
+                <div class="form-group form-group--inline">
+                    <div class="form-group--checkbox">
+                        <input type="checkbox" id="zgodaRodo" name="zgodaRodo" data-field="zgodaRodo">
+                        <label for="zgodaRodo">Zgoda RODO</label>
+                    </div>
+                    <div class="form-group">
+                        <label for="zgodaRodoData">Data</label>
+                        <input type="date" id="zgodaRodoData" name="zgodaRodoData" data-field="zgodaRodoData" class="input">
+                    </div>
+                </div>
+                <div class="form-group form-group--inline">
+                    <div class="form-group--checkbox">
+                        <input type="checkbox" id="zgodaLeczenie" name="zgodaLeczenie" data-field="zgodaLeczenie">
+                        <label for="zgodaLeczenie">Zgoda na leczenie</label>
+                    </div>
+                    <div class="form-group">
+                        <label for="zgodaLeczenieData">Data</label>
+                        <input type="date" id="zgodaLeczenieData" name="zgodaLeczenieData" data-field="zgodaLeczenieData" class="input">
+                    </div>
+                </div>
+                <div class="form-group form-group--inline">
+                    <div class="form-group--checkbox">
+                        <input type="checkbox" id="zgodaOpiekuna" name="zgodaOpiekuna" data-field="zgodaOpiekuna">
+                        <label for="zgodaOpiekuna">Zgoda opiekuna prawnego</label>
+                    </div>
+                    <div class="form-group">
+                        <label for="zgodaOpiekunaData">Data</label>
+                        <input type="date" id="zgodaOpiekunaData" name="zgodaOpiekunaData" data-field="zgodaOpiekunaData" class="input">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="zrodloSkierowania">Źródło skierowania</label>
+                    <input type="text" id="zrodloSkierowania" name="zrodloSkierowania" data-field="zrodloSkierowania" class="input" placeholder="np. lekarz rodzinny, szkoła, samodzielne zgłoszenie">
+                </div>
+            </div>
+        </div>
+
+        <div class="form-actions">
+            <button type="button" class="btn btn--secondary" id="btn-cancel-patient">Anuluj</button>
+        </div>
+    </form>
+
+</div>
+
+<!-- ========================================= -->
+<!-- VIEW: INTERVIEW                           -->
+<!-- ========================================= -->
+<div class="view" id="view-interview">
+
+    <div class="view__header">
+        <h1>Wywiad Kliniczny – Pierwsza Wizyta</h1>
+    </div>
+
+    <p class="form-hint interview-tree-hint">Układ hierarchiczny: <strong>L1</strong> (sekcje bazowe), <strong>L2</strong> (uszczegółowienia), <strong>L3</strong> (dalsze doprecyzowanie).</p>
+
+    <!-- Card: Dane wizyty -->
+    <div class="card">
+        <h2 class="card__title"><span class="tree-pill">L1</span> Dane wizyty</h2>
+        <div class="card__body">
+            <div class="form-group">
+                <label for="dataWizyty">Data wizyty</label>
+                <input type="date" id="dataWizyty" name="dataWizyty" data-field="dataWizyty" class="input">
+            </div>
+            <div class="form-group">
+                <label for="rodzajWizyty">Rodzaj wizyty</label>
+                <select id="rodzajWizyty" name="rodzajWizyty" data-field="rodzajWizyty" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <optgroup label="Konsultacja">
+                        <option value="Konsultacja — pierwszy kontakt">Konsultacja — pierwszy kontakt</option>
+                        <option value="Konsultacja — kilka spotkań rozpoznawczych">Konsultacja — kilka spotkań rozpoznawczych</option>
+                        <option value="Konsultacja — osoba niezdecydowana">Konsultacja — osoba niezdecydowana</option>
+                        <option value="Konsultacja — diagnoza / rozeznanie">Konsultacja — diagnoza / rozeznanie</option>
+                        <option value="Konsultacja — trudności dziecka">Konsultacja — trudności dziecka</option>
+                        <option value="Konsultacja — spotkanie z rodzicem">Konsultacja — spotkanie z rodzicem</option>
+                    </optgroup>
+                    <option value="Interwencja kryzysowa">Interwencja kryzysowa</option>
+                    <option value="Psychoterapia">Psychoterapia</option>
+                    <option value="Diagnoza">Diagnoza</option>
+                </select>
+            </div>
+            <details class="interview-subsection interview-subsection--lvl2">
+                <summary class="interview-subsection__summary"><span class="tree-pill tree-pill--sub">L2</span> Osoby obecne (opcjonalnie)</summary>
+                <div class="interview-subsection__content">
+                    <div class="form-group">
+                        <label for="osobyObecne">Osoby obecne</label>
+                        <input type="text" id="osobyObecne" name="osobyObecne" data-field="osobyObecne" class="input" placeholder="Osoby obecne podczas wizyty">
+                        <div class="insert-suggestions" id="osoby-obecne-suggestions" aria-label="Szybkie wstawianie osób obecnych">
+                            <button type="button" class="insert-suggestions__item" data-insert-text="rodzice">rodzice</button>
+                            <button type="button" class="insert-suggestions__item" data-insert-text="mama">mama</button>
+                            <button type="button" class="insert-suggestions__item" data-insert-text="tata">tata</button>
+                            <button type="button" class="insert-suggestions__item" data-insert-text="opiekun">opiekun</button>
+                        </div>
+                    </div>
+                </div>
+            </details>
+        </div>
+    </div>
+
+    <!-- Card: Powód zgłoszenia -->
+    <div class="card">
+        <h2 class="card__title"><span class="tree-pill">L1</span> Powód zgłoszenia</h2>
+        <div class="card__body">
+            <div class="form-group">
+                <label for="powodZgloszenia">Powód zgłoszenia</label>
+                <textarea id="powodZgloszenia" name="powodZgloszenia" data-field="powodZgloszenia" class="input" rows="4" placeholder="Opisz główny powód zgłoszenia się pacjenta"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Doświadczenie przemocy</label>
+                <div class="form-group">
+                    <label for="przemocStatus" class="sr-only">Status doświadczenia przemocy</label>
+                    <select id="przemocStatus" name="przemocStatus" data-field="przemocStatus" class="input">
+                        <option value="">-- Wybierz --</option>
+                        <option value="Tak">Tak</option>
+                        <option value="Nie">Nie</option>
+                        <option value="Nie zgłasza">Nie zgłasza</option>
+                    </select>
+                </div>
+                <details class="interview-subsection interview-subsection--lvl2" id="przemoc-typy-wrap">
+                    <summary class="interview-subsection__summary"><span class="tree-pill tree-pill--sub">L2</span> Typy przemocy (uszczegółowienie)</summary>
+                    <div class="interview-subsection__content">
+                        <div class="checkbox-group">
+                            <div class="form-group--checkbox">
+                                <input type="checkbox" id="przemocFizyczna" name="przemocFizyczna" data-field="przemocFizyczna">
+                                <label for="przemocFizyczna">Fizyczna</label>
+                            </div>
+                            <div class="form-group--checkbox">
+                                <input type="checkbox" id="przemocPsychiczna" name="przemocPsychiczna" data-field="przemocPsychiczna">
+                                <label for="przemocPsychiczna">Psychiczna</label>
+                            </div>
+                            <div class="form-group--checkbox">
+                                <input type="checkbox" id="przemocSeksualna" name="przemocSeksualna" data-field="przemocSeksualna">
+                                <label for="przemocSeksualna">Seksualna</label>
+                            </div>
+                            <div class="form-group--checkbox">
+                                <input type="checkbox" id="przemocZaniedbanie" name="przemocZaniedbanie" data-field="przemocZaniedbanie">
+                                <label for="przemocZaniedbanie">Zaniedbanie</label>
+                            </div>
+                            <div class="form-group--checkbox">
+                                <input type="checkbox" id="przemocEkonomiczna" name="przemocEkonomiczna" data-field="przemocEkonomiczna">
+                                <label for="przemocEkonomiczna">Ekonomiczna</label>
+                            </div>
+                        </div>
+                    </div>
+                </details>
+                <div class="form-group">
+                    <label for="przemocKomentarz"><span class="tree-pill tree-pill--sub">L3</span> Komentarz</label>
+                    <textarea id="przemocKomentarz" name="przemocKomentarz" data-field="przemocKomentarz" class="input" rows="2" placeholder="Opcjonalne uszczegółowienie"></textarea>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="aktualnyProblem">Aktualny problem</label>
+                <textarea id="aktualnyProblem" name="aktualnyProblem" data-field="aktualnyProblem" class="input" rows="4" placeholder="Opis aktualnego problemu"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card: Kontekst funkcjonowania -->
+    <div class="card">
+        <h2 class="card__title"><span class="tree-pill">L1</span> Kontekst funkcjonowania</h2>
+        <div class="card__body">
+            <div class="form-group">
+                <label for="sytuacjaRodzinna">Sytuacja rodzinna</label>
+                <textarea id="sytuacjaRodzinna" name="sytuacjaRodzinna" data-field="sytuacjaRodzinna" class="input" rows="3" placeholder="Opis sytuacji rodzinnej"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="szkolaPraca">Szkoła / Praca</label>
+                <textarea id="szkolaPraca" name="szkolaPraca" data-field="szkolaPraca" class="input" rows="3" placeholder="Sytuacja w szkole lub pracy"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="relacjeRowiesnicze">Relacje rówieśnicze</label>
+                <textarea id="relacjeRowiesnicze" name="relacjeRowiesnicze" data-field="relacjeRowiesnicze" class="input" rows="3" placeholder="Relacje z rówieśnikami"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="stanCywilny">Stan cywilny</label>
+                <select id="stanCywilny" name="stanCywilny" data-field="stanCywilny" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Kawaler/Panna">Kawaler/Panna</option>
+                    <option value="Małżeństwo">Małżeństwo</option>
+                    <option value="Związek partnerski">Związek partnerski</option>
+                    <option value="Rozwód">Rozwód</option>
+                    <option value="Separacja">Separacja</option>
+                    <option value="Wdowa/Wdowiec">Wdowa/Wdowiec</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="wydarzeniaTraumatyczne">Wydarzenia traumatyczne</label>
+                <textarea id="wydarzeniaTraumatyczne" name="wydarzeniaTraumatyczne" data-field="wydarzeniaTraumatyczne" class="input" rows="3" placeholder="Znaczące wydarzenia traumatyczne"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="czasWolny">Czas wolny</label>
+                <textarea id="czasWolny" name="czasWolny" data-field="czasWolny" class="input" rows="3" placeholder="Jak pacjent spędza czas wolny"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card: Funkcjonowanie somatyczne -->
+    <div class="card">
+        <h2 class="card__title"><span class="tree-pill">L1</span> Funkcjonowanie somatyczne</h2>
+        <div class="card__body">
+            <div class="form-group">
+                <label for="apetytStatus">Apetyt</label>
+                <select id="apetytStatus" name="apetytStatus" data-field="apetytStatus" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Prawidłowy">Prawidłowy</option>
+                    <option value="Obniżony">Obniżony</option>
+                    <option value="Wzmożony">Wzmożony</option>
+                    <option value="Zmienny">Zmienny</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="apetyt"><span class="tree-pill tree-pill--sub">L2</span> Komentarz do apetytu</label>
+                <textarea id="apetyt" name="apetyt" data-field="apetyt" class="input" rows="2" placeholder="Opis/komentarz"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="senStatus">Sen</label>
+                <select id="senStatus" name="senStatus" data-field="senStatus" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Prawidłowy">Prawidłowy</option>
+                    <option value="Bezsenność">Bezsenność</option>
+                    <option value="Przerywany">Przerywany</option>
+                    <option value="Hipersomnia">Hipersomnia</option>
+                    <option value="Inny">Inny</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="senJakosc">Jakość snu</label>
+                <select id="senJakosc" name="senJakosc" data-field="senJakosc" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Dobra">Dobra</option>
+                    <option value="Średnia">Średnia</option>
+                    <option value="Słaba">Słaba</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="senCzasZasypiania">Czas zasypiania</label>
+                <input type="text" id="senCzasZasypiania" name="senCzasZasypiania" data-field="senCzasZasypiania" class="input" placeholder="np. 30 minut">
+            </div>
+            <div class="checkbox-group">
+                <div class="form-group--checkbox">
+                    <input type="checkbox" id="senBudzenieNocne" name="senBudzenieNocne" data-field="senBudzenieNocne">
+                    <label for="senBudzenieNocne">Budzenie nocne</label>
+                </div>
+                <div class="form-group--checkbox">
+                    <input type="checkbox" id="senKoszmary" name="senKoszmary" data-field="senKoszmary">
+                    <label for="senKoszmary">Koszmary senne</label>
+                </div>
+                <div class="form-group--checkbox">
+                    <input type="checkbox" id="senHipersomnia" name="senHipersomnia" data-field="senHipersomnia">
+                    <label for="senHipersomnia">Hipersomnia</label>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="sen"><span class="tree-pill tree-pill--sub">L2</span> Komentarz do snu</label>
+                <textarea id="sen" name="sen" data-field="sen" class="input" rows="2" placeholder="Ogólny opis / komentarz"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="aktywnoscFizyczna">Aktywność fizyczna</label>
+                <textarea id="aktywnoscFizyczna" name="aktywnoscFizyczna" data-field="aktywnoscFizyczna" class="input" rows="2" placeholder="Rodzaj aktywności fizycznej"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="aktywnoscCzestotliwosc">Częstotliwość aktywności</label>
+                <select id="aktywnoscCzestotliwosc" name="aktywnoscCzestotliwosc" data-field="aktywnoscCzestotliwosc" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Brak">Brak</option>
+                    <option value="1-2x/tydzień">1-2x/tydzień</option>
+                    <option value="3-4x/tydzień">3-4x/tydzień</option>
+                    <option value="Codziennie">Codziennie</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card: Historia leczenia -->
+    <div class="card">
+        <h2 class="card__title"><span class="tree-pill">L1</span> Historia leczenia</h2>
+        <div class="card__body">
+            <div class="form-group">
+                <label for="historiaLeczenia">Historia leczenia psychiatrycznego/psychologicznego</label>
+                <textarea id="historiaLeczenia" name="historiaLeczenia" data-field="historiaLeczenia" class="input" rows="4" placeholder="Poprzednie leczenie, hospitalizacje, terapie"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="farmakoterapiaOgolna">Ogólna farmakoterapia</label>
+                <textarea id="farmakoterapiaOgolna" name="farmakoterapiaOgolna" data-field="farmakoterapiaOgolna" class="input" rows="3" placeholder="Leki ogólne, dawki, działania niepożądane"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="psychotropySubstancje">Leki psychotropowe / substancje</label>
+                <textarea id="psychotropySubstancje" name="psychotropySubstancje" data-field="psychotropySubstancje" class="input" rows="3" placeholder="Substancja, dawka, częstość, wpływ"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card: Używki -->
+    <div class="card">
+        <h2 class="card__title"><span class="tree-pill">L1</span> Używki</h2>
+        <div class="card__body">
+            <div class="substance-grid">
+                <div class="substance-item">
+                    <div class="form-group--checkbox">
+                        <input type="checkbox" id="nikotyna" name="nikotyna" data-field="nikotyna">
+                        <label for="nikotyna">Nikotyna</label>
+                    </div>
+                    <div class="form-group">
+                        <select id="nikotynaFreq" name="nikotynaFreq" data-field="nikotynaFreq" class="input input--sm">
+                            <option value="Brak">Brak</option>
+                            <option value="Okazjonalnie">Okazjonalnie</option>
+                            <option value="Regularnie">Regularnie</option>
+                            <option value="Codziennie">Codziennie</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="nikotynaIlosc" name="nikotynaIlosc" data-field="nikotynaIlosc" class="input input--sm" placeholder="Ilość">
+                    </div>
+                </div>
+                <div class="substance-item">
+                    <div class="form-group--checkbox">
+                        <input type="checkbox" id="kofeina" name="kofeina" data-field="kofeina">
+                        <label for="kofeina">Kofeina</label>
+                    </div>
+                    <div class="form-group">
+                        <select id="kofeinaFreq" name="kofeinaFreq" data-field="kofeinaFreq" class="input input--sm">
+                            <option value="Brak">Brak</option>
+                            <option value="Okazjonalnie">Okazjonalnie</option>
+                            <option value="Regularnie">Regularnie</option>
+                            <option value="Codziennie">Codziennie</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="kofeinaIlosc" name="kofeinaIlosc" data-field="kofeinaIlosc" class="input input--sm" placeholder="Ilość">
+                    </div>
+                </div>
+                <div class="substance-item">
+                    <div class="form-group--checkbox">
+                        <input type="checkbox" id="alkohol" name="alkohol" data-field="alkohol">
+                        <label for="alkohol">Alkohol</label>
+                    </div>
+                    <div class="form-group">
+                        <select id="alkoholFreq" name="alkoholFreq" data-field="alkoholFreq" class="input input--sm">
+                            <option value="Brak">Brak</option>
+                            <option value="Okazjonalnie">Okazjonalnie</option>
+                            <option value="Regularnie">Regularnie</option>
+                            <option value="Codziennie">Codziennie</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="alkoholIlosc" name="alkoholIlosc" data-field="alkoholIlosc" class="input input--sm" placeholder="Ilość">
+                    </div>
+                </div>
+                <div class="substance-item">
+                    <div class="form-group--checkbox">
+                        <input type="checkbox" id="marihuana" name="marihuana" data-field="marihuana">
+                        <label for="marihuana">Marihuana</label>
+                    </div>
+                    <div class="form-group">
+                        <select id="marihuanaFreq" name="marihuanaFreq" data-field="marihuanaFreq" class="input input--sm">
+                            <option value="Brak">Brak</option>
+                            <option value="Okazjonalnie">Okazjonalnie</option>
+                            <option value="Regularnie">Regularnie</option>
+                            <option value="Codziennie">Codziennie</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="marihuanaIlosc" name="marihuanaIlosc" data-field="marihuanaIlosc" class="input input--sm" placeholder="Ilość">
+                    </div>
+                </div>
+                <div class="substance-item">
+                    <div class="form-group--checkbox">
+                        <input type="checkbox" id="halucynogeny" name="halucynogeny" data-field="halucynogeny">
+                        <label for="halucynogeny">Halucynogeny (MDMA, grzyby, psylocybina)</label>
+                    </div>
+                    <div class="form-group">
+                        <select id="halucynogenyFreq" name="halucynogenyFreq" data-field="halucynogenyFreq" class="input input--sm">
+                            <option value="Brak">Brak</option>
+                            <option value="Okazjonalnie">Okazjonalnie</option>
+                            <option value="Regularnie">Regularnie</option>
+                            <option value="Codziennie">Codziennie</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="halucynogenyIlosc" name="halucynogenyIlosc" data-field="halucynogenyIlosc" class="input input--sm" placeholder="Ilość">
+                    </div>
+                </div>
+                <div class="substance-item">
+                    <div class="form-group--checkbox">
+                        <input type="checkbox" id="opioidy" name="opioidy" data-field="opioidy">
+                        <label for="opioidy">Opioidy</label>
+                    </div>
+                    <div class="form-group">
+                        <select id="opioidyFreq" name="opioidyFreq" data-field="opioidyFreq" class="input input--sm">
+                            <option value="Brak">Brak</option>
+                            <option value="Okazjonalnie">Okazjonalnie</option>
+                            <option value="Regularnie">Regularnie</option>
+                            <option value="Codziennie">Codziennie</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="opioidyIlosc" name="opioidyIlosc" data-field="opioidyIlosc" class="input input--sm" placeholder="Ilość">
+                    </div>
+                </div>
+                <div class="substance-item">
+                    <div class="form-group--checkbox">
+                        <input type="checkbox" id="lekiBarbiturany" name="lekiBarbiturany" data-field="lekiBarbiturany">
+                        <label for="lekiBarbiturany">Leki (barbiturany)</label>
+                    </div>
+                    <div class="form-group">
+                        <select id="lekiBarbituranyFreq" name="lekiBarbituranyFreq" data-field="lekiBarbituranyFreq" class="input input--sm">
+                            <option value="Brak">Brak</option>
+                            <option value="Okazjonalnie">Okazjonalnie</option>
+                            <option value="Regularnie">Regularnie</option>
+                            <option value="Codziennie">Codziennie</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="lekiBarbituranyIlosc" name="lekiBarbituranyIlosc" data-field="lekiBarbituranyIlosc" class="input input--sm" placeholder="Ilość">
+                    </div>
+                </div>
+                <div class="substance-item">
+                    <div class="form-group--checkbox">
+                        <input type="checkbox" id="srodkiWziewne" name="srodkiWziewne" data-field="srodkiWziewne">
+                        <label for="srodkiWziewne">Środki wziewne</label>
+                    </div>
+                    <div class="form-group">
+                        <select id="srodkiWziewneFreq" name="srodkiWziewneFreq" data-field="srodkiWziewneFreq" class="input input--sm">
+                            <option value="Brak">Brak</option>
+                            <option value="Okazjonalnie">Okazjonalnie</option>
+                            <option value="Regularnie">Regularnie</option>
+                            <option value="Codziennie">Codziennie</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="srodkiWziewneIlosc" name="srodkiWziewneIlosc" data-field="srodkiWziewneIlosc" class="input input--sm" placeholder="Ilość">
+                    </div>
+                </div>
+                <div class="substance-item">
+                    <div class="form-group--checkbox">
+                        <input type="checkbox" id="dozylne" name="dozylne" data-field="dozylne">
+                        <label for="dozylne">Dożylne</label>
+                    </div>
+                    <div class="form-group">
+                        <select id="dozylneFreq" name="dozylneFreq" data-field="dozylneFreq" class="input input--sm">
+                            <option value="Brak">Brak</option>
+                            <option value="Okazjonalnie">Okazjonalnie</option>
+                            <option value="Regularnie">Regularnie</option>
+                            <option value="Codziennie">Codziennie</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="dozylneIlosc" name="dozylneIlosc" data-field="dozylneIlosc" class="input input--sm" placeholder="Ilość">
+                    </div>
+                </div>
+                <div class="substance-item">
+                    <div class="form-group--checkbox">
+                        <input type="checkbox" id="inneLeki" name="inneLeki" data-field="inneLeki">
+                        <label for="inneLeki">Inne leki</label>
+                    </div>
+                    <div class="form-group">
+                        <select id="inneLekiFreq" name="inneLekiFreq" data-field="inneLekiFreq" class="input input--sm">
+                            <option value="Brak">Brak</option>
+                            <option value="Okazjonalnie">Okazjonalnie</option>
+                            <option value="Regularnie">Regularnie</option>
+                            <option value="Codziennie">Codziennie</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="inneLekiIlosc" name="inneLekiIlosc" data-field="inneLekiIlosc" class="input input--sm" placeholder="Ilość">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card: Parametry somatyczne -->
+    <div class="card">
+        <h2 class="card__title"><span class="tree-pill">L1</span> Parametry somatyczne</h2>
+        <div class="card__body">
+            <div class="form-group">
+                <label for="wzrost">Wzrost (cm)</label>
+                <input type="number" id="wzrost" name="wzrost" data-field="wzrost" class="input" placeholder="Wzrost w cm">
+            </div>
+            <div class="form-group">
+                <label for="masaCiala">Masa ciała (kg)</label>
+                <input type="number" id="masaCiala" name="masaCiala" data-field="masaCiala" class="input" placeholder="Masa ciała w kg">
+            </div>
+            <div class="form-group">
+                <label for="bmi">BMI</label>
+                <input type="text" id="bmi" name="bmi" data-field="bmi" class="input" readonly placeholder="Obliczane automatycznie">
+            </div>
+            <div class="form-group">
+                <label for="najnizszaMasa">Najniższa masa ciała (kg)</label>
+                <input type="number" id="najnizszaMasa" name="najnizszaMasa" data-field="najnizszaMasa" class="input" placeholder="Najniższa masa w kg">
+            </div>
+            <div class="form-group">
+                <label for="najwyzszaMasa">Najwyższa masa ciała (kg)</label>
+                <input type="number" id="najwyzszaMasa" name="najwyzszaMasa" data-field="najwyzszaMasa" class="input" placeholder="Najwyższa masa w kg">
+            </div>
+        </div>
+    </div>
+
+    <!-- Card: Ocena kliniczna -->
+    <div class="card">
+        <h2 class="card__title"><span class="tree-pill">L1</span> Ocena kliniczna</h2>
+        <div class="card__body">
+            <div class="form-group">
+                <label for="hipotezaDiagnostyczna">Hipoteza diagnostyczna</label>
+                <textarea id="hipotezaDiagnostyczna" name="hipotezaDiagnostyczna" data-field="hipotezaDiagnostyczna" class="input" rows="4" placeholder="Wstępna hipoteza diagnostyczna"></textarea>
+                <small class="form-hint">Użyj kodów ICD-10/ICD-11</small>
+            </div>
+            <div class="form-group">
+                <label for="czynnikiPodtrzymujace">Czynniki podtrzymujące</label>
+                <textarea id="czynnikiPodtrzymujace" name="czynnikiPodtrzymujace" data-field="czynnikiPodtrzymujace" class="input" rows="3" placeholder="Czynniki podtrzymujące problem"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="czynnikiRyzyka">Czynniki ryzyka</label>
+                <textarea id="czynnikiRyzyka" name="czynnikiRyzyka" data-field="czynnikiRyzyka" class="input" rows="3" placeholder="Zidentyfikowane czynniki ryzyka"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="czynnikiOchronne">Czynniki ochronne</label>
+                <textarea id="czynnikiOchronne" name="czynnikiOchronne" data-field="czynnikiOchronne" class="input" rows="3" placeholder="Czynniki ochronne pacjenta"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="motywacjaDoLeczenia">Motywacja do leczenia (1-5)</label>
+                <select id="motywacjaDoLeczenia" name="motywacjaDoLeczenia" data-field="motywacjaDoLeczenia" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="1">1 - Bardzo niska</option>
+                    <option value="2">2 - Niska</option>
+                    <option value="3">3 - Umiarkowana</option>
+                    <option value="4">4 - Wysoka</option>
+                    <option value="5">5 - Bardzo wysoka</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="postawaRodzicow">Postawa rodziców/opiekunów</label>
+                <textarea id="postawaRodzicow" name="postawaRodzicow" data-field="postawaRodzicow" class="input" rows="3" placeholder="Postawa rodziców wobec leczenia"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card: Rozpoznanie i Plan -->
+    <div class="card">
+        <h2 class="card__title"><span class="tree-pill">L1</span> Rozpoznanie i Plan</h2>
+        <div class="card__body">
+            <div class="form-group">
+                <label for="rozpoznanie">Rozpoznanie</label>
+                <textarea id="rozpoznanie" name="rozpoznanie" data-field="rozpoznanie" class="input" rows="4" placeholder="Rozpoznanie kliniczne"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="planLeczenia">Plan leczenia</label>
+                <textarea id="planLeczenia" name="planLeczenia" data-field="planLeczenia" class="input" rows="4" placeholder="Proponowany plan leczenia"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="konsultacjaSpecjalista">Konsultacja specjalisty</label>
+                <textarea id="konsultacjaSpecjalista" name="konsultacjaSpecjalista" data-field="konsultacjaSpecjalista" class="input" rows="3" placeholder="Potrzebne konsultacje specjalistyczne"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="wizytaKontrolna">Termin kolejnej wizyty</label>
+                <input type="date" id="wizytaKontrolna" name="wizytaKontrolna" data-field="wizytaKontrolna" class="input">
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ========================================= -->
+<!-- VIEW: MSE                                 -->
+<!-- ========================================= -->
+<div class="view" id="view-mse">
+
+    <div class="view__header">
+        <h1>Badanie Stanu Psychicznego (MSE)</h1>
+    </div>
+
+    <div class="form-group">
+        <label for="mseData">Data badania</label>
+        <input type="date" id="mseData" name="mseData" data-field="mseData" class="input">
+    </div>
+
+    <!-- Card: Wygląd i zachowanie -->
+    <div class="card">
+        <h2 class="card__title">Wygląd i zachowanie</h2>
+        <div class="card__body mse-grid">
+            <div class="form-group">
+                <label for="pielegnacja">Pielęgnacja</label>
+                <select id="pielegnacja" name="pielegnacja" data-field="pielegnacja" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Zadbany">Zadbany</option>
+                    <option value="Przeciętny">Przeciętny</option>
+                    <option value="Zaniedbany">Zaniedbany</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="kontaktWzrokowy">Kontakt wzrokowy</label>
+                <select id="kontaktWzrokowy" name="kontaktWzrokowy" data-field="kontaktWzrokowy" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Prawidłowy">Prawidłowy</option>
+                    <option value="Unikający">Unikający</option>
+                    <option value="Wzmożony">Wzmożony</option>
+                    <option value="Brak">Brak</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="aktywnoscMotoryczna">Aktywność motoryczna</label>
+                <select id="aktywnoscMotoryczna" name="aktywnoscMotoryczna" data-field="aktywnoscMotoryczna" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Norma">Norma</option>
+                    <option value="Pobudzenie">Pobudzenie</option>
+                    <option value="Spowolnienie">Spowolnienie</option>
+                    <option value="Akatyzja">Akatyzja</option>
+                    <option value="Tiki">Tiki</option>
+                    <option value="Stereotypie">Stereotypie</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card: Mowa -->
+    <div class="card">
+        <h2 class="card__title">Mowa</h2>
+        <div class="card__body mse-grid">
+            <div class="form-group">
+                <label for="mowaTempo">Tempo</label>
+                <select id="mowaTempo" name="mowaTempo" data-field="mowaTempo" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Norma">Norma</option>
+                    <option value="Przyspieszone">Przyspieszone</option>
+                    <option value="Spowolnione">Spowolnione</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="mowaGlosnosc">Głośność</label>
+                <select id="mowaGlosnosc" name="mowaGlosnosc" data-field="mowaGlosnosc" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Norma">Norma</option>
+                    <option value="Cicha">Cicha</option>
+                    <option value="Głośna">Głośna</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="mowaPlynnosc">Płynność</label>
+                <select id="mowaPlynnosc" name="mowaPlynnosc" data-field="mowaPlynnosc" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Płynna">Płynna</option>
+                    <option value="Zaburzona">Zaburzona</option>
+                    <option value="Jąkanie">Jąkanie</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="mowaIntonacja">Intonacja</label>
+                <select id="mowaIntonacja" name="mowaIntonacja" data-field="mowaIntonacja" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Norma">Norma</option>
+                    <option value="Monotonna">Monotonna</option>
+                    <option value="Nadmierna">Nadmierna</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="mowaSpojnosc">Spójność</label>
+                <select id="mowaSpojnosc" name="mowaSpojnosc" data-field="mowaSpojnosc" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Spójna">Spójna</option>
+                    <option value="Niespójna">Niespójna</option>
+                    <option value="Dygresyjna">Dygresyjna</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card: Styl interakcyjny -->
+    <div class="card">
+        <h2 class="card__title">Styl interakcyjny</h2>
+        <div class="card__body mse-grid">
+            <div class="form-group">
+                <label for="stylInterakcyjny">Styl interakcyjny</label>
+                <select id="stylInterakcyjny" name="stylInterakcyjny" data-field="stylInterakcyjny" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Współpracujący">Współpracujący</option>
+                    <option value="Oporowy">Oporowy</option>
+                    <option value="Wycofany">Wycofany</option>
+                    <option value="Manipulacyjny">Manipulacyjny</option>
+                    <option value="Wrogi">Wrogi</option>
+                    <option value="Zależny">Zależny</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card: Orientacja -->
+    <div class="card">
+        <h2 class="card__title">Orientacja</h2>
+        <div class="card__body mse-grid">
+            <div class="checkbox-group">
+                <div class="form-group--checkbox">
+                    <input type="checkbox" id="orientacjaCzas" name="orientacjaCzas" data-field="orientacjaCzas">
+                    <label for="orientacjaCzas">Czas</label>
+                </div>
+                <div class="form-group--checkbox">
+                    <input type="checkbox" id="orientacjaMiejsce" name="orientacjaMiejsce" data-field="orientacjaMiejsce">
+                    <label for="orientacjaMiejsce">Miejsce</label>
+                </div>
+                <div class="form-group--checkbox">
+                    <input type="checkbox" id="orientacjaOsoba" name="orientacjaOsoba" data-field="orientacjaOsoba">
+                    <label for="orientacjaOsoba">Osoba</label>
+                </div>
+                <div class="form-group--checkbox">
+                    <input type="checkbox" id="orientacjaSytuacja" name="orientacjaSytuacja" data-field="orientacjaSytuacja">
+                    <label for="orientacjaSytuacja">Sytuacja</label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card: Funkcje poznawcze -->
+    <div class="card">
+        <h2 class="card__title">Funkcje poznawcze</h2>
+        <div class="card__body mse-grid">
+            <div class="form-group">
+                <label for="funkcjonowanieIntelektualne">Funkcjonowanie intelektualne</label>
+                <select id="funkcjonowanieIntelektualne" name="funkcjonowanieIntelektualne" data-field="funkcjonowanieIntelektualne" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="W normie">W normie</option>
+                    <option value="Poniżej normy">Poniżej normy</option>
+                    <option value="Powyżej normy">Powyżej normy</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="pamiec">Pamięć</label>
+                <select id="pamiec" name="pamiec" data-field="pamiec" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="W normie">W normie</option>
+                    <option value="Zaburzona krótkotrwała">Zaburzona krótkotrwała</option>
+                    <option value="Zaburzona długotrwała">Zaburzona długotrwała</option>
+                    <option value="Amnezja">Amnezja</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="zasobWiedzy">Zasób wiedzy</label>
+                <select id="zasobWiedzy" name="zasobWiedzy" data-field="zasobWiedzy" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Adekwatny">Adekwatny</option>
+                    <option value="Ograniczony">Ograniczony</option>
+                    <option value="Bogaty">Bogaty</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="koncentracja">Koncentracja</label>
+                <select id="koncentracja" name="koncentracja" data-field="koncentracja" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="W normie">W normie</option>
+                    <option value="Zaburzona">Zaburzona</option>
+                    <option value="Znacznie zaburzona">Znacznie zaburzona</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card: Nastrój i afekt -->
+    <div class="card">
+        <h2 class="card__title">Nastrój i afekt</h2>
+        <div class="card__body mse-grid">
+            <div class="form-group">
+                <label for="nastrojSubiektywny">Nastrój subiektywny</label>
+                <input type="text" id="nastrojSubiektywny" name="nastrojSubiektywny" data-field="nastrojSubiektywny" class="input" placeholder="Jak pacjent opisuje swój nastrój">
+            </div>
+            <div class="form-group">
+                <label for="nastrojSkala">Nastrój (skala 1-10): <span id="nastrojSkalaValue">5</span></label>
+                <input type="range" id="nastrojSkala" name="nastrojSkala" data-field="nastrojSkala" class="input" min="1" max="10" value="5">
+            </div>
+            <div class="form-group">
+                <label for="afektZgodnosc">Zgodność afektu</label>
+                <select id="afektZgodnosc" name="afektZgodnosc" data-field="afektZgodnosc" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Zgodny">Zgodny</option>
+                    <option value="Niezgodny">Niezgodny</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="afektReaktywnosc">Reaktywność afektu</label>
+                <select id="afektReaktywnosc" name="afektReaktywnosc" data-field="afektReaktywnosc" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Reaktywny">Reaktywny</option>
+                    <option value="Niereaktywny">Niereaktywny</option>
+                    <option value="Labilny">Labilny</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="afektZakres">Zakres afektu</label>
+                <select id="afektZakres" name="afektZakres" data-field="afektZakres" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Pełny">Pełny</option>
+                    <option value="Zawężony">Zawężony</option>
+                    <option value="Płaski">Płaski</option>
+                    <option value="Wzmożony">Wzmożony</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card: Zaburzenia percepcji i myślenia -->
+    <div class="card">
+        <h2 class="card__title">Zaburzenia percepcji i myślenia</h2>
+        <div class="card__body mse-grid">
+            <div class="form-group mse-full">
+                <label for="zaburzeniaPercepcyjne">Zaburzenia percepcyjne</label>
+                <textarea id="zaburzeniaPercepcyjne" name="zaburzeniaPercepcyjne" data-field="zaburzeniaPercepcyjne" class="input" rows="3" placeholder="Opisz zaburzenia percepcyjne"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="halucynacje">Halucynacje</label>
+                <select id="halucynacje" name="halucynacje" data-field="halucynacje" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Brak">Brak</option>
+                    <option value="Słuchowe">Słuchowe</option>
+                    <option value="Wzrokowe">Wzrokowe</option>
+                    <option value="Dotykowe">Dotykowe</option>
+                    <option value="Węchowe">Węchowe</option>
+                    <option value="Smakowe">Smakowe</option>
+                </select>
+            </div>
+            <div class="form-group mse-full">
+                <label for="urojenia">Urojenia</label>
+                <textarea id="urojenia" name="urojenia" data-field="urojenia" class="input" rows="3" placeholder="Opisz urojenia"></textarea>
+            </div>
+            <div class="form-group mse-full">
+                <label for="omamy">Omamy</label>
+                <textarea id="omamy" name="omamy" data-field="omamy" class="input" rows="3" placeholder="Opisz omamy"></textarea>
+            </div>
+            <div class="form-group mse-full">
+                <label for="dysocjacja">Dysocjacja</label>
+                <textarea id="dysocjacja" name="dysocjacja" data-field="dysocjacja" class="input" rows="3" placeholder="Opisz objawy dysocjacyjne"></textarea>
+            </div>
+            <div class="form-group mse-full">
+                <label for="zaburzeniaProcesMyslowego">Zaburzenia procesu myślowego</label>
+                <textarea id="zaburzeniaProcesMyslowego" name="zaburzeniaProcesMyslowego" data-field="zaburzeniaProcesMyslowego" class="input" rows="3" placeholder="Opisz zaburzenia procesu myślowego"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="skojarzenia">Skojarzenia</label>
+                <select id="skojarzenia" name="skojarzenia" data-field="skojarzenia" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Logiczne">Logiczne</option>
+                    <option value="Luźne">Luźne</option>
+                    <option value="Rozkojarzenie">Rozkojarzenie</option>
+                    <option value="Natłok">Natłok</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="osady">Osądy</label>
+                <select id="osady" name="osady" data-field="osady" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="W normie">W normie</option>
+                    <option value="Zaburzone">Zaburzone</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="wglad">Wgląd</label>
+                <select id="wglad" name="wglad" data-field="wglad" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Pełny">Pełny</option>
+                    <option value="Częściowy">Częściowy</option>
+                    <option value="Brak">Brak</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="samoocena">Samoocena</label>
+                <select id="samoocena" name="samoocena" data-field="samoocena" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Adekwatna">Adekwatna</option>
+                    <option value="Zawyżona">Zawyżona</option>
+                    <option value="Zaniżona">Zaniżona</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card: Ocena ryzyka suicydalnego -->
+    <div class="card card--danger">
+        <h2 class="card__title">🚨 Ocena ryzyka suicydalnego</h2>
+        <div class="card__body mse-grid">
+            <div class="form-group">
+                <label for="mysliSamobojczeAktualne">Myśli samobójcze (aktualne)</label>
+                <select id="mysliSamobojczeAktualne" name="mysliSamobojczeAktualne" data-field="mysliSamobojczeAktualne" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Brak">Brak</option>
+                    <option value="Bierne">Bierne</option>
+                    <option value="Aktywne z planem">Aktywne z planem</option>
+                    <option value="Aktywne z intencją">Aktywne z intencją</option>
+                </select>
+            </div>
+            <div class="form-group mse-full">
+                <div class="form-group--checkbox">
+                    <input type="checkbox" id="mysliSamobojczePrzeszle" name="mysliSamobojczePrzeszle" data-field="mysliSamobojczePrzeszle">
+                    <label for="mysliSamobojczePrzeszle">Myśli samobójcze w przeszłości</label>
+                </div>
+                <textarea id="mysliSamobojczePrzeszleOpis" name="mysliSamobojczePrzeszleOpis" data-field="mysliSamobojczePrzeszleOpis" class="input" rows="2" placeholder="Opisz wcześniejsze myśli samobójcze"></textarea>
+            </div>
+            <div class="form-group mse-full">
+                <label for="planSuicydalny">Plan suicydalny</label>
+                <textarea id="planSuicydalny" name="planSuicydalny" data-field="planSuicydalny" class="input" rows="3" placeholder="Czy pacjent ma plan? Opisz"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="intencjaSuicydalna">Intencja suicydalna</label>
+                <select id="intencjaSuicydalna" name="intencjaSuicydalna" data-field="intencjaSuicydalna" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Brak">Brak</option>
+                    <option value="Niska">Niska</option>
+                    <option value="Umiarkowana">Umiarkowana</option>
+                    <option value="Wysoka">Wysoka</option>
+                </select>
+            </div>
+            <div class="form-group mse-full">
+                <div class="form-group--checkbox">
+                    <input type="checkbox" id="dostepDoSrodkow" name="dostepDoSrodkow" data-field="dostepDoSrodkow">
+                    <label for="dostepDoSrodkow">Dostęp do środków</label>
+                </div>
+                <textarea id="dostepDoSrodkowOpis" name="dostepDoSrodkowOpis" data-field="dostepDoSrodkowOpis" class="input" rows="2" placeholder="Opisz dostęp do środków"></textarea>
+            </div>
+            <div class="form-group mse-full">
+                <label for="czynnikiOchronneSuicyd">Czynniki ochronne</label>
+                <textarea id="czynnikiOchronneSuicyd" name="czynnikiOchronneSuicyd" data-field="czynnikiOchronneSuicyd" class="input" rows="3" placeholder="Czynniki chroniące przed samobójstwem"></textarea>
+            </div>
+            <div class="form-group mse-full">
+                <label for="samouszkodzeniaHistoria">Historia samouszkódzeń</label>
+                <textarea id="samouszkodzeniaHistoria" name="samouszkodzeniaHistoria" data-field="samouszkodzeniaHistoria" class="input" rows="3" placeholder="Historia samouszkódzeń"></textarea>
+            </div>
+            <div class="form-group--checkbox">
+                <input type="checkbox" id="samouszkodzeniaAktualne" name="samouszkodzeniaAktualne" data-field="samouszkodzeniaAktualne">
+                <label for="samouszkodzeniaAktualne">Aktualne samouszkodzenia</label>
+            </div>
+            <div class="form-group">
+                <label for="ryzykoAgresji">Ryzyko agresji</label>
+                <select id="ryzykoAgresji" name="ryzykoAgresji" data-field="ryzykoAgresji" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Brak">Brak</option>
+                    <option value="Niskie">Niskie</option>
+                    <option value="Umiarkowane">Umiarkowane</option>
+                    <option value="Wysokie">Wysokie</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="ocenaRyzykaSuicyd">Ocena ryzyka suicydalnego</label>
+                <select id="ocenaRyzykaSuicyd" name="ocenaRyzykaSuicyd" data-field="ocenaRyzykaSuicyd" class="input input--risk">
+                    <option value="">-- Wybierz --</option>
+                    <option value="Niskie">Niskie</option>
+                    <option value="Średnie">Średnie</option>
+                    <option value="Wysokie">Wysokie</option>
+                    <option value="Krytyczne">Krytyczne</option>
+                </select>
+                <div id="risk-indicator" class="risk-indicator"></div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ========================================= -->
+<!-- VIEW: SOAP                                -->
+<!-- ========================================= -->
+<div class="view" id="view-soap">
+
+    <div class="view__header">
+        <h1>Notatki z Sesji (SOAP)</h1>
+        <button type="button" class="btn btn--primary" id="btn-new-session">Nowa Sesja</button>
+    </div>
+
+    <div id="sessions-list" class="sessions-list"></div>
+
+    <!-- Session Form -->
+    <form id="session-form" class="session-form" style="display:none;">
+
+        <div class="session-form__actions">
+            <button type="button" class="btn btn--secondary btn--sm" id="btn-close-session">Powrót do listy sesji</button>
+            <button type="button" class="btn btn--secondary btn--sm" id="btn-edit-session">Edytuj sesję</button>
+            <button type="button" class="btn btn--subtle-danger btn--sm" id="btn-delete-session">Usuń sesję</button>
+        </div>
+
+        <!-- Card: Dane sesji -->
+        <div class="card">
+            <h2 class="card__title">Dane sesji</h2>
+            <div class="card__body">
+                <div class="form-group">
+                    <label for="dataSesji">Data sesji</label>
+                    <input type="date" id="dataSesji" name="dataSesji" data-field="dataSesji" class="input">
+                </div>
+                <div class="form-group">
+                    <label for="nrSesji">Numer sesji</label>
+                    <input type="number" id="nrSesji" name="nrSesji" data-field="nrSesji" class="input" placeholder="Nr sesji" min="1" readonly aria-readonly="true">
+                </div>
+                <div class="form-group">
+                    <label for="typSesji">Typ sesji</label>
+                    <input type="text" id="typSesji" name="typSesji" data-field="typSesji" class="input" placeholder="Typ sesji" readonly aria-readonly="true">
+                </div>
+                <div class="form-group">
+                    <label for="terapeuta">Terapeuta</label>
+                    <input type="text" id="terapeuta" name="terapeuta" data-field="terapeuta" class="input" placeholder="Imię i nazwisko terapeuty">
+                </div>
+                <div class="form-group">
+                    <label for="modalnosc">Modalność</label>
+                    <select id="modalnosc" name="modalnosc" data-field="modalnosc" class="input">
+                        <option value="">-- Wybierz --</option>
+                        <option value="Indywidualna">Indywidualna</option>
+                        <option value="Grupowa">Grupowa</option>
+                        <option value="Rodzinna">Rodzinna</option>
+                        <option value="Parowa">Parowa</option>
+                        <option value="Online">Online</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="czasMin">Czas trwania (min)</label>
+                    <select id="czasMin" name="czasMin" data-field="czasMin" class="input">
+                        <option value="">-- Wybierz --</option>
+                        <option value="15">15 min</option>
+                        <option value="30">30 min</option>
+                        <option value="45">45 min</option>
+                        <option value="60">1 h (60 min)</option>
+                        <option value="120">2 h (120 min)</option>
+                        <option value="custom">Inny (w minutach)</option>
+                    </select>
+                </div>
+                <div class="form-group" id="czasMin-custom-wrap" style="display:none;">
+                    <label for="czasMinCustom">Inny czas trwania (min)</label>
+                    <input type="number" id="czasMinCustom" name="czasMinCustom" data-field="czasMinCustom" class="input" placeholder="Podaj minuty" min="1" step="1">
+                </div>
+            </div>
+        </div>
+
+        <!-- Card: S - Subiektywne -->
+        <div class="card">
+            <h2 class="card__title">S – Subiektywne</h2>
+            <div class="card__body">
+                <div class="form-group">
+                    <label for="opisKlienta">Opis klienta</label>
+                    <textarea id="opisKlienta" name="opisKlienta" data-field="opisKlienta" class="input" rows="6" placeholder="Co pacjent zgłasza, jak opisuje swoje samopoczucie"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="ocenaRyzykaS">Ocena ryzyka S (wymagane przed zamknięciem sesji)</label>
+                    <select id="ocenaRyzykaS" name="ocenaRyzykaS" data-field="ocenaRyzykaS" class="input">
+                        <option value="">-- Wybierz --</option>
+                        <option value="Niskie">Niskie</option>
+                        <option value="Umiarkowane">Umiarkowane</option>
+                        <option value="Wysokie">Wysokie</option>
+                        <option value="Krytyczne">Krytyczne</option>
+                    </select>
+                </div>
+
+                <h3>Lista objawów</h3>
+                <table class="symptoms-table">
+                    <thead>
+                        <tr>
+                            <th></th>
+                            <th>Obszar</th>
+                            <th>Nasilenie (0-3)</th>
+                            <th>Uwagi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><input type="checkbox" id="sym_nastrojObnizony" name="sym_nastrojObnizony" data-field="sym_nastrojObnizony"></td>
+                            <td><label for="sym_nastrojObnizony">Nastrój obniżony</label></td>
+                            <td>
+                                <select id="sym_nastrojObnizony_sev" name="sym_nastrojObnizony_sev" data-field="sym_nastrojObnizony_sev" class="input input--sm">
+                                    <option value="0">0 - Brak</option>
+                                    <option value="1">1 - Łagodne</option>
+                                    <option value="2">2 - Umiarkowane</option>
+                                    <option value="3">3 - Ciężkie</option>
+                                </select>
+                            </td>
+                            <td><input type="text" id="sym_nastrojObnizony_note" name="sym_nastrojObnizony_note" data-field="sym_nastrojObnizony_note" class="input input--sm" placeholder="Uwagi"></td>
+                        </tr>
+                        <tr>
+                            <td><input type="checkbox" id="sym_lekUogolniony" name="sym_lekUogolniony" data-field="sym_lekUogolniony"></td>
+                            <td><label for="sym_lekUogolniony">Lęk uogólniony</label></td>
+                            <td>
+                                <select id="sym_lekUogolniony_sev" name="sym_lekUogolniony_sev" data-field="sym_lekUogolniony_sev" class="input input--sm">
+                                    <option value="0">0 - Brak</option>
+                                    <option value="1">1 - Łagodne</option>
+                                    <option value="2">2 - Umiarkowane</option>
+                                    <option value="3">3 - Ciężkie</option>
+                                </select>
+                            </td>
+                            <td><input type="text" id="sym_lekUogolniony_note" name="sym_lekUogolniony_note" data-field="sym_lekUogolniony_note" class="input input--sm" placeholder="Uwagi"></td>
+                        </tr>
+                        <tr>
+                            <td><input type="checkbox" id="sym_atakiPaniki" name="sym_atakiPaniki" data-field="sym_atakiPaniki"></td>
+                            <td><label for="sym_atakiPaniki">Ataki paniki</label></td>
+                            <td>
+                                <select id="sym_atakiPaniki_sev" name="sym_atakiPaniki_sev" data-field="sym_atakiPaniki_sev" class="input input--sm">
+                                    <option value="0">0 - Brak</option>
+                                    <option value="1">1 - Łagodne</option>
+                                    <option value="2">2 - Umiarkowane</option>
+                                    <option value="3">3 - Ciężkie</option>
+                                </select>
+                            </td>
+                            <td><input type="text" id="sym_atakiPaniki_note" name="sym_atakiPaniki_note" data-field="sym_atakiPaniki_note" class="input input--sm" placeholder="Uwagi"></td>
+                        </tr>
+                        <tr>
+                            <td><input type="checkbox" id="sym_bezsennosc" name="sym_bezsennosc" data-field="sym_bezsennosc"></td>
+                            <td><label for="sym_bezsennosc">Bezsenność</label></td>
+                            <td>
+                                <select id="sym_bezsennosc_sev" name="sym_bezsennosc_sev" data-field="sym_bezsennosc_sev" class="input input--sm">
+                                    <option value="0">0 - Brak</option>
+                                    <option value="1">1 - Łagodne</option>
+                                    <option value="2">2 - Umiarkowane</option>
+                                    <option value="3">3 - Ciężkie</option>
+                                </select>
+                            </td>
+                            <td><input type="text" id="sym_bezsennosc_note" name="sym_bezsennosc_note" data-field="sym_bezsennosc_note" class="input input--sm" placeholder="Uwagi"></td>
+                        </tr>
+                        <tr>
+                            <td><input type="checkbox" id="sym_drazliwosc" name="sym_drazliwosc" data-field="sym_drazliwosc"></td>
+                            <td><label for="sym_drazliwosc">Drażliwość</label></td>
+                            <td>
+                                <select id="sym_drazliwosc_sev" name="sym_drazliwosc_sev" data-field="sym_drazliwosc_sev" class="input input--sm">
+                                    <option value="0">0 - Brak</option>
+                                    <option value="1">1 - Łagodne</option>
+                                    <option value="2">2 - Umiarkowane</option>
+                                    <option value="3">3 - Ciężkie</option>
+                                </select>
+                            </td>
+                            <td><input type="text" id="sym_drazliwosc_note" name="sym_drazliwosc_note" data-field="sym_drazliwosc_note" class="input input--sm" placeholder="Uwagi"></td>
+                        </tr>
+                        <tr>
+                            <td><input type="checkbox" id="sym_problemyKoncentracja" name="sym_problemyKoncentracja" data-field="sym_problemyKoncentracja"></td>
+                            <td><label for="sym_problemyKoncentracja">Problemy z koncentracją</label></td>
+                            <td>
+                                <select id="sym_problemyKoncentracja_sev" name="sym_problemyKoncentracja_sev" data-field="sym_problemyKoncentracja_sev" class="input input--sm">
+                                    <option value="0">0 - Brak</option>
+                                    <option value="1">1 - Łagodne</option>
+                                    <option value="2">2 - Umiarkowane</option>
+                                    <option value="3">3 - Ciężkie</option>
+                                </select>
+                            </td>
+                            <td><input type="text" id="sym_problemyKoncentracja_note" name="sym_problemyKoncentracja_note" data-field="sym_problemyKoncentracja_note" class="input input--sm" placeholder="Uwagi"></td>
+                        </tr>
+                        <tr>
+                            <td><input type="checkbox" id="sym_mysliSuicydalne" name="sym_mysliSuicydalne" data-field="sym_mysliSuicydalne"></td>
+                            <td><label for="sym_mysliSuicydalne">Myśli suicydalne</label></td>
+                            <td>
+                                <select id="sym_mysliSuicydalne_sev" name="sym_mysliSuicydalne_sev" data-field="sym_mysliSuicydalne_sev" class="input input--sm">
+                                    <option value="0">0 - Brak</option>
+                                    <option value="1">1 - Łagodne</option>
+                                    <option value="2">2 - Umiarkowane</option>
+                                    <option value="3">3 - Ciężkie</option>
+                                </select>
+                            </td>
+                            <td><input type="text" id="sym_mysliSuicydalne_note" name="sym_mysliSuicydalne_note" data-field="sym_mysliSuicydalne_note" class="input input--sm" placeholder="Uwagi"></td>
+                        </tr>
+                        <tr>
+                            <td><input type="checkbox" id="sym_samouszkodzenia" name="sym_samouszkodzenia" data-field="sym_samouszkodzenia"></td>
+                            <td><label for="sym_samouszkodzenia">Samouszkodzenia</label></td>
+                            <td>
+                                <select id="sym_samouszkodzenia_sev" name="sym_samouszkodzenia_sev" data-field="sym_samouszkodzenia_sev" class="input input--sm">
+                                    <option value="0">0 - Brak</option>
+                                    <option value="1">1 - Łagodne</option>
+                                    <option value="2">2 - Umiarkowane</option>
+                                    <option value="3">3 - Ciężkie</option>
+                                </select>
+                            </td>
+                            <td><input type="text" id="sym_samouszkodzenia_note" name="sym_samouszkodzenia_note" data-field="sym_samouszkodzenia_note" class="input input--sm" placeholder="Uwagi"></td>
+                        </tr>
+                        <tr>
+                            <td><input type="checkbox" id="sym_zaburzeniaOdzywiania" name="sym_zaburzeniaOdzywiania" data-field="sym_zaburzeniaOdzywiania"></td>
+                            <td><label for="sym_zaburzeniaOdzywiania">Zaburzenia odżywiania</label></td>
+                            <td>
+                                <select id="sym_zaburzeniaOdzywiania_sev" name="sym_zaburzeniaOdzywiania_sev" data-field="sym_zaburzeniaOdzywiania_sev" class="input input--sm">
+                                    <option value="0">0 - Brak</option>
+                                    <option value="1">1 - Łagodne</option>
+                                    <option value="2">2 - Umiarkowane</option>
+                                    <option value="3">3 - Ciężkie</option>
+                                </select>
+                            </td>
+                            <td><input type="text" id="sym_zaburzeniaOdzywiania_note" name="sym_zaburzeniaOdzywiania_note" data-field="sym_zaburzeniaOdzywiania_note" class="input input--sm" placeholder="Uwagi"></td>
+                        </tr>
+                        <tr>
+                            <td><input type="checkbox" id="sym_uzywki" name="sym_uzywki" data-field="sym_uzywki"></td>
+                            <td><label for="sym_uzywki">Używki</label></td>
+                            <td>
+                                <select id="sym_uzywki_sev" name="sym_uzywki_sev" data-field="sym_uzywki_sev" class="input input--sm">
+                                    <option value="0">0 - Brak</option>
+                                    <option value="1">1 - Łagodne</option>
+                                    <option value="2">2 - Umiarkowane</option>
+                                    <option value="3">3 - Ciężkie</option>
+                                </select>
+                            </td>
+                            <td><input type="text" id="sym_uzywki_note" name="sym_uzywki_note" data-field="sym_uzywki_note" class="input input--sm" placeholder="Uwagi"></td>
+                        </tr>
+                        <tr>
+                            <td><input type="checkbox" id="sym_problemyRelacyjne" name="sym_problemyRelacyjne" data-field="sym_problemyRelacyjne"></td>
+                            <td><label for="sym_problemyRelacyjne">Problemy relacyjne</label></td>
+                            <td>
+                                <select id="sym_problemyRelacyjne_sev" name="sym_problemyRelacyjne_sev" data-field="sym_problemyRelacyjne_sev" class="input input--sm">
+                                    <option value="0">0 - Brak</option>
+                                    <option value="1">1 - Łagodne</option>
+                                    <option value="2">2 - Umiarkowane</option>
+                                    <option value="3">3 - Ciężkie</option>
+                                </select>
+                            </td>
+                            <td><input type="text" id="sym_problemyRelacyjne_note" name="sym_problemyRelacyjne_note" data-field="sym_problemyRelacyjne_note" class="input input--sm" placeholder="Uwagi"></td>
+                        </tr>
+                        <tr>
+                            <td><input type="checkbox" id="sym_traumaFlashbacki" name="sym_traumaFlashbacki" data-field="sym_traumaFlashbacki"></td>
+                            <td><label for="sym_traumaFlashbacki">Trauma / Flashbacki</label></td>
+                            <td>
+                                <select id="sym_traumaFlashbacki_sev" name="sym_traumaFlashbacki_sev" data-field="sym_traumaFlashbacki_sev" class="input input--sm">
+                                    <option value="0">0 - Brak</option>
+                                    <option value="1">1 - Łagodne</option>
+                                    <option value="2">2 - Umiarkowane</option>
+                                    <option value="3">3 - Ciężkie</option>
+                                </select>
+                            </td>
+                            <td><input type="text" id="sym_traumaFlashbacki_note" name="sym_traumaFlashbacki_note" data-field="sym_traumaFlashbacki_note" class="input input--sm" placeholder="Uwagi"></td>
+                        </tr>
+                        <tr>
+                            <td><input type="checkbox" id="sym_somatyzacja" name="sym_somatyzacja" data-field="sym_somatyzacja"></td>
+                            <td><label for="sym_somatyzacja">Somatyzacja</label></td>
+                            <td>
+                                <select id="sym_somatyzacja_sev" name="sym_somatyzacja_sev" data-field="sym_somatyzacja_sev" class="input input--sm">
+                                    <option value="0">0 - Brak</option>
+                                    <option value="1">1 - Łagodne</option>
+                                    <option value="2">2 - Umiarkowane</option>
+                                    <option value="3">3 - Ciężkie</option>
+                                </select>
+                            </td>
+                            <td><input type="text" id="sym_somatyzacja_note" name="sym_somatyzacja_note" data-field="sym_somatyzacja_note" class="input input--sm" placeholder="Uwagi"></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Card: O - Obiektywne -->
+        <div class="card">
+            <h2 class="card__title">O – Obiektywne</h2>
+            <div class="card__body">
+                <div class="form-group">
+                    <label for="obserwacjeTerapeuty">Obserwacje terapeuty</label>
+                    <textarea id="obserwacjeTerapeuty" name="obserwacjeTerapeuty" data-field="obserwacjeTerapeuty" class="input" rows="4" placeholder="Obserwacje kliniczne terapeuty"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="wynikiTestow">Wyniki testów</label>
+                    <textarea id="wynikiTestow" name="wynikiTestow" data-field="wynikiTestow" class="input" rows="3" placeholder="Wyniki zastosowanych testów"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="komunikacjaNiewerbalna">Komunikacja niewerbalna</label>
+                    <textarea id="komunikacjaNiewerbalna" name="komunikacjaNiewerbalna" data-field="komunikacjaNiewerbalna" class="input" rows="3" placeholder="Obserwacje dotyczące komunikacji niewerbalnej"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- Card: A - Ocena -->
+        <div class="card">
+            <h2 class="card__title">A – Ocena</h2>
+            <div class="card__body">
+                <div class="form-group">
+                    <label for="postepTerapii">Postęp terapii</label>
+                    <textarea id="postepTerapii" name="postepTerapii" data-field="postepTerapii" class="input" rows="4" placeholder="Ocena postępu terapeutycznego"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="aktualizacjaDiagnozy">Aktualizacja diagnozy</label>
+                    <textarea id="aktualizacjaDiagnozy" name="aktualizacjaDiagnozy" data-field="aktualizacjaDiagnozy" class="input" rows="3" placeholder="Zmiany w diagnozie"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="odpowiedzInterwencje">Odpowiedź na interwencje</label>
+                    <textarea id="odpowiedzInterwencje" name="odpowiedzInterwencje" data-field="odpowiedzInterwencje" class="input" rows="3" placeholder="Jak pacjent reaguje na zastosowane interwencje"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- Card: P - Plan -->
+        <div class="card">
+            <h2 class="card__title">P – Plan</h2>
+            <div class="card__body">
+                <div class="form-group">
+                    <label for="interwencjeZastosowane">Interwencje zastosowane</label>
+                    <textarea id="interwencjeZastosowane" name="interwencjeZastosowane" data-field="interwencjeZastosowane" class="input" rows="4" placeholder="Zastosowane interwencje terapeutyczne"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="zadanieDomowe">Zadanie domowe</label>
+                    <textarea id="zadanieDomowe" name="zadanieDomowe" data-field="zadanieDomowe" class="input" rows="3" placeholder="Zadanie domowe dla pacjenta"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="planNastepnaSesja">Plan na następną sesję</label>
+                    <textarea id="planNastepnaSesja" name="planNastepnaSesja" data-field="planNastepnaSesja" class="input" rows="3" placeholder="Plan na kolejną sesję"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="wizytaKontrolnaData">Data wizyty kontrolnej</label>
+                    <input type="date" id="wizytaKontrolnaData" name="wizytaKontrolnaData" data-field="wizytaKontrolnaData" class="input">
+                </div>
+                <div class="form-group">
+                    <label for="potrzebaKonsultacji">Potrzeba konsultacji</label>
+                    <textarea id="potrzebaKonsultacji" name="potrzebaKonsultacji" data-field="potrzebaKonsultacji" class="input" rows="2" placeholder="Potrzeba konsultacji specjalistycznych"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="zmianaFarmakoterapii">Zmiana farmakoterapii</label>
+                    <textarea id="zmianaFarmakoterapii" name="zmianaFarmakoterapii" data-field="zmianaFarmakoterapii" class="input" rows="2" placeholder="Proponowane zmiany w farmakoterapii"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- Card: AI Podsumowanie -->
+        <div class="card">
+            <h2 class="card__title">🤖 Podsumowanie AI sesji</h2>
+            <div class="card__body">
+                <p class="form-hint">Demo: aplikacja spróbuje użyć klucza OpenAI z pliku <code>C:\Users\Michael\Projects\security\key2.txt</code>. Jeśli odczyt się nie powiedzie, poprosi o ręczne wklejenie klucza.</p>
+                <div class="form-actions">
+                    <button type="button" class="btn btn--primary" id="btn-generate-summary-ai">Generuj podsumowanie 2-3 rozdziały</button>
+                    <span class="form-hint" id="ai-summary-status"></span>
+                </div>
+                <div class="form-group mt-3">
+                    <label for="podsumowanieAI">Podsumowanie AI</label>
+                    <textarea id="podsumowanieAI" name="podsumowanieAI" data-field="podsumowanieAI" class="input" rows="12" placeholder="Tu pojawi się podsumowanie wygenerowane przez AI..."></textarea>
+                </div>
+            </div>
+        </div>
+
+    </form>
+
+</div>
+
+<!-- ========================================= -->
+<!-- VIEW: TESTS                               -->
+<!-- ========================================= -->
+<div class="view" id="view-tests">
+
+    <div class="view__header">
+        <h1>Testy Przesiewowe</h1>
+    </div>
+
+    <!-- Test Tabs -->
+    <div class="tabs">
+        <button type="button" class="tab active" data-tab="phq9-section">PHQ-9</button>
+        <button type="button" class="tab" data-tab="gad7-section">GAD-7</button>
+    </div>
+
+    <!-- PHQ-9 Section -->
+    <div class="test-section active" id="phq9-section">
+        <div class="card">
+            <h2 class="card__title">PHQ-9 – Kwestionariusz Zdrowia Pacjenta (Depresja)</h2>
+            <div class="card__body">
+                <div class="form-group">
+                    <label for="phq9Data">Data badania</label>
+                    <input type="date" id="phq9Data" name="phq9Data" data-field="phq9Data" class="input">
+                </div>
+
+                <div class="test-questions">
+                <div class="test-question">
+                    <p class="test-question__text">1. Niewielkie zainteresowanie lub odczuwanie przyjemności z wykonywania czynności</p>
+                    <div class="test-question__options">
+                        <label><input type="radio" name="phq9_q1" data-field="phq9_q1" value="0"> 0 - Wcale</label>
+                        <label><input type="radio" name="phq9_q1" data-field="phq9_q1" value="1"> 1 - Kilka dni</label>
+                        <label><input type="radio" name="phq9_q1" data-field="phq9_q1" value="2"> 2 - Więcej niż połowę dni</label>
+                        <label><input type="radio" name="phq9_q1" data-field="phq9_q1" value="3"> 3 - Prawie codziennie</label>
+                    </div>
+                </div>
+                <div class="test-question">
+                    <p class="test-question__text">2. Uczucie smutku, przygnębienia lub beznadziejności</p>
+                    <div class="test-question__options">
+                        <label><input type="radio" name="phq9_q2" data-field="phq9_q2" value="0"> 0 - Wcale</label>
+                        <label><input type="radio" name="phq9_q2" data-field="phq9_q2" value="1"> 1 - Kilka dni</label>
+                        <label><input type="radio" name="phq9_q2" data-field="phq9_q2" value="2"> 2 - Więcej niż połowę dni</label>
+                        <label><input type="radio" name="phq9_q2" data-field="phq9_q2" value="3"> 3 - Prawie codziennie</label>
+                    </div>
+                </div>
+                <div class="test-question">
+                    <p class="test-question__text">3. Kłopoty z zaśnięciem, przerywany sen albo zbyt długi sen</p>
+                    <div class="test-question__options">
+                        <label><input type="radio" name="phq9_q3" data-field="phq9_q3" value="0"> 0 - Wcale</label>
+                        <label><input type="radio" name="phq9_q3" data-field="phq9_q3" value="1"> 1 - Kilka dni</label>
+                        <label><input type="radio" name="phq9_q3" data-field="phq9_q3" value="2"> 2 - Więcej niż połowę dni</label>
+                        <label><input type="radio" name="phq9_q3" data-field="phq9_q3" value="3"> 3 - Prawie codziennie</label>
+                    </div>
+                </div>
+                <div class="test-question">
+                    <p class="test-question__text">4. Uczucie zmęczenia lub brak energii</p>
+                    <div class="test-question__options">
+                        <label><input type="radio" name="phq9_q4" data-field="phq9_q4" value="0"> 0 - Wcale</label>
+                        <label><input type="radio" name="phq9_q4" data-field="phq9_q4" value="1"> 1 - Kilka dni</label>
+                        <label><input type="radio" name="phq9_q4" data-field="phq9_q4" value="2"> 2 - Więcej niż połowę dni</label>
+                        <label><input type="radio" name="phq9_q4" data-field="phq9_q4" value="3"> 3 - Prawie codziennie</label>
+                    </div>
+                </div>
+                <div class="test-question">
+                    <p class="test-question__text">5. Brak apetytu lub przejadanie się</p>
+                    <div class="test-question__options">
+                        <label><input type="radio" name="phq9_q5" data-field="phq9_q5" value="0"> 0 - Wcale</label>
+                        <label><input type="radio" name="phq9_q5" data-field="phq9_q5" value="1"> 1 - Kilka dni</label>
+                        <label><input type="radio" name="phq9_q5" data-field="phq9_q5" value="2"> 2 - Więcej niż połowę dni</label>
+                        <label><input type="radio" name="phq9_q5" data-field="phq9_q5" value="3"> 3 - Prawie codziennie</label>
+                    </div>
+                </div>
+                <div class="test-question">
+                    <p class="test-question__text">6. Poczucie niezadowolenia z siebie — lub uczucie, że jest się do niczego albo że zawiodło się siebie lub rodzinę</p>
+                    <div class="test-question__options">
+                        <label><input type="radio" name="phq9_q6" data-field="phq9_q6" value="0"> 0 - Wcale</label>
+                        <label><input type="radio" name="phq9_q6" data-field="phq9_q6" value="1"> 1 - Kilka dni</label>
+                        <label><input type="radio" name="phq9_q6" data-field="phq9_q6" value="2"> 2 - Więcej niż połowę dni</label>
+                        <label><input type="radio" name="phq9_q6" data-field="phq9_q6" value="3"> 3 - Prawie codziennie</label>
+                    </div>
+                </div>
+                <div class="test-question">
+                    <p class="test-question__text">7. Trudności w skoncentrowaniu się na czymś, na przykład na czytaniu gazety lub oglądaniu telewizji</p>
+                    <div class="test-question__options">
+                        <label><input type="radio" name="phq9_q7" data-field="phq9_q7" value="0"> 0 - Wcale</label>
+                        <label><input type="radio" name="phq9_q7" data-field="phq9_q7" value="1"> 1 - Kilka dni</label>
+                        <label><input type="radio" name="phq9_q7" data-field="phq9_q7" value="2"> 2 - Więcej niż połowę dni</label>
+                        <label><input type="radio" name="phq9_q7" data-field="phq9_q7" value="3"> 3 - Prawie codziennie</label>
+                    </div>
+                </div>
+                <div class="test-question">
+                    <p class="test-question__text">8. Spowolnienie ruchowe lub mówienie tak wolno, że inni mogliby to zauważyć. Albo odwrotnie — niemożność usiedzenia w miejscu lub podenerwowanie</p>
+                    <div class="test-question__options">
+                        <label><input type="radio" name="phq9_q8" data-field="phq9_q8" value="0"> 0 - Wcale</label>
+                        <label><input type="radio" name="phq9_q8" data-field="phq9_q8" value="1"> 1 - Kilka dni</label>
+                        <label><input type="radio" name="phq9_q8" data-field="phq9_q8" value="2"> 2 - Więcej niż połowę dni</label>
+                        <label><input type="radio" name="phq9_q8" data-field="phq9_q8" value="3"> 3 - Prawie codziennie</label>
+                    </div>
+                </div>
+                <div class="test-question">
+                    <p class="test-question__text">9. Myśli, że lepiej byłoby umrzeć, albo o skrzywdzeniu siebie w jakiś sposób</p>
+                    <div class="test-question__options">
+                        <label><input type="radio" name="phq9_q9" data-field="phq9_q9" value="0"> 0 - Wcale</label>
+                        <label><input type="radio" name="phq9_q9" data-field="phq9_q9" value="1"> 1 - Kilka dni</label>
+                        <label><input type="radio" name="phq9_q9" data-field="phq9_q9" value="2"> 2 - Więcej niż połowę dni</label>
+                        <label><input type="radio" name="phq9_q9" data-field="phq9_q9" value="3"> 3 - Prawie codziennie</label>
+                    </div>
+                </div>
+                </div>
+
+                <div class="test-score">
+                    <h3>Wynik: <span id="phq9-score">0</span> / 27</h3>
+                    <p id="phq9-interpretation" class="test-interpretation"></p>
+                    <div class="test-scale">
+                        <small>0-4: Minimalna depresja | 5-9: Łagodna depresja | 10-14: Umiarkowana depresja | 15-19: Umiarkowanie ciężka depresja | 20-27: Ciężka depresja</small>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn--primary" id="btn-save-phq9">Zapisz wynik</button>
+                </div>
+
+                <h3>Historia wyników PHQ-9</h3>
+                <table class="results-table" id="phq9-history">
+                    <thead>
+                        <tr>
+                            <th>Data</th>
+                            <th>Wynik</th>
+                            <th>Interpretacja</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- GAD-7 Section -->
+    <div class="test-section" id="gad7-section">
+        <div class="card">
+            <h2 class="card__title">GAD-7 – Skala Lęku Uogólnionego</h2>
+            <div class="card__body">
+                <div class="form-group">
+                    <label for="gad7Data">Data badania</label>
+                    <input type="date" id="gad7Data" name="gad7Data" data-field="gad7Data" class="input">
+                </div>
+
+                <div class="test-questions">
+                <div class="test-question">
+                    <p class="test-question__text">1. Uczucie zdenerwowania, niepokoju lub podminowania</p>
+                    <div class="test-question__options">
+                        <label><input type="radio" name="gad7_q1" data-field="gad7_q1" value="0"> 0 - Wcale</label>
+                        <label><input type="radio" name="gad7_q1" data-field="gad7_q1" value="1"> 1 - Kilka dni</label>
+                        <label><input type="radio" name="gad7_q1" data-field="gad7_q1" value="2"> 2 - Więcej niż połowę dni</label>
+                        <label><input type="radio" name="gad7_q1" data-field="gad7_q1" value="3"> 3 - Prawie codziennie</label>
+                    </div>
+                </div>
+                <div class="test-question">
+                    <p class="test-question__text">2. Niemożność powstrzymania lub kontrolowania zamartwiania się</p>
+                    <div class="test-question__options">
+                        <label><input type="radio" name="gad7_q2" data-field="gad7_q2" value="0"> 0 - Wcale</label>
+                        <label><input type="radio" name="gad7_q2" data-field="gad7_q2" value="1"> 1 - Kilka dni</label>
+                        <label><input type="radio" name="gad7_q2" data-field="gad7_q2" value="2"> 2 - Więcej niż połowę dni</label>
+                        <label><input type="radio" name="gad7_q2" data-field="gad7_q2" value="3"> 3 - Prawie codziennie</label>
+                    </div>
+                </div>
+                <div class="test-question">
+                    <p class="test-question__text">3. Nadmierne zamartwianie się różnymi sprawami</p>
+                    <div class="test-question__options">
+                        <label><input type="radio" name="gad7_q3" data-field="gad7_q3" value="0"> 0 - Wcale</label>
+                        <label><input type="radio" name="gad7_q3" data-field="gad7_q3" value="1"> 1 - Kilka dni</label>
+                        <label><input type="radio" name="gad7_q3" data-field="gad7_q3" value="2"> 2 - Więcej niż połowę dni</label>
+                        <label><input type="radio" name="gad7_q3" data-field="gad7_q3" value="3"> 3 - Prawie codziennie</label>
+                    </div>
+                </div>
+                <div class="test-question">
+                    <p class="test-question__text">4. Trudności z odprężeniem się</p>
+                    <div class="test-question__options">
+                        <label><input type="radio" name="gad7_q4" data-field="gad7_q4" value="0"> 0 - Wcale</label>
+                        <label><input type="radio" name="gad7_q4" data-field="gad7_q4" value="1"> 1 - Kilka dni</label>
+                        <label><input type="radio" name="gad7_q4" data-field="gad7_q4" value="2"> 2 - Więcej niż połowę dni</label>
+                        <label><input type="radio" name="gad7_q4" data-field="gad7_q4" value="3"> 3 - Prawie codziennie</label>
+                    </div>
+                </div>
+                <div class="test-question">
+                    <p class="test-question__text">5. Niepokój tak silny, że trudno usiedzieć w miejscu</p>
+                    <div class="test-question__options">
+                        <label><input type="radio" name="gad7_q5" data-field="gad7_q5" value="0"> 0 - Wcale</label>
+                        <label><input type="radio" name="gad7_q5" data-field="gad7_q5" value="1"> 1 - Kilka dni</label>
+                        <label><input type="radio" name="gad7_q5" data-field="gad7_q5" value="2"> 2 - Więcej niż połowę dni</label>
+                        <label><input type="radio" name="gad7_q5" data-field="gad7_q5" value="3"> 3 - Prawie codziennie</label>
+                    </div>
+                </div>
+                <div class="test-question">
+                    <p class="test-question__text">6. Łatwe wpadanie w irytację lub zdenerwowanie</p>
+                    <div class="test-question__options">
+                        <label><input type="radio" name="gad7_q6" data-field="gad7_q6" value="0"> 0 - Wcale</label>
+                        <label><input type="radio" name="gad7_q6" data-field="gad7_q6" value="1"> 1 - Kilka dni</label>
+                        <label><input type="radio" name="gad7_q6" data-field="gad7_q6" value="2"> 2 - Więcej niż połowę dni</label>
+                        <label><input type="radio" name="gad7_q6" data-field="gad7_q6" value="3"> 3 - Prawie codziennie</label>
+                    </div>
+                </div>
+                <div class="test-question">
+                    <p class="test-question__text">7. Uczucie lęku, jakby mogło wydarzyć się coś strasznego</p>
+                    <div class="test-question__options">
+                        <label><input type="radio" name="gad7_q7" data-field="gad7_q7" value="0"> 0 - Wcale</label>
+                        <label><input type="radio" name="gad7_q7" data-field="gad7_q7" value="1"> 1 - Kilka dni</label>
+                        <label><input type="radio" name="gad7_q7" data-field="gad7_q7" value="2"> 2 - Więcej niż połowę dni</label>
+                        <label><input type="radio" name="gad7_q7" data-field="gad7_q7" value="3"> 3 - Prawie codziennie</label>
+                    </div>
+                </div>
+                </div>
+
+                <div class="test-score">
+                    <h3>Wynik: <span id="gad7-score">0</span> / 21</h3>
+                    <p id="gad7-interpretation" class="test-interpretation"></p>
+                    <div class="test-scale">
+                        <small>0-4: Minimalny lęk | 5-9: Łagodny lęk | 10-14: Umiarkowany lęk | 15-21: Ciężki lęk</small>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn--primary" id="btn-save-gad7">Zapisz wynik</button>
+                </div>
+
+                <h3>Historia wyników GAD-7</h3>
+                <table class="results-table" id="gad7-history">
+                    <thead>
+                        <tr>
+                            <th>Data</th>
+                            <th>Wynik</th>
+                            <th>Interpretacja</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chart Area -->
+    <div id="test-chart" class="test-chart">
+        <h3>Wizualizacja postępu</h3>
+        <div class="chart-container" id="chart-container"></div>
+    </div>
+
+</div>
+
+<!-- ========================================= -->
+<!-- VIEW: TREATMENT PLAN                      -->
+<!-- ========================================= -->
+<div class="view" id="view-plan">
+
+    <div class="view__header">
+        <h1>Plan Terapii</h1>
+    </div>
+
+    <!-- Card: Cele długoterminowe -->
+    <div class="card">
+        <h2 class="card__title">Cele długoterminowe</h2>
+        <div class="card__body">
+            <div class="form-group">
+                <label for="celeDlugoterminowe">Cele długoterminowe</label>
+                <textarea id="celeDlugoterminowe" name="celeDlugoterminowe" data-field="celeDlugoterminowe" class="input" rows="5" placeholder="Opisz cele długoterminowe terapii"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card: Cele krótkoterminowe (SMART) -->
+    <div class="card">
+        <h2 class="card__title">Cele krótkoterminowe (SMART)</h2>
+        <div class="card__body">
+            <div id="short-term-goals" class="dynamic-list">
+                <!-- Template for a single goal item -->
+                <div class="dynamic-list__item goal-item" data-index="0">
+                    <div class="form-group">
+                        <label for="cel_0">Cel</label>
+                        <input type="text" id="cel_0" name="cel_0" data-field="cel" class="input" placeholder="Opisz cel krótkoterminowy">
+                    </div>
+                    <div class="form-group">
+                        <label for="mierzalnosc_0">Mierzalność</label>
+                        <input type="text" id="mierzalnosc_0" name="mierzalnosc_0" data-field="mierzalnosc" class="input" placeholder="Jak zmierzysz osiągnięcie celu?">
+                    </div>
+                    <div class="form-group">
+                        <label for="terminRealizacji_0">Termin realizacji</label>
+                        <input type="date" id="terminRealizacji_0" name="terminRealizacji_0" data-field="terminRealizacji" class="input">
+                    </div>
+                    <div class="form-group">
+                        <label for="status_0">Status</label>
+                        <select id="status_0" name="status_0" data-field="status" class="input">
+                            <option value="Nowy">Nowy</option>
+                            <option value="W trakcie">W trakcie</option>
+                            <option value="Osiągnięty">Osiągnięty</option>
+                            <option value="Zmodyfikowany">Zmodyfikowany</option>
+                        </select>
+                    </div>
+                    <button type="button" class="btn btn--danger btn--sm btn-remove-goal">Usuń</button>
+                </div>
+            </div>
+            <button type="button" class="btn btn--secondary" id="btn-add-goal">+ Dodaj cel</button>
+        </div>
+    </div>
+
+    <!-- Card: Podejście terapeutyczne -->
+    <div class="card">
+        <h2 class="card__title">Podejście terapeutyczne</h2>
+        <div class="card__body">
+            <div class="form-group">
+                <label for="podejscie">Podejście</label>
+                <select id="podejscie" name="podejscie" data-field="podejscie" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="CBT">CBT</option>
+                    <option value="Psychodynamiczne">Psychodynamiczne</option>
+                    <option value="Humanistyczne">Humanistyczne</option>
+                    <option value="Systemowe">Systemowe</option>
+                    <option value="Integracyjne">Integracyjne</option>
+                    <option value="Inne">Inne</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="podejscieInne">Inne podejście (jeśli wybrano "Inne")</label>
+                <input type="text" id="podejscieInne" name="podejscieInne" data-field="podejscieInne" class="input" placeholder="Opisz inne podejście terapeutyczne">
+            </div>
+            <div class="form-group">
+                <label for="metody">Metody</label>
+                <textarea id="metody" name="metody" data-field="metody" class="input" rows="4" placeholder="Stosowane metody terapeutyczne"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card: Czas i struktura -->
+    <div class="card">
+        <h2 class="card__title">Czas i struktura</h2>
+        <div class="card__body">
+            <div class="form-group">
+                <label for="przewidywanyCzas">Przewidywany czas terapii</label>
+                <input type="text" id="przewidywanyCzas" name="przewidywanyCzas" data-field="przewidywanyCzas" class="input" placeholder="np. 6 miesięcy, 20 sesji">
+            </div>
+            <div class="form-group">
+                <label for="czestotliwoscSesji">Częstotliwość sesji</label>
+                <select id="czestotliwoscSesji" name="czestotliwoscSesji" data-field="czestotliwoscSesji" class="input">
+                    <option value="">-- Wybierz --</option>
+                    <option value="1x/tydzień">1x/tydzień</option>
+                    <option value="2x/tydzień">2x/tydzień</option>
+                    <option value="1x/2 tygodnie">1x/2 tygodnie</option>
+                    <option value="1x/miesiąc">1x/miesiąc</option>
+                    <option value="Inna">Inna</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="kryteriaZakonczenia">Kryteria zakończenia</label>
+                <textarea id="kryteriaZakonczenia" name="kryteriaZakonczenia" data-field="kryteriaZakonczenia" class="input" rows="4" placeholder="Kiedy terapia zostanie zakończona?"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card: Ewaluacja -->
+    <div class="card">
+        <h2 class="card__title">Ewaluacja</h2>
+        <div class="card__body">
+            <div id="evaluation-entries" class="dynamic-list">
+                <!-- Template for evaluation entry -->
+                <div class="dynamic-list__item evaluation-item" data-index="0">
+                    <div class="form-group">
+                        <label for="dataEwaluacji_0">Data ewaluacji</label>
+                        <input type="date" id="dataEwaluacji_0" name="dataEwaluacji_0" data-field="dataEwaluacji" class="input">
+                    </div>
+                    <div class="form-group">
+                        <label for="notatkaEwaluacji_0">Notatka</label>
+                        <textarea id="notatkaEwaluacji_0" name="notatkaEwaluacji_0" data-field="notatka" class="input" rows="3" placeholder="Notatka z ewaluacji"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="postep_0">Postęp</label>
+                        <select id="postep_0" name="postep_0" data-field="postep" class="input">
+                            <option value="">-- Wybierz --</option>
+                            <option value="Znaczny">Znaczny</option>
+                            <option value="Umiarkowany">Umiarkowany</option>
+                            <option value="Minimalny">Minimalny</option>
+                            <option value="Brak">Brak</option>
+                            <option value="Regresja">Regresja</option>
+                        </select>
+                    </div>
+                    <button type="button" class="btn btn--danger btn--sm btn-remove-evaluation">Usuń</button>
+                </div>
+            </div>
+            <button type="button" class="btn btn--secondary" id="btn-add-evaluation">+ Dodaj ewaluację</button>
+        </div>
+    </div>
+
+</div>
+
+</main>
+
+<!-- ===== REUSABLE MODAL ===== -->
+<div class="app-modal" id="app-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="app-modal-title">
+    <div class="app-modal__backdrop" id="app-modal-backdrop"></div>
+    <div class="app-modal__dialog" role="document">
+        <div class="app-modal__header">
+            <h2 class="app-modal__title" id="app-modal-title">Potwierdzenie</h2>
+        </div>
+        <div class="app-modal__body" id="app-modal-body"></div>
+        <div class="app-modal__actions">
+            <button type="button" class="btn btn--secondary" id="app-modal-cancel">Anuluj</button>
+            <button type="button" class="btn btn--primary" id="app-modal-confirm">Potwierdź</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===== SCRIPTS ===== -->
+<script src="lib/xlsx-js-style.min.js"></script>
+<script src="js/config.js"></script>
+<script src="js/xlsx-handler.js"></script>
+<script src="js/patients.js"></script>
+<script src="js/interview.js"></script>
+<script src="js/mse.js"></script>
+<script src="js/soap.js"></script>
+<script src="js/ai-summary.js"></script>
+<script src="js/tests.js"></script>
+<script src="js/plan.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
