@@ -6,6 +6,7 @@
     <title>PsychoApp – Dokumentacja Psychologiczna</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/compat.css">
+    <link rel="stylesheet" href="css/feedback.css">
 </head>
 <body>
 
@@ -24,6 +25,7 @@
     </div>
     <div class="top-bar__actions">
         <button type="button" class="btn btn--secondary btn--sm" id="btn-connect-folder">📁 Połącz folder pacjentów</button>
+        <button type="button" class="btn btn--secondary btn--sm" id="btn-toggle-feedback" title="Włącz tryb recenzji">💬 Tryb recenzji</button>
         <div class="top-bar__save-indicator" id="save-indicator">💾 Autozapis</div>
     </div>
 </header>
@@ -1937,6 +1939,50 @@
     </div>
 </div>
 
+<!-- ===== FEEDBACK PANEL ===== -->
+<aside class="feedback-panel" id="feedback-panel" aria-hidden="true">
+    <div class="feedback-panel__header">
+        <h2 class="feedback-panel__title">Komentarze do aplikacji</h2>
+        <div class="feedback-panel__header-actions">
+            <button type="button" class="feedback-panel__icon-btn" id="feedback-connect-file" title="Połącz plik JSON" aria-label="Połącz plik JSON">📎</button>
+            <button type="button" class="feedback-panel__close" id="feedback-close" aria-label="Zamknij panel komentarzy">✕</button>
+        </div>
+    </div>
+
+    <div class="feedback-panel__meta">
+        <div class="feedback-panel__status" id="feedback-status" aria-live="polite">Tryb recenzji wyłączony.</div>
+    </div>
+
+    <div class="feedback-panel__editor">
+        <div class="feedback-target-summary" id="feedback-target-summary">Wybierz element (ikona 💬), aby dodać komentarz.</div>
+        <div class="form-group">
+            <label for="feedback-priority">Priorytet</label>
+            <select id="feedback-priority" class="input input--sm">
+                <option value="suggestion">💡 Sugestia</option>
+                <option value="important">⚠️ Ważne</option>
+                <option value="bug">🐛 Błąd</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="feedback-text">Komentarz</label>
+            <textarea id="feedback-text" class="input" rows="4" placeholder="Wpisz komentarz do wybranego elementu..."></textarea>
+        </div>
+        <div class="feedback-editor__actions">
+            <button type="button" class="btn btn--secondary btn--sm" id="feedback-clear-current">Wyczyść komentarz</button>
+        </div>
+    </div>
+
+    <div class="feedback-panel__list-wrap">
+        <div class="feedback-panel__list-header">
+            <strong>Wszystkie komentarze</strong>
+            <span id="feedback-count">0</span>
+        </div>
+        <div class="feedback-panel__list" id="feedback-list"></div>
+    </div>
+</aside>
+
+<button type="button" id="feedback-app-comment" class="feedback-app-comment" title="Komentarz do całej aplikacji" aria-label="Komentarz do całej aplikacji">💬 APP</button>
+
 <!-- ===== SCRIPTS ===== -->
 <script src="lib/xlsx-js-style.min.js"></script>
 <script src="js/config.js"></script>
@@ -1948,6 +1994,7 @@
 <script src="js/ai-summary.js"></script>
 <script src="js/tests.js"></script>
 <script src="js/plan.js"></script>
+<script src="js/feedback.js"></script>
 <script src="js/app.js"></script>
 
 </body>

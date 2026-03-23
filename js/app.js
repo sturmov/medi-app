@@ -46,7 +46,8 @@ const App = {
                 { name: 'SOAP', ref: typeof SOAP !== 'undefined' ? SOAP : null },
                 { name: 'AISummary', ref: typeof AISummary !== 'undefined' ? AISummary : null },
                 { name: 'Tests', ref: typeof Tests !== 'undefined' ? Tests : null },
-                { name: 'Plan', ref: typeof Plan !== 'undefined' ? Plan : null }
+                { name: 'Plan', ref: typeof Plan !== 'undefined' ? Plan : null },
+                { name: 'Feedback', ref: typeof Feedback !== 'undefined' ? Feedback : null }
             ];
             modules.forEach(m => {
                 if (m.ref && typeof m.ref.init === 'function') {
@@ -220,6 +221,10 @@ const App = {
         }
 
         this._loadCurrentPatientIntoView(resolvedViewId);
+
+        if (typeof Feedback !== 'undefined' && typeof Feedback.onViewChanged === 'function') {
+            Feedback.onViewChanged(resolvedViewId);
+        }
     },
 
     _loadCurrentPatientIntoView(viewId) {
