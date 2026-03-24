@@ -69,6 +69,19 @@ body.has-patient-banner .feedback-panel {
   font-size: 15px;
 }
 
+.feedback-panel__icon-btn.is-required {
+  border-color: #2563EB;
+  color: #1D4ED8;
+  background: #EFF6FF;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+  animation: feedbackConnectRequiredPulse 1.1s ease-in-out infinite alternate;
+}
+
+@keyframes feedbackConnectRequiredPulse {
+  0% { transform: scale(1); }
+  100% { transform: scale(1.06); }
+}
+
 .feedback-panel__meta {
   padding: 12px 14px 10px;
   border-bottom: 1px solid #E5E7EB;
@@ -92,6 +105,45 @@ body.has-patient-banner .feedback-panel {
   padding: 12px 14px;
   border-bottom: 1px solid #E5E7EB;
   background: #FFF;
+}
+
+.feedback-panel.is-locked .feedback-panel__editor .form-group,
+.feedback-panel.is-locked .feedback-panel__editor .feedback-editor__actions {
+  opacity: 0.55;
+}
+
+.feedback-editor__lock {
+  margin-bottom: 12px;
+  border: 1px solid #FBBF24;
+  background: linear-gradient(180deg, #FFFBEB 0%, #FEF3C7 100%);
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.18);
+}
+
+.feedback-editor__lock-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: #92400E;
+  margin-bottom: 4px;
+}
+
+.feedback-editor__lock-text {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #78350F;
+}
+
+.feedback-editor__connect-cta {
+  width: 100%;
+  font-weight: 800;
+  animation: feedbackCtaPulse 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes feedbackCtaPulse {
+  0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.15); }
+  100% { box-shadow: 0 0 0 6px rgba(37, 99, 235, 0.05); }
 }
 
 .feedback-target-summary {

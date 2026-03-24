@@ -1955,6 +1955,11 @@
 
     <div class="feedback-panel__editor">
         <div class="feedback-target-summary" id="feedback-target-summary">Wybierz element (ikona 💬), aby dodać komentarz.</div>
+        <div class="feedback-editor__lock" id="feedback-editor-lock" hidden>
+            <div class="feedback-editor__lock-title">Komentowanie jest zablokowane</div>
+            <p class="feedback-editor__lock-text">Aby rozpocząć dodawanie komentarzy, najpierw podepnij plik feedback JSON.</p>
+            <button type="button" class="btn btn--primary feedback-editor__connect-cta" id="feedback-connect-file-cta">📎 Podepnij plik feedback JSON</button>
+        </div>
         <div class="form-group">
             <label for="feedback-priority">Priorytet</label>
             <select id="feedback-priority" class="input input--sm">

@@ -9,8 +9,11 @@ const Feedback = {
     commentsByKey: {},
     meta: {
         createdAt: '',
-        lastModifiedAt: ''
+        lastModifiedAt: '',
+        appVersion: ''
     },
+
+    _schemaVersion: '2.0.0',
 
     fileHandle: null,
     _saveEditorTimeout: null,
@@ -36,6 +39,7 @@ const Feedback = {
         this._setMode(false, { silentStatus: true });
         this._renderCommentList();
         this._syncEditorFromSelected({ force: true });
+        this._updateEditorLockState();
         this._updateAnchorIndicators();
         this._startMutationObserver();
 
@@ -58,12 +62,14 @@ const Feedback = {
             closeBtn: document.getElementById('feedback-close'),
             status: document.getElementById('feedback-status'),
             targetSummary: document.getElementById('feedback-target-summary'),
+            editorLock: document.getElementById('feedback-editor-lock'),
             prioritySelect: document.getElementById('feedback-priority'),
             textArea: document.getElementById('feedback-text'),
             clearCurrentBtn: document.getElementById('feedback-clear-current'),
             list: document.getElementById('feedback-list'),
             count: document.getElementById('feedback-count'),
             connectFileBtn: document.getElementById('feedback-connect-file'),
+            connectFileCtaBtn: document.getElementById('feedback-connect-file-cta'),
             appCommentBtn: document.getElementById('feedback-app-comment')
         };
     },
@@ -84,6 +90,11 @@ const Feedback = {
         if (el.appCommentBtn) {
             el.appCommentBtn.addEventListener('click', () => {
                 if (!this.enabled) this._setMode(true);
+                if (this._isEditorLocked()) {
+                    this.selectTarget('app:global', { focusEditor: false });
+                    this._promptJsonConnectionRequired();
+                    return;
+                }
                 this.selectTarget('app:global', { focusEditor: true });
             });
         }
@@ -112,6 +123,12 @@ const Feedback = {
                 await this.connectJsonFile();
             });
         }
+
+        if (el.connectFileCtaBtn) {
+            el.connectFileCtaBtn.addEventListener('click', async () => {
+                await this.connectJsonFile();
+            });
+        }
     },
 
     toggleMode() {
@@ -137,9 +154,11 @@ const Feedback = {
 
         if (this.enabled) {
             this._scheduleTargetScan();
-            this._setStatus(this.fileHandle
-                ? 'Tryb recenzji aktywny. Autozapis lokalny + plik JSON.'
-                : 'Tryb recenzji aktywny. Autozapis lokalny aktywny.');
+            if (this._isEditorLocked()) {
+                this._setStatus('Tryb recenzji aktywny. Aby dodać komentarze, najpierw podepnij plik feedback JSON.');
+            } else {
+                this._setStatus('Tryb recenzji aktywny. Autozapis do podłączonego pliku JSON działa.', 'success');
+            }
 
             if (!this.selectedTargetKey) this.selectedTargetKey = 'app:global';
             this._syncEditorFromSelected({ force: true });
@@ -149,6 +168,8 @@ const Feedback = {
             this._clearButtonSelection();
             this._clearActiveTargetHighlight();
         }
+
+        this._updateEditorLockState();
     },
 
     _setStatus(message, type) {
@@ -159,6 +180,40 @@ const Feedback = {
         el.classList.remove('is-error', 'is-success');
         if (type === 'error') el.classList.add('is-error');
         if (type === 'success') el.classList.add('is-success');
+    },
+
+    _isEditorLocked() {
+        return !this.fileHandle;
+    },
+
+    _promptJsonConnectionRequired() {
+        this._setStatus('Aby komentować, najpierw podepnij plik feedback JSON.', 'error');
+        this._updateEditorLockState();
+    },
+
+    _updateEditorLockState() {
+        if (!this._els) return;
+
+        const locked = this.enabled && this._isEditorLocked();
+
+        if (this._els.panel) {
+            this._els.panel.classList.toggle('is-locked', locked);
+        }
+
+        if (this._els.editorLock) {
+            this._els.editorLock.hidden = !locked;
+        }
+
+        if (this._els.prioritySelect) this._els.prioritySelect.disabled = locked;
+        if (this._els.textArea) this._els.textArea.disabled = locked;
+        if (this._els.clearCurrentBtn) this._els.clearCurrentBtn.disabled = locked || !this.commentsByKey[this.selectedTargetKey];
+
+        if (this._els.connectFileBtn) {
+            this._els.connectFileBtn.classList.toggle('is-required', locked);
+            this._els.connectFileBtn.title = locked
+                ? 'Wymagane: podepnij plik JSON, aby odblokować komentarze'
+                : 'Połącz plik JSON';
+        }
     },
 
     // ---------------------------------------------------------------------
@@ -361,6 +416,11 @@ const Feedback = {
             event.stopPropagation();
 
             if (!this.enabled) this._setMode(true);
+            if (this._isEditorLocked()) {
+                this.selectTarget(targetKey, { focusEditor: false });
+                this._promptJsonConnectionRequired();
+                return;
+            }
             this.selectTarget(targetKey, { focusEditor: true });
         });
 
@@ -402,7 +462,7 @@ const Feedback = {
         this._syncEditorFromSelected({ force: true });
         this._updateActiveTargetHighlight();
 
-        if (opts.focusEditor && this._els && this._els.textArea) {
+        if (opts.focusEditor && this._els && this._els.textArea && !this._isEditorLocked()) {
             this._els.textArea.focus();
             this._els.textArea.setSelectionRange(this._els.textArea.value.length, this._els.textArea.value.length);
         }
@@ -437,6 +497,8 @@ const Feedback = {
         if (this._els.prioritySelect && !preserveEditorText) this._els.prioritySelect.value = (comment && comment.priority) ? comment.priority : 'suggestion';
         if (this._els.textArea && !preserveEditorText) this._els.textArea.value = comment ? String(comment.text || '') : '';
         if (this._els.clearCurrentBtn) this._els.clearCurrentBtn.disabled = !comment;
+
+        this._updateEditorLockState();
     },
 
     _renderTargetSummary(target, context) {
@@ -473,6 +535,7 @@ const Feedback = {
     },
 
     _saveSelectedCommentFromEditor(forceImmediate) {
+        if (this._isEditorLocked()) return;
         if (!this.selectedTargetKey) return;
 
         const target = this._getSelectedTarget();
@@ -583,6 +646,11 @@ const Feedback = {
             del.addEventListener('click', (event) => {
                 event.preventDefault();
                 event.stopPropagation();
+
+                if (this._isEditorLocked()) {
+                    this._promptJsonConnectionRequired();
+                    return;
+                }
 
                 delete this.commentsByKey[comment.key];
                 this.meta.lastModifiedAt = new Date().toISOString();
@@ -766,11 +834,13 @@ const Feedback = {
 
     _serializeState() {
         if (!this.meta.createdAt) this.meta.createdAt = new Date().toISOString();
+        this.meta.appVersion = this._schemaVersion;
         return {
-            version: 1,
+            version: 2,
             meta: {
                 createdAt: this.meta.createdAt,
-                lastModifiedAt: this.meta.lastModifiedAt || ''
+                lastModifiedAt: this.meta.lastModifiedAt || '',
+                appVersion: this.meta.appVersion
             },
             comments: this._sortedComments().map((c) => ({
                 key: c.key,
@@ -803,6 +873,9 @@ const Feedback = {
         if (incomingMeta.lastModifiedAt) {
             this.meta.lastModifiedAt = String(incomingMeta.lastModifiedAt);
         }
+        if (incomingMeta.appVersion) {
+            this.meta.appVersion = String(incomingMeta.appVersion);
+        }
 
         const incomingComments = Array.isArray(payload.comments) ? payload.comments : [];
         incomingComments.forEach((rawComment) => {
@@ -833,6 +906,7 @@ const Feedback = {
         });
 
         if (!this.meta.createdAt) this.meta.createdAt = new Date().toISOString();
+        if (!this.meta.appVersion) this.meta.appVersion = this._schemaVersion;
         return true;
     },
 
@@ -840,7 +914,9 @@ const Feedback = {
     // JSON file linkage + auto-save
     // ---------------------------------------------------------------------
 
-    async connectJsonFile() {
+    async connectJsonFile(options) {
+        const opts = options || {};
+
         if (!('showSaveFilePicker' in window)) {
             this._setStatus('Ta przeglądarka nie wspiera bezpośredniego zapisu do pliku JSON.', 'error');
             return;
@@ -848,7 +924,7 @@ const Feedback = {
 
         try {
             const handle = await window.showSaveFilePicker({
-                suggestedName: 'feedback.json',
+                suggestedName: opts.suggestedName || this._defaultFeedbackFilename(),
                 types: [{
                     description: 'JSON',
                     accept: { 'application/json': ['.json'] }
@@ -861,27 +937,28 @@ const Feedback = {
                 return;
             }
 
-            this.fileHandle = handle;
-            await this._savePersistedFileHandle(handle);
+            let parsedFromFile = null;
 
             // If file already has content, merge it in; then save back latest state.
             try {
                 const file = await handle.getFile();
                 const txt = await file.text();
                 if (txt && txt.trim()) {
-                    const parsed = JSON.parse(txt);
-                    this._mergePayload(parsed, { replaceAll: false });
-                    this._persistLocalState();
+                    parsedFromFile = JSON.parse(txt);
+                    const validation = this._validatePayloadVersion(parsedFromFile);
+                    if (!validation.ok) {
+                        const createNew = await this._confirmCreateNewFileAfterVersionMismatch(validation);
+                        if (createNew) {
+                            await this.connectJsonFile({ suggestedName: this._versionedFeedbackFilename() });
+                        }
+                        return;
+                    }
                 }
             } catch (_) {
                 // Ignore parse/read errors from pre-existing file.
             }
 
-            await this._saveToLinkedFile();
-            this._renderCommentList();
-            this._updateAnchorIndicators();
-            this._syncEditorFromSelected();
-            this._updateActiveTargetHighlight();
+            await this._finalizeConnectedHandle(handle, parsedFromFile);
 
             this._setStatus('Połączono plik JSON. Autozapis pliku aktywny.', 'success');
         } catch (err) {
@@ -891,6 +968,103 @@ const Feedback = {
             }
             this._setStatus('Błąd podłączania pliku JSON: ' + (err && err.message ? err.message : String(err)), 'error');
         }
+    },
+
+    _defaultFeedbackFilename() {
+        return 'feedback.json';
+    },
+
+    _versionedFeedbackFilename() {
+        const safeVersion = String(this._schemaVersion || '1').replace(/[^0-9a-zA-Z.-]+/g, '-');
+        return 'feedback-v' + safeVersion + '.json';
+    },
+
+    _extractPayloadVersion(payload) {
+        const v = payload && payload.meta ? payload.meta.appVersion : '';
+        return String(v || '').trim();
+    },
+
+    _compareVersions(a, b) {
+        const parse = (value) => String(value || '')
+            .split('.')
+            .map((part) => parseInt(part, 10))
+            .map((num) => Number.isFinite(num) ? num : 0);
+
+        const va = parse(a);
+        const vb = parse(b);
+        const len = Math.max(va.length, vb.length);
+
+        for (let i = 0; i < len; i++) {
+            const ai = va[i] || 0;
+            const bi = vb[i] || 0;
+            if (ai > bi) return 1;
+            if (ai < bi) return -1;
+        }
+        return 0;
+    },
+
+    _validatePayloadVersion(payload) {
+        const payloadVersion = this._extractPayloadVersion(payload);
+        if (!payloadVersion) {
+            return { ok: false, reason: 'missing', payloadVersion: '' };
+        }
+
+        const cmp = this._compareVersions(payloadVersion, this._schemaVersion);
+        if (cmp < 0) {
+            return { ok: false, reason: 'older', payloadVersion };
+        }
+        if (cmp > 0) {
+            return { ok: false, reason: 'newer', payloadVersion };
+        }
+
+        return { ok: true, reason: 'ok', payloadVersion };
+    },
+
+    async _confirmCreateNewFileAfterVersionMismatch(validation) {
+        const current = this._schemaVersion;
+        const incoming = validation && validation.payloadVersion ? validation.payloadVersion : 'brak';
+        let message = 'Nie można podłączyć tego pliku feedback JSON.';
+
+        if (validation.reason === 'older' || validation.reason === 'missing') {
+            message = 'Wybrany plik feedback JSON jest ze starszej wersji (v' + incoming + '). Aktualna wersja aplikacji to v' + current + '. Utwórz nowy plik feedback.';
+        } else if (validation.reason === 'newer') {
+            message = 'Wybrany plik feedback JSON jest z nowszej wersji (v' + incoming + ') niż obecna aplikacja (v' + current + ').';
+        }
+
+        this._setStatus(message, 'error');
+
+        if (typeof App !== 'undefined' && typeof App.confirmModal === 'function') {
+            return await App.confirmModal({
+                title: 'Niezgodna wersja pliku feedback',
+                message: message + ' Czy chcesz teraz utworzyć nowy plik JSON?',
+                confirmText: 'Utwórz nowy plik',
+                cancelText: 'Anuluj',
+                danger: false
+            });
+        }
+
+        if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+            return window.confirm(message + '\n\nUtworzyć nowy plik JSON?');
+        }
+
+        return false;
+    },
+
+    async _finalizeConnectedHandle(handle, parsedFromFile) {
+        this.fileHandle = handle;
+        await this._savePersistedFileHandle(handle);
+
+        if (parsedFromFile && typeof parsedFromFile === 'object') {
+            this._mergePayload(parsedFromFile, { replaceAll: false });
+            this._persistLocalState();
+        }
+
+        await this._saveToLinkedFile();
+        this._renderCommentList();
+        this._updateAnchorIndicators();
+        this._syncEditorFromSelected();
+        this._updateActiveTargetHighlight();
+        this._updateEditorLockState();
     },
 
     async importJsonFile() {
@@ -1122,13 +1296,30 @@ const Feedback = {
     async _restorePersistedFileHandle() {
         try {
             const handle = await this._loadPersistedFileHandle();
-            if (!handle) return;
+            if (!handle) {
+                this._updateEditorLockState();
+                return;
+            }
 
             const ok = await this._verifyReadWritePermission(handle, false);
-            if (!ok) return;
+            if (!ok) {
+                this._updateEditorLockState();
+                return;
+            }
 
             // Test read access (file may have been removed).
-            await handle.getFile();
+            const file = await handle.getFile();
+            const txt = await file.text();
+            if (txt && txt.trim()) {
+                const parsed = JSON.parse(txt);
+                const validation = this._validatePayloadVersion(parsed);
+                if (!validation.ok) {
+                    this._setStatus('Poprzedni plik feedback JSON jest niezgodny z wersją aplikacji. Podepnij nowy plik.', 'error');
+                    this._updateEditorLockState();
+                    return;
+                }
+            }
+
             this.fileHandle = handle;
 
             if (!this.enabled) {
@@ -1136,8 +1327,10 @@ const Feedback = {
             } else {
                 this._setStatus('Połączono z poprzednim plikiem feedback JSON.', 'success');
             }
+            this._updateEditorLockState();
         } catch (_) {
             // Ignore stale handles silently.
+            this._updateEditorLockState();
         }
     },
 
