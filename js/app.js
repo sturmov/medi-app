@@ -37,6 +37,7 @@ const App = {
 
             // Setup storage controls
             this._bindStorageControls();
+            this._updateStorageActionsUi();
 
             // Initialize all modules
             const modules = [
@@ -71,7 +72,11 @@ const App = {
             } else {
                 this.clearCurrentPatient({ persist: false });
                 this.showView('view-patients', { persist: false });
-                this._setFolderGateVisible(true, this._getFolderGateDefaultMessage());
+                if (this._isFolderPinningSupported()) {
+                    this._setFolderGateVisible(true, this._getFolderGateDefaultMessage());
+                } else {
+                    this._setFolderGateVisible(false);
+                }
             }
 
             console.log('PsychoApp initialized.');
@@ -293,6 +298,39 @@ const App = {
         if (btnConnectGate) btnConnectGate.addEventListener('click', handler);
     },
 
+    _isFolderPinningSupported() {
+        return typeof XlsxHandler !== 'undefined'
+            && typeof XlsxHandler.isFileSystemAccessSupported === 'function'
+            && !!XlsxHandler.isFileSystemAccessSupported();
+    },
+
+    _updateStorageActionsUi() {
+        const btnConnect = document.getElementById('btn-connect-folder');
+        const btnConnectGate = document.getElementById('btn-connect-folder-gate');
+
+        if (this._isFolderPinningSupported()) {
+            if (btnConnectGate) btnConnectGate.textContent = '📁 Połącz folder pacjentów';
+            if (this._folderGateState && this._folderGateState.title) {
+                this._folderGateState.title.textContent = 'Aby rozpocząć pracę, przypnij folder pacjentów';
+            }
+            this._updateConnectedFolderLabel();
+            return;
+        }
+
+        if (btnConnect) {
+            btnConnect.textContent = '📥 Importuj pacjenta (.xlsx)';
+            btnConnect.title = 'Importuj plik pacjenta XLSX (tryb mobilny)';
+        }
+        if (btnConnectGate) {
+            btnConnectGate.textContent = '📥 Importuj pacjenta (.xlsx)';
+            btnConnectGate.title = 'Importuj plik pacjenta XLSX (tryb mobilny)';
+        }
+
+        if (this._folderGateState && this._folderGateState.title) {
+            this._folderGateState.title.textContent = 'Tryb mobilny: importuj plik pacjenta';
+        }
+    },
+
     // ---- Storage ----
     async _initStorageAndLoadPatients() {
         if (typeof XlsxHandler === 'undefined') return false;
@@ -312,20 +350,33 @@ const App = {
             }
         };
 
+        if (!this._isFolderPinningSupported()) {
+            this._persistFolderState(false);
+            this.updateSaveIndicator('idle');
+            this._updateStorageActionsUi();
+            return false;
+        }
+
         const ready = await XlsxHandler.init({ interactive: false });
         if (!ready) {
             this._persistFolderState(false);
             this.updateSaveIndicator('idle');
+            this._updateStorageActionsUi();
             return false;
         }
 
         await this._loadPatientsIntoState();
         this._persistFolderState(true);
+        this._updateStorageActionsUi();
         return true;
     },
 
     async _connectFolderAndReload() {
         if (typeof XlsxHandler === 'undefined') return false;
+
+        if (!this._isFolderPinningSupported()) {
+            return await this._importPatientWithoutPinnedFolder();
+        }
 
         const ready = await XlsxHandler.init({ interactive: true });
         if (!ready) {
@@ -343,6 +394,56 @@ const App = {
         this.showView('view-patients', { persist: false });
 
         this._setFolderGateVisible(false);
+        this._updateStorageActionsUi();
+        return true;
+    },
+
+    async _importPatientWithoutPinnedFolder() {
+        if (typeof XlsxHandler === 'undefined' || typeof XlsxHandler.importPatientFromFile !== 'function') {
+            return false;
+        }
+
+        const importedPatient = await XlsxHandler.importPatientFromFile();
+        if (!importedPatient) {
+            this.updateSaveIndicator('idle');
+            return false;
+        }
+
+        if (typeof Patients !== 'undefined' && Array.isArray(Patients.list)) {
+            const importedCode = String(importedPatient && importedPatient.dane && (importedPatient.dane.kodPacjenta || importedPatient.dane.id) || '')
+                .trim()
+                .toUpperCase();
+
+            let targetIndex = -1;
+            if (importedCode) {
+                targetIndex = Patients.list.findIndex((p) => {
+                    const code = String(p && p.dane && (p.dane.kodPacjenta || p.dane.id) || '').trim().toUpperCase();
+                    return code && code === importedCode;
+                });
+            }
+
+            if (targetIndex >= 0) {
+                Patients.list[targetIndex] = importedPatient;
+            } else {
+                Patients.list.push(importedPatient);
+                targetIndex = Patients.list.length - 1;
+            }
+
+            if (typeof Patients.renderList === 'function') {
+                Patients.renderList(Patients._currentFilter || '');
+            }
+
+            if (typeof Patients.selectPatient === 'function') {
+                Patients.selectPatient(targetIndex);
+            } else if (typeof this.setCurrentPatient === 'function') {
+                this.setCurrentPatient(importedPatient, { persist: false });
+            }
+        }
+
+        this._persistFolderState(false);
+        this._setFolderGateVisible(false);
+        this._updateStorageActionsUi();
+        this.updateSaveIndicator('saved', { recordTimestamp: true });
         return true;
     },
 
@@ -379,6 +480,12 @@ const App = {
         const btnConnect = document.getElementById('btn-connect-folder');
         if (!btnConnect) return;
 
+        if (!this._isFolderPinningSupported()) {
+            btnConnect.textContent = '📥 Importuj pacjenta (.xlsx)';
+            btnConnect.title = 'Importuj plik pacjenta XLSX (tryb mobilny)';
+            return;
+        }
+
         let connectedName = '';
         if (this._isStorageReady() && typeof XlsxHandler !== 'undefined' && typeof XlsxHandler.getStorageState === 'function') {
             const state = XlsxHandler.getStorageState() || {};
@@ -401,16 +508,24 @@ const App = {
 
     _setupFolderGate() {
         const container = document.getElementById('folder-gate');
+        const title = container ? container.querySelector('.folder-gate__title') : null;
         const status = document.getElementById('folder-gate-status');
+        const actionBtn = document.getElementById('btn-connect-folder-gate');
 
         this._folderGateState = {
             container,
+            title,
             status,
+            actionBtn,
             visible: false
         };
     },
 
     _setFolderGateVisible(visible, message) {
+        if (!this._isFolderPinningSupported()) {
+            visible = false;
+        }
+
         const state = this._folderGateState;
         if (!state || !state.container) return;
 
@@ -429,6 +544,10 @@ const App = {
     },
 
     _getFolderGateDefaultMessage() {
+        if (!this._isFolderPinningSupported()) {
+            return 'Tryb mobilny: użyj przycisku importu pliku .xlsx, aby rozpocząć bez przypinania folderu.';
+        }
+
         if (typeof AppConfig !== 'undefined' && typeof AppConfig.getFolderSummary === 'function') {
             const summary = AppConfig.getFolderSummary();
             if (summary) {

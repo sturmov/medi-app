@@ -166,7 +166,7 @@ const XlsxHandler = {
 
         try {
             if (!this.isFileSystemAccessSupported()) {
-                this._notify('Przeglądarka nie wspiera File System Access API. Dostępny będzie tylko eksport pliku.', 'warning');
+                this._notify('Tryb mobilny: ta przeglądarka nie wspiera przypinania folderu. Użyj importu/eksportu plików XLSX.', 'info');
                 return false;
             }
 

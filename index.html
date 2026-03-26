@@ -1945,6 +1945,7 @@
         <h2 class="feedback-panel__title">Komentarze do aplikacji</h2>
         <div class="feedback-panel__header-actions">
             <button type="button" class="feedback-panel__icon-btn" id="feedback-connect-file" title="Połącz plik JSON" aria-label="Połącz plik JSON">📎</button>
+            <button type="button" class="feedback-panel__icon-btn" id="feedback-export-json" title="Pobierz plik JSON" aria-label="Pobierz plik JSON" hidden>⬇️</button>
             <button type="button" class="feedback-panel__close" id="feedback-close" aria-label="Zamknij panel komentarzy">✕</button>
         </div>
     </div>
@@ -1957,7 +1958,7 @@
         <div class="feedback-target-summary" id="feedback-target-summary">Wybierz element (ikona 💬), aby dodać komentarz.</div>
         <div class="feedback-editor__lock" id="feedback-editor-lock" hidden>
             <div class="feedback-editor__lock-title">Komentowanie jest zablokowane</div>
-            <p class="feedback-editor__lock-text">Aby rozpocząć dodawanie komentarzy, najpierw podepnij plik feedback JSON.</p>
+            <p class="feedback-editor__lock-text" id="feedback-editor-lock-text">Aby rozpocząć dodawanie komentarzy, najpierw podepnij plik feedback JSON.</p>
             <button type="button" class="btn btn--primary feedback-editor__connect-cta" id="feedback-connect-file-cta">📎 Podepnij plik feedback JSON</button>
         </div>
         <div class="form-group">

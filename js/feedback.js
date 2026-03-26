@@ -16,6 +16,7 @@ const Feedback = {
     _schemaVersion: '2.0.0',
 
     fileHandle: null,
+    _localJsonMode: false,
     _saveEditorTimeout: null,
     _saveFileTimeout: null,
     _scanTimeout: null,
@@ -63,12 +64,14 @@ const Feedback = {
             status: document.getElementById('feedback-status'),
             targetSummary: document.getElementById('feedback-target-summary'),
             editorLock: document.getElementById('feedback-editor-lock'),
+            editorLockText: document.getElementById('feedback-editor-lock-text'),
             prioritySelect: document.getElementById('feedback-priority'),
             textArea: document.getElementById('feedback-text'),
             clearCurrentBtn: document.getElementById('feedback-clear-current'),
             list: document.getElementById('feedback-list'),
             count: document.getElementById('feedback-count'),
             connectFileBtn: document.getElementById('feedback-connect-file'),
+            exportJsonBtn: document.getElementById('feedback-export-json'),
             connectFileCtaBtn: document.getElementById('feedback-connect-file-cta'),
             appCommentBtn: document.getElementById('feedback-app-comment')
         };
@@ -129,6 +132,12 @@ const Feedback = {
                 await this.connectJsonFile();
             });
         }
+
+        if (el.exportJsonBtn) {
+            el.exportJsonBtn.addEventListener('click', () => {
+                this.exportJson();
+            });
+        }
     },
 
     toggleMode() {
@@ -155,9 +164,17 @@ const Feedback = {
         if (this.enabled) {
             this._scheduleTargetScan();
             if (this._isEditorLocked()) {
-                this._setStatus('Tryb recenzji aktywny. Aby dodać komentarze, najpierw podepnij plik feedback JSON.');
+                if (this._supportsDirectJsonFileLinking()) {
+                    this._setStatus('Tryb recenzji aktywny. Aby dodać komentarze, najpierw podepnij plik feedback JSON.');
+                } else {
+                    this._setStatus('Tryb recenzji aktywny (mobilny). Aby odblokować komentarze, użyj przycisku podpięcia JSON i uruchom tryb lokalny.');
+                }
             } else {
-                this._setStatus('Tryb recenzji aktywny. Autozapis do podłączonego pliku JSON działa.', 'success');
+                if (this._localJsonMode) {
+                    this._setStatus('Tryb recenzji aktywny (mobilny). Komentarze zapisują się lokalnie – użyj ⬇️ aby pobrać JSON.', 'success');
+                } else {
+                    this._setStatus('Tryb recenzji aktywny. Autozapis do podłączonego pliku JSON działa.', 'success');
+                }
             }
 
             if (!this.selectedTargetKey) this.selectedTargetKey = 'app:global';
@@ -183,17 +200,27 @@ const Feedback = {
     },
 
     _isEditorLocked() {
-        return !this.fileHandle;
+        return !this.fileHandle && !this._localJsonMode;
     },
 
     _promptJsonConnectionRequired() {
-        this._setStatus('Aby komentować, najpierw podepnij plik feedback JSON.', 'error');
+        if (this._supportsDirectJsonFileLinking()) {
+            this._setStatus('Aby komentować, najpierw podepnij plik feedback JSON.', 'error');
+        } else {
+            this._setStatus('Aby komentować w trybie mobilnym, kliknij 📎 i uruchom tryb lokalny JSON.', 'error');
+        }
         this._updateEditorLockState();
+    },
+
+    _supportsDirectJsonFileLinking() {
+        return typeof window !== 'undefined' && ('showSaveFilePicker' in window);
     },
 
     _updateEditorLockState() {
         if (!this._els) return;
 
+        const supportsDirectLinking = this._supportsDirectJsonFileLinking();
+        const localJsonMode = !!this._localJsonMode;
         const locked = this.enabled && this._isEditorLocked();
 
         if (this._els.panel) {
@@ -204,15 +231,40 @@ const Feedback = {
             this._els.editorLock.hidden = !locked;
         }
 
+        if (this._els.editorLockText) {
+            this._els.editorLockText.textContent = supportsDirectLinking
+                ? 'Aby rozpocząć dodawanie komentarzy, najpierw podepnij plik feedback JSON.'
+                : 'Ta przeglądarka działa w trybie mobilnym. Kliknij poniżej, aby wczytać JSON (opcjonalnie) i odblokować komentarze w trybie lokalnym.';
+        }
+
+        if (this._els.connectFileCtaBtn) {
+            this._els.connectFileCtaBtn.textContent = supportsDirectLinking
+                ? '📎 Podepnij plik feedback JSON'
+                : '📎 Wczytaj JSON / uruchom tryb lokalny';
+        }
+
         if (this._els.prioritySelect) this._els.prioritySelect.disabled = locked;
         if (this._els.textArea) this._els.textArea.disabled = locked;
         if (this._els.clearCurrentBtn) this._els.clearCurrentBtn.disabled = locked || !this.commentsByKey[this.selectedTargetKey];
 
         if (this._els.connectFileBtn) {
             this._els.connectFileBtn.classList.toggle('is-required', locked);
-            this._els.connectFileBtn.title = locked
-                ? 'Wymagane: podepnij plik JSON, aby odblokować komentarze'
-                : 'Połącz plik JSON';
+            if (supportsDirectLinking) {
+                this._els.connectFileBtn.title = locked
+                    ? 'Wymagane: podepnij plik JSON, aby odblokować komentarze'
+                    : 'Połącz plik JSON';
+            } else {
+                this._els.connectFileBtn.title = locked
+                    ? 'Wymagane: uruchom tryb lokalny JSON, aby odblokować komentarze'
+                    : 'Wczytaj JSON / tryb lokalny';
+            }
+        }
+
+        if (this._els.exportJsonBtn) {
+            this._els.exportJsonBtn.hidden = !localJsonMode;
+            this._els.exportJsonBtn.title = localJsonMode
+                ? 'Pobierz aktualny plik JSON z komentarzami'
+                : 'Pobierz plik JSON';
         }
     },
 
@@ -917,8 +969,8 @@ const Feedback = {
     async connectJsonFile(options) {
         const opts = options || {};
 
-        if (!('showSaveFilePicker' in window)) {
-            this._setStatus('Ta przeglądarka nie wspiera bezpośredniego zapisu do pliku JSON.', 'error');
+        if (!this._supportsDirectJsonFileLinking()) {
+            await this._connectJsonInLocalMode();
             return;
         }
 
@@ -958,6 +1010,7 @@ const Feedback = {
                 // Ignore parse/read errors from pre-existing file.
             }
 
+            this._localJsonMode = false;
             await this._finalizeConnectedHandle(handle, parsedFromFile);
 
             this._setStatus('Połączono plik JSON. Autozapis pliku aktywny.', 'success');
@@ -967,6 +1020,49 @@ const Feedback = {
                 return;
             }
             this._setStatus('Błąd podłączania pliku JSON: ' + (err && err.message ? err.message : String(err)), 'error');
+        }
+    },
+
+    async _connectJsonInLocalMode() {
+        try {
+            let parsedFromFile = null;
+            const file = await this._pickJsonFile();
+
+            if (file) {
+                const txt = await file.text();
+                if (txt && txt.trim()) {
+                    parsedFromFile = JSON.parse(txt);
+                    const validation = this._validatePayloadVersion(parsedFromFile);
+                    if (!validation.ok) {
+                        const createNew = await this._confirmCreateNewFileAfterVersionMismatch(validation);
+                        if (!createNew) return;
+                        parsedFromFile = null;
+                    }
+                }
+            }
+
+            this.fileHandle = null;
+            this._localJsonMode = true;
+
+            if (parsedFromFile && typeof parsedFromFile === 'object') {
+                this._mergePayload(parsedFromFile, { replaceAll: false });
+            }
+
+            this.meta.lastModifiedAt = new Date().toISOString();
+            this._persistLocalState();
+            this._renderCommentList();
+            this._updateAnchorIndicators();
+            this._syncEditorFromSelected({ force: true });
+            this._updateActiveTargetHighlight();
+            this._updateEditorLockState();
+
+            if (file) {
+                this._setStatus('Wczytano plik JSON. Tryb lokalny aktywny – komentarze zapisują się lokalnie. Użyj ⬇️ aby pobrać JSON.', 'success');
+            } else {
+                this._setStatus('Tryb lokalny aktywny – komentarze zapisują się lokalnie. Użyj ⬇️ aby pobrać JSON.', 'success');
+            }
+        } catch (err) {
+            this._setStatus('Błąd uruchamiania trybu lokalnego JSON: ' + (err && err.message ? err.message : String(err)), 'error');
         }
     },
 
@@ -1052,6 +1148,7 @@ const Feedback = {
 
     async _finalizeConnectedHandle(handle, parsedFromFile) {
         this.fileHandle = handle;
+        this._localJsonMode = false;
         await this._savePersistedFileHandle(handle);
 
         if (parsedFromFile && typeof parsedFromFile === 'object') {
@@ -1295,6 +1392,12 @@ const Feedback = {
 
     async _restorePersistedFileHandle() {
         try {
+            if (!this._supportsDirectJsonFileLinking()) {
+                this.fileHandle = null;
+                this._updateEditorLockState();
+                return;
+            }
+
             const handle = await this._loadPersistedFileHandle();
             if (!handle) {
                 this._updateEditorLockState();
