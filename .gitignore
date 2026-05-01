@@ -1,0 +1,36 @@
+# ============================================================================
+# .gitignore — PsychoApp
+# ============================================================================
+
+# Sekrety / dane wrażliwe — NIGDY nie commit
+client_secret_*.json
+*.pem
+*.key
+.env
+.env.local
+
+# Logi i pliki tymczasowe
+http-server.log
+*.log
+*.tmp
+*.bak
+docs/_extracted_temp.md
+
+# Lokalne dane testowe pacjentów (XLSX z pseudonimami)
+pacjent/
+
+# Build / vendor (jeśli kiedyś dodamy)
+node_modules/
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
