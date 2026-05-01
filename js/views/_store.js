@@ -50,12 +50,20 @@ import {
     FAKE_TESTS
 } from './_fake-data.js';
 
+import {
+    isFileSystemAccessSupported,
+    saveHandle, loadHandle, clearHandle,
+    verifyPermission, readTextFile, writeTextFile
+} from './_folder-handle.js';
+
 // --- storage keys -----------------------------------------------------------
 
 const LS_KEY_DATA         = 'psy-new:data';
 const LS_KEY_CURRENT      = 'psy-new:currentPatientId';
 const LS_KEY_SCHEMA_VER   = 'psy-new:schema';
+const LS_KEY_DEV_MODE     = 'psy-new:devMode';   // gdy true → user wybrał „🧪 Tryb dev"
 const SCHEMA_VERSION      = 1;
+const DATA_FILE_NAME      = 'data.json';
 
 // --- state ------------------------------------------------------------------
 
@@ -68,11 +76,22 @@ const state = {
     tests: [],
     currentPatient: null,
     route: '',
-    saveStatus: 'idle' // 'idle' | 'saving' | 'saved' | 'error'
+    saveStatus: 'idle', // 'idle' | 'saving' | 'saved' | 'error'
+
+    // Folder lokalny (PR-I, 2026-05-01 cd. 3)
+    folderConnected: false,           // true = handle aktywny + permission granted
+    folderName: '',                    // czytelna nazwa wybranego folderu
+    folderStatus: 'init',             // 'init' | 'unsupported' | 'denied' | 'connected' | 'devmode'
+    devMode: false                     // true = user wybrał „🧪 Tryb dev (localStorage)"
 };
 
 const listeners = new Set();
 let _saveStatusTimer = null;
+
+// Trzymamy handle TYLKO w pamięci (nie w stanie publikowanym subscriberom).
+// Persist do IndexedDB realizuje `_folder-handle.js`.
+let _dirHandle = null;
+let _folderSyncTimer = null;
 
 // --- helpers: ID generation -------------------------------------------------
 
@@ -127,12 +146,47 @@ function _serialize() {
 function _persist() {
     _setSaveStatus('saving');
     try {
+        // 1) localStorage = zawsze cache (szybki, działa offline, fallback)
         window.localStorage.setItem(LS_KEY_DATA, _serialize());
         window.localStorage.setItem(LS_KEY_SCHEMA_VER, String(SCHEMA_VERSION));
+
+        // 2) folder lokalny = source-of-truth (gdy podpięty), debounce 500ms
+        if (state.folderConnected && _dirHandle) {
+            _scheduleFolderSync();
+        }
+
         // krótkie „saving" → „saved" — miga by user widział feedback
         window.setTimeout(() => _setSaveStatus('saved'), 120);
     } catch (e) {
         console.error('[store persist]', e);
+        _setSaveStatus('error');
+    }
+}
+
+/** Zaplanuj zapis `data.json` do podpiętego folderu (debounce 500ms). */
+function _scheduleFolderSync() {
+    if (_folderSyncTimer) clearTimeout(_folderSyncTimer);
+    _folderSyncTimer = setTimeout(_doFolderSync, 500);
+}
+
+async function _doFolderSync() {
+    if (!_dirHandle) return;
+    try {
+        const payload = JSON.stringify({
+            schema: SCHEMA_VERSION,
+            version: 'psy-app-1.0',
+            lastWrite: new Date().toISOString(),
+            patients: state.patients,
+            visits: state.visits,
+            meds: state.meds,
+            diagnoses: state.diagnoses,
+            recommendations: state.recommendations,
+            tests: state.tests
+        }, null, 2);
+        const ok = await writeTextFile(_dirHandle, DATA_FILE_NAME, payload);
+        if (!ok) _setSaveStatus('error');
+    } catch (e) {
+        console.error('[store folder sync]', e);
         _setSaveStatus('error');
     }
 }
@@ -602,6 +656,244 @@ export const Store = {
         // Persist pustego stanu — przy następnym uruchomieniu nie zostanie
         // zreseedowany z FAKE_* (bo `_loadFromStorage` zwróci `true`).
         _persist();
+        emit();
+    },
+
+    // ---- Folder lokalny (PR-I, 2026-05-01 cd. 3) ---------------------------
+
+    /** Czy aktywny jest podpięty folder lokalny? */
+    isLocalConnected() {
+        return state.folderConnected === true;
+    },
+
+    /**
+     * Otwórz dialog `showDirectoryPicker`, zapisz handle, wczytaj `data.json`
+     * (lub utwórz pusty), oznacz folder jako podpięty.
+     *
+     * @returns {Promise<{ok: boolean, error?: string}>}
+     */
+    async connectLocalFolder() {
+        if (!isFileSystemAccessSupported()) {
+            state.folderStatus = 'unsupported';
+            emit();
+            return { ok: false, error: 'unsupported' };
+        }
+        try {
+            const handle = await window.showDirectoryPicker({
+                id: 'psy-app-patients',
+                mode: 'readwrite',
+                startIn: 'documents'
+            });
+            // Po pierwszym wyborze permission jest zwykle 'granted', ale upewnij się.
+            const ok = await verifyPermission(handle, 'readwrite', true);
+            if (!ok) {
+                state.folderStatus = 'denied';
+                emit();
+                return { ok: false, error: 'denied' };
+            }
+            await saveHandle(handle);
+            _dirHandle = handle;
+            state.folderConnected = true;
+            state.folderName = handle.name || '';
+            state.folderStatus = 'connected';
+            state.devMode = false;
+            try { window.localStorage.removeItem(LS_KEY_DEV_MODE); } catch (_) { /* */ }
+
+            // Spróbuj wczytać data.json z folderu (overwrite localStorage).
+            const json = await readTextFile(handle, DATA_FILE_NAME);
+            if (json) {
+                try {
+                    const data = JSON.parse(json);
+                    if (data && typeof data === 'object') {
+                        state.patients        = Array.isArray(data.patients)        ? data.patients        : [];
+                        state.visits          = Array.isArray(data.visits)          ? data.visits          : [];
+                        state.meds            = Array.isArray(data.meds)            ? data.meds            : [];
+                        state.diagnoses       = Array.isArray(data.diagnoses)       ? data.diagnoses       : [];
+                        state.recommendations = Array.isArray(data.recommendations) ? data.recommendations : [];
+                        state.tests           = Array.isArray(data.tests)           ? data.tests           : [];
+                        state.currentPatient  = null;
+                        _persist();   // Zaktualizuj localStorage cache
+                        emit();
+                        return { ok: true };
+                    }
+                } catch (e) {
+                    console.warn('[connectLocalFolder] data.json malformed', e);
+                }
+            }
+            // Brak data.json → wykonaj wipe + zapisz pusty plik
+            state.patients = [];
+            state.visits = [];
+            state.meds = [];
+            state.diagnoses = [];
+            state.recommendations = [];
+            state.tests = [];
+            state.currentPatient = null;
+            _persist();   // wymusi zapis localStorage + folder sync
+            emit();
+            return { ok: true };
+        } catch (e) {
+            // User anulował picker → AbortError. Inne błędy logujemy.
+            if (e && (e.name === 'AbortError' || e.message === 'The user aborted a request.')) {
+                return { ok: false, error: 'aborted' };
+            }
+            console.error('[connectLocalFolder]', e);
+            state.folderStatus = 'denied';
+            emit();
+            return { ok: false, error: 'denied' };
+        }
+    },
+
+    /**
+     * Spróbuj odzyskać podpięcie folderu z poprzedniej sesji (IndexedDB).
+     * Wywoływane raz w `init()`. Zwraca true jeśli udało się.
+     */
+    async restoreLocalFolder() {
+        if (!isFileSystemAccessSupported()) {
+            state.folderStatus = 'unsupported';
+            // Sprawdź czy user wcześniej wybrał tryb dev
+            try {
+                if (window.localStorage.getItem(LS_KEY_DEV_MODE) === '1') {
+                    state.devMode = true;
+                    state.folderStatus = 'devmode';
+                }
+            } catch (_) { /* */ }
+            emit();
+            return false;
+        }
+        try {
+            const handle = await loadHandle();
+            if (!handle) {
+                // Brak zapisanego folderu — sprawdź dev mode
+                try {
+                    if (window.localStorage.getItem(LS_KEY_DEV_MODE) === '1') {
+                        state.devMode = true;
+                        state.folderStatus = 'devmode';
+                    }
+                } catch (_) { /* */ }
+                emit();
+                return false;
+            }
+            // Permission może być prompt'em po reload — verifyPermission z prompt:false
+            // żeby NIE pokazywać popup'u przy starcie. User ma kliknąć „Połącz" w gate
+            // żeby wyrazić user-gesture.
+            const ok = await verifyPermission(handle, 'readwrite', false);
+            if (!ok) {
+                // Mamy handle, ale permission expired → trzeba ręcznie kliknąć
+                _dirHandle = handle;   // zapamiętaj na potem
+                state.folderStatus = 'denied';
+                state.folderName = handle.name || '';
+                emit();
+                return false;
+            }
+            _dirHandle = handle;
+            state.folderConnected = true;
+            state.folderName = handle.name || '';
+            state.folderStatus = 'connected';
+            state.devMode = false;
+
+            // Wczytaj data.json (jeśli istnieje, overwrite localStorage)
+            const json = await readTextFile(handle, DATA_FILE_NAME);
+            if (json) {
+                try {
+                    const data = JSON.parse(json);
+                    if (data && typeof data === 'object') {
+                        state.patients        = Array.isArray(data.patients)        ? data.patients        : [];
+                        state.visits          = Array.isArray(data.visits)          ? data.visits          : [];
+                        state.meds            = Array.isArray(data.meds)            ? data.meds            : [];
+                        state.diagnoses       = Array.isArray(data.diagnoses)       ? data.diagnoses       : [];
+                        state.recommendations = Array.isArray(data.recommendations) ? data.recommendations : [];
+                        state.tests           = Array.isArray(data.tests)           ? data.tests           : [];
+                        // Cache do localStorage
+                        try {
+                            window.localStorage.setItem(LS_KEY_DATA, _serialize());
+                        } catch (_) { /* */ }
+                    }
+                } catch (e) {
+                    console.warn('[restoreLocalFolder] data.json malformed', e);
+                }
+            }
+            emit();
+            return true;
+        } catch (e) {
+            console.warn('[restoreLocalFolder]', e);
+            return false;
+        }
+    },
+
+    /**
+     * Re-prompt permission dla zapamiętanego handle'a (gdy `folderStatus === 'denied'`
+     * po reload). Wymaga user gesture (klik z gate'a / topbar'u).
+     */
+    async reauthorizeLocalFolder() {
+        if (!_dirHandle) {
+            // Nie ma handle'a w pamięci — spróbuj wczytać z IDB
+            const handle = await loadHandle();
+            if (!handle) return { ok: false, error: 'no-handle' };
+            _dirHandle = handle;
+        }
+        const ok = await verifyPermission(_dirHandle, 'readwrite', true);
+        if (!ok) {
+            state.folderStatus = 'denied';
+            emit();
+            return { ok: false, error: 'denied' };
+        }
+        state.folderConnected = true;
+        state.folderName = _dirHandle.name || '';
+        state.folderStatus = 'connected';
+        state.devMode = false;
+        // Odczyt data.json
+        const json = await readTextFile(_dirHandle, DATA_FILE_NAME);
+        if (json) {
+            try {
+                const data = JSON.parse(json);
+                if (data && typeof data === 'object') {
+                    state.patients        = Array.isArray(data.patients)        ? data.patients        : [];
+                    state.visits          = Array.isArray(data.visits)          ? data.visits          : [];
+                    state.meds            = Array.isArray(data.meds)            ? data.meds            : [];
+                    state.diagnoses       = Array.isArray(data.diagnoses)       ? data.diagnoses       : [];
+                    state.recommendations = Array.isArray(data.recommendations) ? data.recommendations : [];
+                    state.tests           = Array.isArray(data.tests)           ? data.tests           : [];
+                }
+            } catch (_) { /* */ }
+        }
+        _persist();
+        emit();
+        return { ok: true };
+    },
+
+    /**
+     * Odepnij folder. Handle z IndexedDB usunięty. Cache w localStorage zostaje.
+     * Po tej operacji aplikacja działa nadal, ale w trybie tylko-localStorage.
+     */
+    async disconnectLocalFolder() {
+        try { await clearHandle(); } catch (_) { /* */ }
+        if (_folderSyncTimer) { clearTimeout(_folderSyncTimer); _folderSyncTimer = null; }
+        _dirHandle = null;
+        state.folderConnected = false;
+        state.folderName = '';
+        state.folderStatus = 'init';
+        state.devMode = false;
+        try { window.localStorage.removeItem(LS_KEY_DEV_MODE); } catch (_) { /* */ }
+        emit();
+    },
+
+    /**
+     * Włącz „🧪 Tryb dev (localStorage)" — apka działa bez folderu, dane
+     * tylko w przeglądarce. Persist'owany flag w localStorage żeby gate
+     * nie wyskakiwał ponownie po reload.
+     */
+    enableDevMode() {
+        state.devMode = true;
+        state.folderStatus = 'devmode';
+        try { window.localStorage.setItem(LS_KEY_DEV_MODE, '1'); } catch (_) { /* */ }
+        emit();
+    },
+
+    /** Wyłącz tryb dev (np. gdy user chce wreszcie podpiąć folder). */
+    disableDevMode() {
+        state.devMode = false;
+        state.folderStatus = 'init';
+        try { window.localStorage.removeItem(LS_KEY_DEV_MODE); } catch (_) { /* */ }
         emit();
     },
 

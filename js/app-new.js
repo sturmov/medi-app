@@ -41,6 +41,7 @@ import { renderPatientForm } from './views/view-patient-form.js';
 import { renderPatientDetail } from './views/view-patient-detail.js';
 import { renderTestRunner } from './views/view-test-runner.js';
 import { listAvailableTests } from './views/_tests-catalog.js';
+import { showFolderGate, hideFolderGate, shouldShowGate } from './views/view-folder-gate.js';
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -1063,12 +1064,13 @@ function resolveRoute(hash) {
 }
 
 const AppController = {
-    init() {
+    async init() {
         this.shellEl = document.getElementById('psy-new-shell');
         this.sidebarEl = document.getElementById('psy-new-sidebar');
         this.mainEl = document.getElementById('psy-new-main');
         this.patientHostEl = document.getElementById('psy-new-topbar-patient');
         this.saveIndicatorEl = document.getElementById('save-indicator');
+        this.folderStatusEl = document.getElementById('folder-status');
         this._lastSaveStatus = null;
         this._lastRenderedHash = null;
 
@@ -1093,9 +1095,29 @@ const AppController = {
         Store.subscribe((state) => {
             this._renderPatientTag();
             this._updateSaveIndicator(state.saveStatus);
+            this._updateFolderStatusBadge();
             this._renderView(false);
             this._updateSidebarActive();
         });
+
+        // PR-I: spróbuj odzyskać podpięcie folderu z poprzedniej sesji
+        // (IndexedDB). Jeśli się udało → state.folderConnected=true.
+        // Jeśli permission expired → state.folderStatus='denied' + folderName
+        // (gate pokaże opcję „Przywróć dostęp").
+        await Store.restoreLocalFolder();
+
+        // Folder gate — pokaż gdy nie ma trybu storage'u (init/denied/unsupported
+        // i devMode=false). Apka się NIE rusza dopóki gate jest widoczny.
+        if (shouldShowGate()) {
+            showFolderGate();
+            // Mimo że gate pokazany, ustaw resztę bootstrap'u (sidebar/topbar/route)
+            // — nie robimy renderView, bo gate to przykrywa.
+            Store.restoreLastPatient();
+            this._updateSaveIndicator(Store.state.saveStatus);
+            this._updateFolderStatusBadge();
+            console.log('[PsychoApp new] initialized — folder gate active');
+            return;
+        }
 
         Store.restoreLastPatient();
 
@@ -1107,22 +1129,61 @@ const AppController = {
 
         this._renderPatientTag();
         this._updateSaveIndicator(Store.state.saveStatus);
+        this._updateFolderStatusBadge();
         this._renderView(true);
         this._updateSidebarActive();
 
-        console.log('[PsychoApp new] initialized');
+        console.log('[PsychoApp new] initialized — ' +
+            (Store.state.folderConnected ? 'folder: ' + Store.state.folderName : 'devmode'));
     },
 
     _bindTopbar() {
-        document.getElementById('btn-connect-folder').addEventListener('click', () => {
-            toast('info', 'Folder pacjentów', 'Połączenie folderu lokalnego (File System Access API) zostanie dodane w PR-17.');
+        // PR-I: przycisk „Folder pacjentów" — jeśli niepodpięty, pokaż gate;
+        // jeśli podpięty, pokaż menu z opcją odpięcia.
+        document.getElementById('btn-connect-folder').addEventListener('click', async () => {
+            if (Store.isLocalConnected()) {
+                // Już podpięty — pokaż info + opcja odpięcia
+                const ok = await window.confirm(
+                    'Folder „' + Store.state.folderName + '" jest podpięty.\n\n' +
+                    'Czy chcesz go odpiąć? Dane zostaną w localStorage przeglądarki, ' +
+                    'ale przestaną się synchronizować z folderem.'
+                );
+                if (ok) {
+                    await Store.disconnectLocalFolder();
+                    toast('info', 'Folder odłączony', 'Aplikacja przeszła w tryb localStorage.');
+                    showFolderGate();
+                }
+            } else {
+                // Niepodpięty — pokaż gate
+                showFolderGate();
+            }
         });
         document.getElementById('btn-connect-drive').addEventListener('click', () => {
-            toast('info', 'Google Drive', 'Integracja z Drive (model folderowy: root „pacjenci", folder per pacjent z Sheet + załączniki) pojawi się w Fazie 3.');
+            toast('info', 'Google Drive', 'Integracja z Drive zostanie aktywowana w Fazie 4 (PR-19).');
         });
         document.getElementById('btn-settings').addEventListener('click', () => {
             window.location.hash = APP_SETTINGS_ROUTE;
         });
+    },
+
+    _updateFolderStatusBadge() {
+        const btn = document.getElementById('btn-connect-folder');
+        if (!btn) return;
+        if (Store.isLocalConnected()) {
+            btn.textContent = '📁 ' + (Store.state.folderName || 'folder');
+            btn.classList.add('psy-new-topbar__btn--connected');
+            btn.title = 'Folder podpięty: ' + Store.state.folderName + ' — kliknij aby odłączyć';
+        } else if (Store.state.devMode) {
+            btn.textContent = '🧪 Tryb dev';
+            btn.classList.remove('psy-new-topbar__btn--connected');
+            btn.classList.add('psy-new-topbar__btn--devmode');
+            btn.title = 'Tryb deweloperski (localStorage) — kliknij aby podpiąć folder';
+        } else {
+            btn.textContent = '📁 Folder pacjentów';
+            btn.classList.remove('psy-new-topbar__btn--connected');
+            btn.classList.remove('psy-new-topbar__btn--devmode');
+            btn.title = 'Podpiej folder z pacjentami';
+        }
     },
 
     _updateSaveIndicator(status) {

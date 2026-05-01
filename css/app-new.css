@@ -2031,3 +2031,191 @@ body.psy-modal-open {
 }
 
 
+  
+/* ============================================================================
+   FOLDER GATE (PR-I, 2026-05-01 cd. 3) — modal blokujący przed wyborem
+   trybu storage'u (folder lokalny / Drive / tryb dev).
+   ============================================================================ */
+
+body.psy-folder-gate-open {
+    overflow: hidden;
+}
+
+.psy-folder-gate {
+    position: fixed;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.92) 0%, rgba(30, 41, 59, 0.94) 100%);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    padding: 24px 16px;
+    overflow-y: auto;
+    animation: psy-folder-gate-fadein 0.2s ease-out;
+}
+
+@keyframes psy-folder-gate-fadein {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+.psy-folder-gate__card {
+    background: #FFFFFF;
+    border-radius: 14px;
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.4);
+    width: 100%;
+    max-width: 540px;
+    padding: 32px 36px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    animation: psy-folder-gate-slide 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.1);
+}
+
+@keyframes psy-folder-gate-slide {
+    from { opacity: 0; transform: translateY(-20px) scale(0.96); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.psy-folder-gate__header {
+    text-align: center;
+    margin-bottom: 4px;
+}
+
+.psy-folder-gate__icon {
+    font-size: 56px;
+    line-height: 1;
+    margin-bottom: 10px;
+}
+
+.psy-folder-gate__title {
+    margin: 0 0 4px 0;
+    font-size: 28px;
+    font-weight: 700;
+    color: #0F172A;
+    letter-spacing: -0.02em;
+}
+
+.psy-folder-gate__subtitle {
+    font-size: 13px;
+    color: #64748B;
+    font-weight: 500;
+}
+
+.psy-folder-gate__notice {
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: #334155;
+}
+
+.psy-folder-gate__notice p {
+    margin: 4px 0 0 0;
+}
+
+.psy-folder-gate__notice--warning {
+    background: #FFFBEB;
+    border-color: #FDE68A;
+    color: #78350F;
+}
+
+.psy-folder-gate__notice--error {
+    background: #FEF2F2;
+    border-color: #FCA5A5;
+    color: #991B1B;
+}
+
+.psy-folder-gate__btn {
+    width: 100%;
+    justify-content: center;
+    padding: 12px 18px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.psy-folder-gate__btn--primary {
+    background: linear-gradient(180deg, #2563EB 0%, #1D4ED8 100%);
+    border: 0;
+    color: #FFFFFF;
+    box-shadow: 0 6px 14px rgba(37, 99, 235, 0.35);
+}
+
+.psy-folder-gate__btn--primary:hover {
+    background: linear-gradient(180deg, #1D4ED8 0%, #1E40AF 100%);
+    box-shadow: 0 8px 18px rgba(37, 99, 235, 0.5);
+}
+
+.psy-folder-gate__btn--disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.psy-folder-gate__btn--disabled:hover {
+    background: inherit;
+}
+
+.psy-folder-gate__dev {
+    text-align: center;
+    margin-top: 8px;
+    padding-top: 14px;
+    border-top: 1px dashed #E5E7EB;
+}
+
+.psy-folder-gate__dev-link {
+    background: transparent;
+    border: 0;
+    color: #64748B;
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+}
+
+.psy-folder-gate__dev-link:hover {
+    color: #DC2626;
+    background: rgba(220, 38, 38, 0.06);
+}
+
+.psy-folder-gate__dev-hint {
+    font-size: 11.5px;
+    color: #94A3B8;
+    margin-top: 6px;
+    line-height: 1.5;
+}
+
+/* Topbar — wyróżnienie statusu folderu */
+.psy-new-topbar__btn--connected {
+    background: #D1FAE5;
+    border-color: #6EE7B7;
+    color: #065F46;
+}
+
+.psy-new-topbar__btn--connected:hover {
+    background: #A7F3D0;
+}
+
+.psy-new-topbar__btn--devmode {
+    background: #FEF3C7;
+    border-color: #FDE68A;
+    color: #78350F;
+}
+
+.psy-new-topbar__btn--devmode:hover {
+    background: #FDE68A;
+}
+
+@media (max-width: 600px) {
+    .psy-folder-gate__card {
+        padding: 22px 20px;
+    }
+    .psy-folder-gate__title { font-size: 22px; }
+    .psy-folder-gate__icon { font-size: 44px; }
+}
