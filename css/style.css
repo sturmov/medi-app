@@ -19,11 +19,61 @@ html {
   text-size-adjust: 100%;
 }
 
+:root {
+  /* Compact design tokens */
+  --psy-topbar-height: 52px;
+  --psy-sidebar-width: 240px;
+  --psy-main-padding: 20px;
+
+  --psy-font-size-body: 14px;
+  --psy-font-size-h1: 24px;
+  --psy-font-size-h2: 20px;
+  --psy-font-size-h3: 17px;
+  --psy-font-size-h4: 15px;
+  --psy-font-size-label: 13px;
+  --psy-font-size-input: 14px;
+  --psy-font-size-btn: 14px;
+
+  --psy-radius-sm: 6px;
+  --psy-radius-md: 8px;
+  --psy-radius-lg: 10px;
+  --psy-radius-xl: 12px;
+
+  --psy-space-2xs: 2px;
+  --psy-space-xs: 4px;
+  --psy-space-sm: 6px;
+  --psy-space-md: 8px;
+  --psy-space-lg: 10px;
+  --psy-space-xl: 12px;
+  --psy-space-2xl: 16px;
+  --psy-space-3xl: 20px;
+  --psy-space-4xl: 24px;
+
+  --psy-card-padding: 14px;
+  --psy-card-margin-bottom: 14px;
+  --psy-card-title-padding-bottom: 8px;
+  --psy-card-title-margin-bottom: 10px;
+
+  --psy-form-group-margin-bottom: 10px;
+  --psy-form-row-gap: 10px;
+  --psy-input-padding-y: 6px;
+  --psy-input-padding-x: 10px;
+  --psy-input-min-height: 38px;
+
+  --psy-btn-padding-y: 8px;
+  --psy-btn-padding-x: 14px;
+  --psy-btn-min-height: 38px;
+  --psy-btn-gap: 6px;
+  --psy-btn-sm-padding-y: 5px;
+  --psy-btn-sm-padding-x: 10px;
+  --psy-btn-sm-font-size: 12px;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji",
     "Segoe UI Emoji", "Segoe UI Symbol";
-  font-size: 15px;
+  font-size: var(--psy-font-size-body);
   line-height: 1.6;
   color: #1F2937;
   background-color: #F9FAFB;
@@ -66,13 +116,13 @@ ul, ol {
   top: 0;
   left: 0;
   right: 0;
-  height: 56px;
+  height: var(--psy-topbar-height);
   background-color: #FFFFFF;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
+  padding: 0 var(--psy-main-padding);
   z-index: 1000;
 }
 
@@ -92,9 +142,9 @@ ul, ol {
 .sidebar {
   position: fixed;
   left: 0;
-  top: 56px;
+  top: var(--psy-topbar-height);
   bottom: 0;
-  width: 260px;
+  width: var(--psy-sidebar-width);
   background-color: #FFFFFF;
   border-right: 1px solid #E5E7EB;
   overflow-y: auto;
@@ -154,43 +204,43 @@ ul, ol {
 
 /* --- Main content --- */
 .main-content {
-  margin-left: 260px;
-  margin-top: 56px;
-  padding: 32px;
+  margin-left: var(--psy-sidebar-width);
+  margin-top: var(--psy-topbar-height);
+  padding: var(--psy-main-padding);
   max-width: 1000px;
   background-color: #F9FAFB;
-  min-height: calc(100vh - 56px);
+  min-height: calc(100vh - var(--psy-topbar-height));
 }
 
 /* ----------------------------------------------------------
    3. TYPOGRAPHY
    ---------------------------------------------------------- */
 h1 {
-  font-size: 28px;
+  font-size: var(--psy-font-size-h1);
   font-weight: 700;
   color: #111827;
   line-height: 1.3;
-  margin-bottom: 8px;
+  margin-bottom: var(--psy-space-sm);
 }
 
 h2 {
-  font-size: 22px;
+  font-size: var(--psy-font-size-h2);
   font-weight: 600;
   color: #111827;
   line-height: 1.35;
-  margin-bottom: 4px;
+  margin-bottom: var(--psy-space-xs);
 }
 
 h3 {
-  font-size: 18px;
+  font-size: var(--psy-font-size-h3);
   font-weight: 600;
   color: #111827;
   line-height: 1.4;
-  margin-bottom: 4px;
+  margin-bottom: var(--psy-space-xs);
 }
 
 h4 {
-  font-size: 16px;
+  font-size: var(--psy-font-size-h4);
   font-weight: 600;
   color: #1F2937;
   line-height: 1.4;
@@ -205,17 +255,17 @@ p {
    ---------------------------------------------------------- */
 .card {
   background-color: #FFFFFF;
-  border-radius: 12px;
-  padding: 24px;
-  margin-bottom: 20px;
+  border-radius: var(--psy-radius-lg);
+  padding: var(--psy-card-padding);
+  margin-bottom: var(--psy-card-margin-bottom);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   border: 1px solid #E5E7EB;
 }
 
 .card-header {
   border-bottom: 1px solid #E5E7EB;
-  padding-bottom: 12px;
-  margin-bottom: 16px;
+  padding-bottom: var(--psy-card-title-padding-bottom);
+  margin-bottom: var(--psy-card-title-margin-bottom);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -232,12 +282,12 @@ p {
 
 .card-footer {
   border-top: 1px solid #E5E7EB;
-  padding-top: 12px;
-  margin-top: 16px;
+  padding-top: var(--psy-space-lg);
+  margin-top: var(--psy-space-2xl);
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--psy-space-md);
 }
 
 /* Danger card (suicide risk section) */
@@ -259,15 +309,15 @@ p {
    5. FORMS
    ---------------------------------------------------------- */
 .form-group {
-  margin-bottom: 16px;
+  margin-bottom: var(--psy-form-group-margin-bottom);
 }
 
 label {
   display: block;
   font-weight: 500;
-  margin-bottom: 4px;
+  margin-bottom: var(--psy-space-xs);
   color: #374151;
-  font-size: 14px;
+  font-size: var(--psy-font-size-label);
 }
 
 input[type="text"],
@@ -282,16 +332,18 @@ input[type="url"],
 select,
 textarea {
   width: 100%;
-  padding: 10px 12px;
+  padding: var(--psy-input-padding-y) var(--psy-input-padding-x);
   border: 1px solid #D1D5DB;
-  border-radius: 8px;
-  font-size: 15px;
+  border-radius: var(--psy-radius-md);
+  font-size: var(--psy-font-size-input);
   font-family: inherit;
   color: #1F2937;
   background-color: #FFFFFF;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
   appearance: none;
   -webkit-appearance: none;
+  min-height: var(--psy-input-min-height);
+  line-height: 1.45;
 }
 
 input[type="text"]:focus,
@@ -319,7 +371,7 @@ select {
 }
 
 textarea {
-  min-height: 80px;
+  min-height: 76px;
   resize: vertical;
   line-height: 1.5;
 }
@@ -327,13 +379,13 @@ textarea {
 .form-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 16px;
+  gap: var(--psy-form-row-gap);
 }
 
 input[type="checkbox"],
 input[type="radio"] {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   margin: 0;
   cursor: pointer;
   accent-color: #2563EB;
@@ -344,19 +396,19 @@ input[type="radio"] {
 .radio-group {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--psy-space-xs);
 }
 
 .checkbox-group label,
 .radio-group label {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 0;
-  min-height: 44px;
+  gap: var(--psy-space-md);
+  padding: var(--psy-space-sm) 0;
+  min-height: 32px;
   cursor: pointer;
   font-weight: 400;
-  font-size: 15px;
+  font-size: var(--psy-font-size-input);
 }
 
 .checkbox-group label:hover,
@@ -367,7 +419,7 @@ input[type="radio"] {
 .form-inline {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--psy-space-xl);
 }
 
 .form-group.has-error input,
@@ -395,11 +447,11 @@ input[type="radio"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 10px 20px;
-  border-radius: 8px;
+  gap: var(--psy-btn-gap);
+  padding: var(--psy-btn-padding-y) var(--psy-btn-padding-x);
+  border-radius: var(--psy-radius-md);
   font-weight: 500;
-  font-size: 15px;
+  font-size: var(--psy-font-size-btn);
   font-family: inherit;
   cursor: pointer;
   border: none;
@@ -407,6 +459,7 @@ input[type="radio"] {
   text-decoration: none;
   line-height: 1.4;
   user-select: none;
+  min-height: var(--psy-btn-min-height);
 }
 
 .btn:focus-visible {
@@ -487,19 +540,19 @@ input[type="radio"] {
 }
 
 .btn-sm {
-  padding: 6px 12px;
-  font-size: 13px;
-  border-radius: 6px;
+  padding: var(--psy-btn-sm-padding-y) var(--psy-btn-sm-padding-x);
+  font-size: var(--psy-btn-sm-font-size);
+  border-radius: var(--psy-radius-sm);
 }
 
 .btn-lg {
-  padding: 12px 28px;
+  padding: 10px 20px;
   font-size: 16px;
 }
 
 .btn-icon {
-  padding: 8px;
-  border-radius: 8px;
+  padding: 7px;
+  border-radius: var(--psy-radius-md);
   background: none;
   border: none;
   color: #6B7280;
@@ -508,8 +561,8 @@ input[type="radio"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 44px;
-  min-height: 44px;
+  min-width: 36px;
+  min-height: 36px;
 }
 
 .btn-icon:hover {
@@ -520,7 +573,7 @@ input[type="radio"] {
 .btn-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--psy-space-md);
 }
 
 /* ----------------------------------------------------------
@@ -815,13 +868,13 @@ tbody tr:hover {
    ---------------------------------------------------------- */
 .accordion {
   border: 1px solid #E5E7EB;
-  border-radius: 12px;
+  border-radius: var(--psy-radius-lg);
   overflow: hidden;
-  margin-bottom: 12px;
+  margin-bottom: var(--psy-space-xl);
 }
 
 .accordion-header {
-  padding: 16px;
+  padding: 12px;
   cursor: pointer;
   display: flex;
   justify-content: space-between;
@@ -829,7 +882,7 @@ tbody tr:hover {
   background-color: #FFFFFF;
   font-weight: 500;
   color: #1F2937;
-  font-size: 15px;
+  font-size: var(--psy-font-size-input);
   border: none;
   width: 100%;
   text-align: left;
@@ -871,7 +924,7 @@ tbody tr:hover {
 }
 
 .accordion-content-inner {
-  padding: 0 16px 16px;
+  padding: 0 12px 12px;
 }
 
 /* ----------------------------------------------------------

@@ -1,0 +1,117 @@
+# Cline Rules — PsychoApp
+
+## 1) Architecture rules
+- Build UI in a modular way using **Lit** Web Components (`psy-*` components).
+- Reusable UI elements (button, label, field, panel/card, checkbox, select, textarea, view header) must be implemented as base components in `js/components/`.
+- Prefer composition of base components over copy-pasting raw HTML blocks.
+- Migrate incrementally, view-by-view, to avoid breaking production behavior.
+
+## 2) Compatibility rules
+- Keep migration **non-breaking** with the existing app logic (`js/app.js`, `Patients`, `Interview`, `MSE`, `SOAP`, `Tests`, `Plan`, `Feedback`).
+- During migration, components should render in **Light DOM** (`createRenderRoot() { return this; }`) so existing CSS keeps working.
+- Keep current persistence/data flow (XLSX/file-system handling) unchanged unless explicitly requested.
+
+## 3) Styling rules
+- Reuse existing CSS classes (`btn`, `input`, `card`, `form-group`, etc.) to preserve UI/UX consistency.
+- Do not introduce visual redesign unless explicitly requested.
+
+## 4) Workflow rules
+- Start from base primitives, then compose larger view sections.
+- Keep each change small, reviewable, and easy to rollback.
+- Add concise migration notes in PR/task summaries (what was modularized and what remains).
+
+## 5) Interaction rules
+- When user provides new project or interaction rules, **update this `.clinerules` file in the same task**.
+- Treat `.clinerules` as the source of truth for ongoing collaboration conventions.
+
+## 6) Storage integration rules (Local + Google Drive)
+- Keep **dual-mode storage**: local folder/XLSX and Google Drive/Sheets must coexist without breaking existing flows.
+- Use `js/storage-provider.js` as the single abstraction point for storage operations used by app modules.
+- Keep existing patient data mapping (Dane, Wywiad, MSE, Sesje, Testy, Plan) consistent across local and Google Drive modes.
+- For Google auth in browser mode, use Google Identity Services with **client_id only** (never store `client_secret` in frontend code).
+- Preserve minimal-click UX: connect action from top bar and folder gate should support both local and Google Drive paths.
+
+## 7) Komunikacja i forma współpracy
+- W komunikacji z użytkownikiem używaj języka **polskiego**.
+- Przed implementacją dużej zmiany najpierw zbierz i podsumuj wymagania oraz pokaż zakres fazy.
+
+## 8) Aktualna priorytetyzacja PO (2026-04-04)
+1. **Wygląd i architektura UI** (najpierw):
+   - layout ma być bardziej kompaktowy (mniejsze odstępy, więcej treści na ekranie),
+   - wspierać sekcje typu **collapsible tree** (jak w Excelu) do odsłaniania/schowania detali,
+   - najpierw zebrać wymagania wizualne i architektoniczne.
+2. **Google Drive – docelowy model folderowy**:
+   - analogicznie do trybu lokalnego: folder główny (np. „pacjenci”),
+   - w nim folder per pacjent,
+   - w folderze pacjenta: Google Sheet + pozostałe załączniki/pliki.
+3. **Konstrukcja menu i rozmieszczenie funkcjonalności**:
+   - najpierw struktura nawigacji i ekranów,
+   - bez szczegółowej treści biznesowej.
+4. **Implementacja logiki biznesowej**:
+   - po zatwierdzeniu 1–3,
+   - etapami (np. funkcjonalności + dostosowanie arkuszy, potem kolejne moduły).
+
+## 9) Globalny kierunek UI (components-first)
+- Zanim rozpoczniemy przebudowę konkretnych widoków, najpierw projektujemy i wdrażamy **generyczne komponenty** oraz layouty reużywalne globalnie.
+- Każdy typ pola formularza ma mieć własny komponent (np. input/select/textarea/checkbox/radio/date/number/range), wywoływany na stronach przez przekazywanie parametrów.
+- Zmiany w stronach docelowych wykonujemy dopiero po zatwierdzeniu katalogu komponentów i ich zachowania w demie.
+
+## 10) Ustalenia PO 2026-04-17 (priorytet kompaktu i modularyzacji)
+- **Priorytet #1: kompaktowy, wysokiej jakości layout** — cel to gęstość informacji i profesjonalny wygląd aplikacji na standardowych rozdzielczościach (1366×768 i wyżej). Wszystkie decyzje podporządkowane temu.
+- **Pełna modularyzacja**: każdy komponent UI i każdy element layoutu (shell, topbar, sidebar, menu, szablony stron) musi być oddzielnym komponentem wywoływanym przez parametry — żadnego „surowego” HTML w widokach docelowych.
+- **Wizyty = dawne Sesje SOAP** (do ewentualnej unifikacji po akceptacji klientki na makiecie).
+- **Google Drive root**: konfigurowalny, **domyślna nazwa `pacjenci`**.
+- **Auto-collapse collapsible**: zwijaj po **kliknięciu poza sekcją** (nie na globalnym blur/focusout).
+- **Nowa wizyta (skrót)**: decyzja (drawer vs osobny widok) odłożona do makiety.
+- **Kolejność migracji widoków**: dowolna (decyzja developerska).
+
+## 12) Ustalenia PO 2026-04-18
+- **Korekta narracji UI**: wcześniejsze stwierdzenie „klientka ma słaby wzrok" jest nieaktualne. Aplikacja ma być po prostu **wysokiej jakości** (produktywność + profesjonalizm), a kompaktowy layout służy gęstości informacji, nie dostępności dla niedowidzących.
+- **Toasty — faza dev**: domyślnie `duration=0` (sticky, nie znikają same). Produkcyjne czasy trwania zostaną dobrane w Fazie 5 (hardening).
+- **Samodzielne zarządzanie zadaniami**: developer (Cline) dobiera granulację sub-PR-ów, kolejność i zakres — PO interesuje efekt końcowy.
+
+## 13) Ustalenia PO 2026-04-30 (CRUD inline + autozapis + runner testów)
+- **Formularze CRUD są widokami inline (route-based), nie modalami.** Dotyczy: Pacjent, Lek, Diagnoza, Zalecenie, Wizyta. Każdy klik „+ nowy"/„✎ edytuj" przechodzi na osobny route (`#/<sekcja>/new`, `#/<sekcja>/edit/:id`) renderowany w głównym obszarze, z breadcrumbem i przyciskiem „← Wróć do listy".
+- **Modal dozwolony tylko dla potwierdzeń** (`openConfirm` z `_modal.js`) — np. „Czy na pewno usunąć rekord?". Generyczna infrastruktura modali (`_modal.js`, `psy-modal`) zostaje w repo.
+- **Brak przycisku „Zapisz" w formularzach** — autozapis przy każdej zmianie (`input`/`change`, debounce ~400ms) bezpośrednio do `Store`. Wskaźnik statusu w topbarze (`saveStatus`).
+- **Wizyta — lazy create.** Wejście w `#/visit/form/new/:typeId` NIE tworzy od razu rekordu; rekord powstaje w `Store` dopiero przy pierwszym tknięciu pola, po czym hash przechodzi na `#/visit/form/:visitId` (stabilne ID).
+- **Status wizyty.** Każda wizyta ma flagę `closed: false|true`. Wizyta `closed=false` to **robocza/niezamknięta** (badge „Robocza"), `closed=true` to **zamknięta** (badge „Zamknięta"). Przycisk „🔒 Zamknij wizytę" / „🔓 Otwórz ponownie" w nagłówku formularza.
+- **Usuwanie wizyty** dozwolone TYLKO dla wizyt roboczych (`closed=false`). Zamknięta wizyta jest wpisem medycznym i nie może być skasowana z UI.
+- **Testy — runner.** Klik „+ Uruchom test" pokazuje inline picker (karty PHQ-9 / GAD-7) na tej samej stronie. Wybranie testu otwiera widok runnera (`#/tests/run/:code`), wszystkie pytania na jednym ekranie, po wypełnieniu — ekran wyniku z punktacją + interpretacją + zapisem do `Store`. MVP: **PHQ-9 + GAD-7** (okrojone wersje wystarczą — to nadal demo).
+- **Pliki modali kasowane:** `js/views/modal-patient.js`, `modal-med.js`, `modal-diagnosis.js`, `modal-recommendation.js`, `modal-visit-preview.js` zostają usunięte po refaktoringu (zastąpione przez `view-*-form.js` + routing). `_modal.js` (generyczny) zostaje.
+
+
+## 14) Ustalenia PO 2026-05-01 (UX listy / detali pacjenta + modale)
+- **Detale pacjenta** = osobny widok read-only pod `#/patients/detail/:id` (`view-patient-detail.js`), wzorowany na karcie ATOL (lewa kolumna: avatar + zakładki, prawa: karty „Pacjent" / „Dane kontaktowe + adresy" / „Powiązania z innymi kontami").
+- **Lista pacjentów** ma TYLKO dwie akcje:
+  1. klik w cały wiersz → otwarcie detali pacjenta (`#/patients/detail/:id`),
+  2. przycisk **„Wybierz"** → ustawia aktywnego pacjenta i przechodzi do `#/history`.
+  Z listy znikają przyciski ✎ Edytuj oraz 📦 Archiwizuj.
+- **Tag pacjenta w topbarze** jest klikalny — klik (poza przyciskiem „Zmień") otwiera detale. Przycisk „Zmień" zachowany — kieruje do `#/patients` (lista wyboru).
+- **Edycja i archiwizacja pacjenta** — wyłącznie z widoku detali pacjenta. Etykieta przycisku archiwizacji ma być pełna („📦 Archiwizuj pacjenta" / „↩ Przywróć z archiwum"), z `openConfirm`.
+- **Zakładka „Dokumenty"** w detalach pacjenta — w obecnej fazie STUB UI (struktura widoku gotowa pod podpięcie folderu). Pełna integracja (upload/listing plików) jest częścią Fazy 3 (PR-10/PR-11): docelowy model `pacjenci/{KOD}_{Imie}_{Nazwisko}/Sheet + załączniki` zarówno na Drive jak i lokalnie.
+- **Modale globalnie wycentrowane** — `.psy-modal-backdrop` używa `align-items: center` (nie flex-start), aby modale (`openConfirm`) pojawiały się na środku ekranu (poziomo i pionowo).
+
+## 15) Ustalenia PO 2026-05-01 cd. (paczka PR-G — wizyty / reset / pola formularzy)
+- **Status wizyty wycofany z UI.** Pole `closed` zostaje w danych jako legacy, ale UI (lista historii + nagłówek formularza) **nie pokazuje** badge'y „Robocza"/„Zamknięta". Każdą wizytę można skasować przyciskiem 🗑 w nagłówku formularza wizyty (`view-visit-form.js`). `Store.removeVisit` nie ma już guard'a `closed`.
+- **Lista wizyt — klik w wiersz = otwarcie wizyty.** Cały `<tr>` jest klikalny → `#/visit/form/:id`. Usunięto kolumnę „Status", filtr stanu, kolumnę akcji (✎ Edytuj / 🔍 Otwórz / 🗑) z wiersza. Tło wiersza: `paid=false` → żółtawe (`#FFFBEB`, klasa `.psy-row-unpaid`), `paid=true` → białe. Badge w kolumnie „Płatność" niezmieniony (zielony / żółty, klikalny).
+- **Edit = view jednego widoku.** Usunięto `viewVisitDetail` (route `#/visit/detail` + funkcję). Wszystkie kliknięcia w wizytę kierują do `#/visit/form/:id` — tam jest jedyne miejsce edycji i podglądu wizyty.
+- **Sekcja „Dane wizyty" — collapsible jak inne**, default closed. Gdy collapsed pokazuje **preview-line** w summary: `data · godzina · typ wizyty · czas trwania · osoby` (zamiast samej etykiety). Wszystkie sekcje formularza wizyty są default closed.
+- **Reset / odpięcie folderu (dev).** W Ustawieniach sekcja „Stan lokalnego folderu (dev)" ma 2 przyciski:
+  - **🔌 Odłącz folder & wczytaj demo** → `Store.resetAll()` (czyści localStorage, reseeduje z `_fake-data.js`).
+  - **🧹 Wyczyść wszystko (czysty start)** → `Store.wipeAll()` — czyści localStorage **bez** seed-a, symuluje pierwsze uruchomienie (puste listy).
+- **Pola w `view-recommendation-form.js`:** dodane `type` (single-select z `VISIT_DICT.REKOMENDACJE_TYP`), `dueWhen` (select z `VISIT_DICT.KONTROLNA_TERMIN`), `dueDate` (data konkretna), `linkedVisitId` (select wizyt pacjenta). Wszystkie literalnie z `VISIT_FORM_SPEC.md` §2.16/§3 + notatka PO o grupowaniu per wizyta.
+- **Pole w `view-diagnosis-form.js`:** dodane `linkedVisitId` (powiązanie z wizytą, na której rozpoznanie zostało postawione/odnowione). Źródło: `notatki.txt` linia „rozpoznania, leki itp są grupowane per wizyta".
+- **`view-med-form.js`:** odłożone na osobny PR — wymaga rozpoznania struktury formularza leku przed dodaniem `linkedVisitId`.
+
+## 16) Ustalenia PO 2026-05-01 cd. 2 (PR-H — pacjent: edit = view)
+- **Karta pacjenta = jedno miejsce (edit = view).** Analogicznie do wizyty, detale i edycja pacjenta to **ten sam widok** (`view-patient-detail.js`, route `#/patients/detail/:id`). Wszystkie pola w karcie „Pacjent" są **edytowalne inline** z autozapisem (debounce 400 ms). Brak przycisku „✎ Edytuj" w nagłówku.
+- **Akcje w nagłówku detali:** „← Wróć do listy", „📦 Archiwizuj pacjenta" / „↩ Przywróć z archiwum" (z `openConfirm`).
+- **Lazy create dla nowego pacjenta:** route `#/patients/new` ładuje ten sam widok z `id=null`. Pierwszy wpis w polu Imię/Nazwisko → `Store.addPatient(...)` + `history.replaceState` na `#/patients/detail/:newId`. Bez osobnego widoku `view-patient-form.js` (został jako legacy).
+- **Routing:** `#/patients/edit/:id` przekierowuje do `viewPatientDetail` (alias). `viewPatientForm` jest cienkim delegatem (do skasowania w kolejnym PR).
+- **Kontrolka edytowalna:** klasa `.psy-pdf__input` (patient detail form input) — spójna stylistycznie z `.psy-vf__input` (formularz wizyty).
+
+## 11) Dokumentacja planu
+- Pełny, wykonawczy plan wszystkich faz znajduje się w `docs/IMPLEMENTATION_PLAN.md`.
+- Każdy chat/dev przed rozpoczęciem pracy czyta: `.clinerules` → `docs/PO_PRIORYTETY_2026-04-04.md` → `docs/IMPLEMENTATION_PLAN.md` → `components-demo.html`.
+- Postęp realizacji śledzony jest w sekcji 8 `docs/IMPLEMENTATION_PLAN.md` (checklisty) i w liście PR (sekcja 4).

@@ -60,7 +60,7 @@ const App = {
             this.updateSaveIndicator('idle');
 
             // Lock app while checking folder connection
-            this._setFolderGateVisible(true, 'Sprawdzanie połączenia z folderem pacjentów...');
+            this._setFolderGateVisible(true, 'Sprawdzanie połączenia z magazynem danych...');
 
             // Storage + startup loading
             const ready = await this._initStorageAndLoadPatients();
@@ -72,7 +72,7 @@ const App = {
             } else {
                 this.clearCurrentPatient({ persist: false });
                 this.showView('view-patients', { persist: false });
-                if (this._isFolderPinningSupported()) {
+                if (this._isAnyStorageConnectSupported()) {
                     this._setFolderGateVisible(true, this._getFolderGateDefaultMessage());
                 } else {
                     this._setFolderGateVisible(false);
@@ -289,29 +289,89 @@ const App = {
     _bindStorageControls() {
         const btnConnect = document.getElementById('btn-connect-folder');
         const btnConnectGate = document.getElementById('btn-connect-folder-gate');
+        const btnConnectGdrive = document.getElementById('btn-connect-gdrive');
+        const btnConnectGdriveGate = document.getElementById('btn-connect-gdrive-gate');
 
-        const handler = async () => {
+        const localHandler = async () => {
             await this._connectFolderAndReload();
         };
+        const gdriveHandler = async () => {
+            await this._connectGoogleDriveAndReload();
+        };
 
-        if (btnConnect) btnConnect.addEventListener('click', handler);
-        if (btnConnectGate) btnConnectGate.addEventListener('click', handler);
+        if (btnConnect) btnConnect.addEventListener('click', localHandler);
+        if (btnConnectGate) btnConnectGate.addEventListener('click', localHandler);
+        if (btnConnectGdrive) btnConnectGdrive.addEventListener('click', gdriveHandler);
+        if (btnConnectGdriveGate) btnConnectGdriveGate.addEventListener('click', gdriveHandler);
     },
 
     _isFolderPinningSupported() {
+        const localHandler = (typeof LocalXlsxHandler !== 'undefined') ? LocalXlsxHandler : null;
+        return !!(localHandler
+            && typeof localHandler.isFileSystemAccessSupported === 'function'
+            && localHandler.isFileSystemAccessSupported());
+    },
+
+    _isGoogleDriveSupported() {
         return typeof XlsxHandler !== 'undefined'
-            && typeof XlsxHandler.isFileSystemAccessSupported === 'function'
-            && !!XlsxHandler.isFileSystemAccessSupported();
+            && typeof XlsxHandler.isGoogleDriveSupported === 'function'
+            && !!XlsxHandler.isGoogleDriveSupported();
+    },
+
+    _isAnyStorageConnectSupported() {
+        return this._isFolderPinningSupported() || this._isGoogleDriveSupported();
+    },
+
+    _getActiveStorageMode() {
+        if (typeof XlsxHandler !== 'undefined' && typeof XlsxHandler.getActiveMode === 'function') {
+            return XlsxHandler.getActiveMode() === 'gdrive' ? 'gdrive' : 'local';
+        }
+
+        if (typeof AppConfig !== 'undefined' && typeof AppConfig.getStorageMode === 'function') {
+            return AppConfig.getStorageMode() === 'gdrive' ? 'gdrive' : 'local';
+        }
+
+        return 'local';
     },
 
     _updateStorageActionsUi() {
         const btnConnect = document.getElementById('btn-connect-folder');
         const btnConnectGate = document.getElementById('btn-connect-folder-gate');
+        const btnConnectGdrive = document.getElementById('btn-connect-gdrive');
+        const btnConnectGdriveGate = document.getElementById('btn-connect-gdrive-gate');
+        const mode = this._getActiveStorageMode();
+        const localSupported = this._isFolderPinningSupported();
+        const gdriveSupported = this._isGoogleDriveSupported();
 
-        if (this._isFolderPinningSupported()) {
+        if (btnConnectGdrive) {
+            btnConnectGdrive.style.display = gdriveSupported ? '' : 'none';
+            if (gdriveSupported) {
+                btnConnectGdrive.textContent = '☁️ Połącz Google Drive';
+                btnConnectGdrive.title = 'Połącz konto Google Drive';
+            }
+        }
+
+        if (btnConnectGdriveGate) {
+            btnConnectGdriveGate.style.display = gdriveSupported ? '' : 'none';
+            if (gdriveSupported) {
+                btnConnectGdriveGate.textContent = '☁️ Połącz Google Drive';
+                btnConnectGdriveGate.title = 'Połącz konto Google Drive';
+            }
+        }
+
+        if (btnConnect) {
+            btnConnect.style.display = '';
+        }
+        if (btnConnectGate) {
+            btnConnectGate.style.display = '';
+        }
+
+        if (localSupported) {
             if (btnConnectGate) btnConnectGate.textContent = '📁 Połącz folder pacjentów';
             if (this._folderGateState && this._folderGateState.title) {
-                this._folderGateState.title.textContent = 'Aby rozpocząć pracę, przypnij folder pacjentów';
+                this._folderGateState.title.textContent = (mode === 'gdrive' && gdriveSupported)
+                    ? 'Aby rozpocząć pracę, połącz Google Drive'
+                    : 'Aby rozpocząć pracę, przypnij folder pacjentów';
             }
             this._updateConnectedFolderLabel();
             return;
@@ -327,8 +387,12 @@ const App = {
         }
 
         if (this._folderGateState && this._folderGateState.title) {
-            this._folderGateState.title.textContent = 'Tryb mobilny: importuj plik pacjenta';
+            this._folderGateState.title.textContent = gdriveSupported
+                ? 'Aby rozpocząć pracę, połącz Google Drive lub importuj plik pacjenta'
+                : 'Tryb mobilny: importuj plik pacjenta';
         }
+
+        this._updateConnectedFolderLabel();
     },
 
     // ---- Storage ----
@@ -350,14 +414,11 @@ const App = {
             }
         };
 
-        if (!this._isFolderPinningSupported()) {
-            this._persistFolderState(false);
-            this.updateSaveIndicator('idle');
-            this._updateStorageActionsUi();
-            return false;
+        let mode = this._getActiveStorageMode();
+        if (mode === 'gdrive' && !this._isGoogleDriveSupported() && this._isFolderPinningSupported()) {
+            mode = 'local';
         }
-
-        const ready = await XlsxHandler.init({ interactive: false });
+        const ready = await XlsxHandler.init({ interactive: false, mode });
         if (!ready) {
             this._persistFolderState(false);
             this.updateSaveIndicator('idle');
@@ -378,12 +439,42 @@ const App = {
             return await this._importPatientWithoutPinnedFolder();
         }
 
-        const ready = await XlsxHandler.init({ interactive: true });
+        const ready = typeof XlsxHandler.switchMode === 'function'
+            ? await XlsxHandler.switchMode('local', { interactive: true })
+            : await XlsxHandler.init({ interactive: true, mode: 'local' });
         if (!ready) {
             if (!this._isStorageReady()) {
                 this._persistFolderState(false);
                 this._setFolderGateVisible(true, this._getFolderGateDefaultMessage());
             }
+            return false;
+        }
+
+        await this._loadPatientsIntoState();
+        this._persistFolderState(true);
+
+        this.clearCurrentPatient({ persist: false });
+        this.showView('view-patients', { persist: false });
+
+        this._setFolderGateVisible(false);
+        this._updateStorageActionsUi();
+        return true;
+    },
+
+    async _connectGoogleDriveAndReload() {
+        if (typeof XlsxHandler === 'undefined') return false;
+        if (!this._isGoogleDriveSupported()) return false;
+
+        const ready = typeof XlsxHandler.switchMode === 'function'
+            ? await XlsxHandler.switchMode('gdrive', { interactive: true })
+            : await XlsxHandler.init({ interactive: true, mode: 'gdrive' });
+
+        if (!ready) {
+            if (!this._isStorageReady()) {
+                this._persistFolderState(false);
+                this._setFolderGateVisible(true, this._getFolderGateDefaultMessage());
+            }
+            this._updateStorageActionsUi();
             return false;
         }
 
@@ -466,7 +557,8 @@ const App = {
 
         if (!ready || typeof XlsxHandler === 'undefined' || typeof XlsxHandler.getStorageState !== 'function') {
             AppConfig.setFolderState({
-                folderPinned: false
+                folderPinned: false,
+                storageMode: this._getActiveStorageMode()
             });
             this._updateConnectedFolderLabel();
             return;
@@ -478,32 +570,56 @@ const App = {
 
     _updateConnectedFolderLabel() {
         const btnConnect = document.getElementById('btn-connect-folder');
-        if (!btnConnect) return;
+        const btnConnectGdrive = document.getElementById('btn-connect-gdrive');
 
-        if (!this._isFolderPinningSupported()) {
-            btnConnect.textContent = '📥 Importuj pacjenta (.xlsx)';
-            btnConnect.title = 'Importuj plik pacjenta XLSX (tryb mobilny)';
-            return;
+        const mode = this._getActiveStorageMode();
+
+        if (btnConnect) {
+            if (!this._isFolderPinningSupported()) {
+                btnConnect.textContent = '📥 Importuj pacjenta (.xlsx)';
+                btnConnect.title = 'Importuj plik pacjenta XLSX (tryb mobilny)';
+            } else {
+                let localName = '';
+                if (mode === 'local' && this._isStorageReady() && typeof XlsxHandler !== 'undefined' && typeof XlsxHandler.getStorageState === 'function') {
+                    const state = XlsxHandler.getStorageState() || {};
+                    localName = String(state.dataFolderName || state.rootFolderName || '').trim();
+                }
+
+                if (!localName && mode === 'local' && typeof AppConfig !== 'undefined' && typeof AppConfig.getFolderSummary === 'function') {
+                    localName = String(AppConfig.getFolderSummary() || '').trim();
+                }
+
+                if (localName) {
+                    btnConnect.textContent = '📁 Folder: ' + localName;
+                    btnConnect.title = 'Podłączony folder: ' + localName;
+                } else {
+                    btnConnect.textContent = '📁 Połącz folder pacjentów';
+                    btnConnect.title = 'Połącz folder pacjentów';
+                }
+            }
         }
 
-        let connectedName = '';
-        if (this._isStorageReady() && typeof XlsxHandler !== 'undefined' && typeof XlsxHandler.getStorageState === 'function') {
-            const state = XlsxHandler.getStorageState() || {};
-            connectedName = String(state.dataFolderName || state.rootFolderName || '').trim();
-        }
+        if (btnConnectGdrive && this._isGoogleDriveSupported()) {
+            let gdriveName = '';
 
-        if (!connectedName && typeof AppConfig !== 'undefined' && typeof AppConfig.getFolderSummary === 'function') {
-            connectedName = String(AppConfig.getFolderSummary() || '').trim();
-        }
+            if (mode === 'gdrive' && this._isStorageReady() && typeof XlsxHandler !== 'undefined' && typeof XlsxHandler.getStorageState === 'function') {
+                const state = XlsxHandler.getStorageState() || {};
+                gdriveName = String(state.dataFolderName || '').trim();
+            }
 
-        if (connectedName) {
-            btnConnect.textContent = '📁 Folder: ' + connectedName;
-            btnConnect.title = 'Podłączony folder: ' + connectedName;
-            return;
-        }
+            if (!gdriveName && typeof AppConfig !== 'undefined' && typeof AppConfig.getGoogleDriveState === 'function') {
+                const gdState = AppConfig.getGoogleDriveState() || {};
+                gdriveName = String(gdState.folderName || '').trim();
+            }
 
-        btnConnect.textContent = '📁 Połącz folder pacjentów';
-        btnConnect.title = 'Połącz folder pacjentów';
+            if (gdriveName && mode === 'gdrive') {
+                btnConnectGdrive.textContent = '☁️ Google Drive: ' + gdriveName;
+                btnConnectGdrive.title = 'Podłączony Google Drive: ' + gdriveName;
+            } else {
+                btnConnectGdrive.textContent = '☁️ Połącz Google Drive';
+                btnConnectGdrive.title = 'Połącz konto Google Drive';
+            }
+        }
     },
 
     _setupFolderGate() {
@@ -511,18 +627,20 @@ const App = {
         const title = container ? container.querySelector('.folder-gate__title') : null;
         const status = document.getElementById('folder-gate-status');
         const actionBtn = document.getElementById('btn-connect-folder-gate');
+        const actionBtnGdrive = document.getElementById('btn-connect-gdrive-gate');
 
         this._folderGateState = {
             container,
             title,
             status,
             actionBtn,
+            actionBtnGdrive,
             visible: false
         };
     },
 
     _setFolderGateVisible(visible, message) {
-        if (!this._isFolderPinningSupported()) {
+        if (!this._isAnyStorageConnectSupported()) {
             visible = false;
         }
 
@@ -544,7 +662,23 @@ const App = {
     },
 
     _getFolderGateDefaultMessage() {
+        const mode = this._getActiveStorageMode();
+
+        if (mode === 'gdrive' && this._isGoogleDriveSupported()) {
+            if (typeof AppConfig !== 'undefined' && typeof AppConfig.getGoogleDriveState === 'function') {
+                const gd = AppConfig.getGoogleDriveState() || {};
+                const folderName = String(gd.folderName || '').trim();
+                if (folderName) {
+                    return 'Brak dostępu do Google Drive (' + folderName + '). Połącz konto Google Drive, aby kontynuować.';
+                }
+            }
+            return 'Brak połączenia z Google Drive. Połącz konto Google Drive, aby kontynuować.';
+        }
+
         if (!this._isFolderPinningSupported()) {
+            if (this._isGoogleDriveSupported()) {
+                return 'Połącz Google Drive lub użyj importu pliku .xlsx, aby rozpocząć.';
+            }
             return 'Tryb mobilny: użyj przycisku importu pliku .xlsx, aby rozpocząć bez przypinania folderu.';
         }
 

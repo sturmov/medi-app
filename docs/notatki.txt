@@ -1,0 +1,51 @@
+nowa wizyta jako element menu - skrocona wersja formularz
+
+wywiad kliniczny - to ma byc pierwsza wizyta
+
+lek wymieniony w wizycie , w notatkach - ma wskoczyc w leki
+
+wizyta:
+wywiad
+
+jak klikam nowa wizyte pierwszego wywiadu - dane pacjenta zawsze widac 
+szare zawsze widoczne - formularz od Magdy
+
+klika w w menu aktualne objawy i klika i otwieraja sie detale - wybory wielokrotnego wyboru + komentarz - jesli nie klika to jest zwykly komentarz (pole)
+
+przy defocus - zamykaj - jak focus na czesci to pozostaje otwarta
+
+AI - ulepsz klinicznie tekst diagnozy
+
+inny odcien pol, zaznaczenie innego typu pola innym kolorem lub odcieniem 
+
+bardziej kompaktowy layout, aby wiecej widac bylo na ekranie
+
+
+
+rozpoznania, leki itp sa grupowane per wizyta na podstawie wywiadu wizyty
+
+podgląd załącznikow
+
+intgracja z goodle - kalendarz
+
+podglad zalacznikow - bez otwierania pliku aby sie pojawialy zdjecia, pliki tekstowe, word albo pdf
+jak sa zalaczniki na ziwycie
+
+jesli da sie cos komentowac pod podgladem zalacznika to byloby spoko
+
+jesli mozna to nalezaoby 
+
+tam gdzie sie da zrobic 2-3 kolumny np z wyborami lub checkboxami to spoko 
+
+arkusze na androida to samo co excel? - lub dokumenty androida (i mozna od razu cos na appla)
+
+
+podpowiedzi jak uzupelniac - fajnie byloby 
+
+
+formularz
+
+
+
+
+

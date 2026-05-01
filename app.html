@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PsychoApp — Dokumentacja Psychologiczna</title>
+    <link rel="stylesheet" href="css/tokens.css">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/compat.css">
+    <link rel="stylesheet" href="css/app-new.css">
+</head>
+<body class="psy-app-body">
+
+<div class="psy-new-shell" id="psy-new-shell">
+
+    <!-- ===== TOPBAR ===== -->
+    <header class="psy-new-topbar">
+        <div class="psy-new-topbar__left">
+            <button
+                type="button"
+                class="psy-new-topbar__menu-toggle"
+                id="psy-new-menu-toggle"
+                aria-label="Przełącz menu"
+            >☰</button>
+            <div class="psy-new-brand">PsychoApp</div>
+        </div>
+
+        <div class="psy-new-topbar__center" id="psy-new-topbar-patient">
+            <!-- tu trafi pasek pacjenta po wyborze -->
+        </div>
+
+        <div class="psy-new-topbar__right">
+            <button
+                type="button"
+                class="btn btn--secondary btn--sm psy-new-topbar__btn"
+                id="btn-connect-folder"
+                title="Połącz folder pacjentów (lokalny)"
+            >📁 Folder pacjentów</button>
+
+            <button
+                type="button"
+                class="btn btn--secondary btn--sm psy-new-topbar__btn"
+                id="btn-connect-drive"
+                title="Połącz Google Drive"
+            >☁️ Google Drive</button>
+
+            <div class="psy-new-topbar__save" id="save-indicator">💾 Autozapis</div>
+
+            <button
+                type="button"
+                class="btn btn--secondary btn--sm psy-new-topbar__btn psy-new-topbar__btn--icon"
+                id="btn-settings"
+                title="Ustawienia"
+            >⚙️</button>
+        </div>
+    </header>
+
+    <!-- ===== SIDEBAR (6 pozycji wg rysunku Magdy) ===== -->
+    <aside class="psy-new-sidebar" id="psy-new-sidebar">
+        <!-- wypełniane przez AppController._renderSidebar() -->
+    </aside>
+
+    <!-- ===== MAIN CONTENT ===== -->
+    <main class="psy-new-main" id="psy-new-main">
+        <!-- wypełniane przez AppController._renderView() -->
+    </main>
+
+</div>
+
+<!-- Globalny kontener toastów -->
+<psy-toast-container id="psy-app-toasts" position="top-right"></psy-toast-container>
+
+<noscript>
+    <div style="padding:40px;text-align:center;font-family:sans-serif;">
+        <h1>PsychoApp</h1>
+        <p>Ta aplikacja wymaga włączonego JavaScript.</p>
+    </div>
+</noscript>
+
+<script type="module" src="js/app-new.js"></script>
+
+</body>
+</html>

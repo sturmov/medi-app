@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PsychoApp – Dokumentacja Psychologiczna</title>
+    <link rel="stylesheet" href="css/tokens.css">
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/compat.css">
     <link rel="stylesheet" href="css/feedback.css">
@@ -25,6 +26,7 @@
     </div>
     <div class="top-bar__actions">
         <button type="button" class="btn btn--secondary btn--sm" id="btn-connect-folder">📁 Połącz folder pacjentów</button>
+        <button type="button" class="btn btn--secondary btn--sm" id="btn-connect-gdrive">☁️ Połącz Google Drive</button>
         <button type="button" class="btn btn--secondary btn--sm" id="btn-toggle-feedback" title="Włącz tryb recenzji">💬 Tryb recenzji</button>
         <div class="top-bar__save-indicator" id="save-indicator">💾 Autozapis</div>
     </div>
@@ -34,7 +36,10 @@
     <div class="folder-gate__card">
         <h2 class="folder-gate__title">Aby rozpocząć pracę, przypnij folder pacjentów</h2>
         <p class="folder-gate__text" id="folder-gate-status">Brak przypiętego folderu z danymi.</p>
-        <button type="button" class="btn btn--primary" id="btn-connect-folder-gate">📁 Połącz folder pacjentów</button>
+        <div class="form-actions">
+            <button type="button" class="btn btn--primary" id="btn-connect-folder-gate">📁 Połącz folder pacjentów</button>
+            <button type="button" class="btn btn--secondary" id="btn-connect-gdrive-gate">☁️ Połącz Google Drive</button>
+        </div>
     </div>
 </div>
 
@@ -1991,8 +1996,11 @@
 
 <!-- ===== SCRIPTS ===== -->
 <script src="lib/xlsx-js-style.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="js/config.js"></script>
 <script src="js/xlsx-handler.js"></script>
+<script src="js/gdrive-handler.js"></script>
+<script src="js/storage-provider.js"></script>
 <script src="js/patients.js"></script>
 <script src="js/interview.js"></script>
 <script src="js/mse.js"></script>
@@ -2002,6 +2010,22 @@
 <script src="js/plan.js"></script>
 <script src="js/feedback.js"></script>
 <script src="js/app.js"></script>
+<script>
+    // Optional Lit components bootstrap (non-blocking, non-breaking)
+    window.PsyComponents = window.PsyComponents || {};
+    window.PsyComponents.load = function () {
+        if (!('customElements' in window)) return Promise.resolve(false);
+
+        return import('./js/components/index.js')
+            .then(function () { return true; })
+            .catch(function (error) {
+                console.warn('PsychoApp: komponenty Lit nie zostały załadowane.', error);
+                return false;
+            });
+    };
+
+    window.PsyComponents.load();
+</script>
 
 </body>
 </html>
