@@ -81,9 +81,26 @@ function el(tag, props = {}, children = []) {
    Każdy honoruje `initialValue` jeśli jest dostępne w `raw`.
    -------------------------------------------------------------------------- */
 
+/* Auto-grow helper — dopasowuje wysokość textarea-y do zawartości.
+   Wywołać po wstrzyknięciu w DOM oraz po każdym `input`. */
+function _autoGrowTextarea(ta) {
+    if (!ta || !ta.classList || !ta.classList.contains('psy-vf__textarea--autogrow')) return;
+    // Reset, żeby `scrollHeight` odzwierciedlał aktualną zawartość, nie poprzednią wysokość.
+    ta.style.height = 'auto';
+    ta.style.height = (ta.scrollHeight + 2) + 'px';   // +2 px na border
+}
+
 function renderTextarea(name, initial = '', opts = {}) {
+    // Domyślnie WSZYSTKIE textarea w formularzu wizyty rosną z zawartością
+    // (PR-J: notatki/opisy „muszą być widoczne w całości"). Wyjątek: gdy
+    // wywołujący jawnie poda `autoGrow: false` (np. 1-linijkowy komentarz
+    // sekcji w summary collapsible — narzędzie dev).
+    const autoGrow = (opts.autoGrow !== false);
+    const klass = ['psy-vf__textarea'];
+    if (opts.compact) klass.push('psy-vf__textarea--compact');
+    if (autoGrow)     klass.push('psy-vf__textarea--autogrow');
     const ta = el('textarea', {
-        class: 'psy-vf__textarea ' + (opts.compact ? 'psy-vf__textarea--compact' : ''),
+        class: klass.join(' '),
         name,
         rows: opts.rows || 2,
         placeholder: opts.placeholder || '',
@@ -92,6 +109,7 @@ function renderTextarea(name, initial = '', opts = {}) {
     ta.value = initial == null ? '' : initial;
     return ta;
 }
+
 
 function renderInput(type, name, initial = '', opts = {}) {
     const attrs = { type, name, class: 'psy-vf__input', value: initial == null ? '' : initial };
@@ -365,11 +383,12 @@ function renderUzywkiSpecial(sectionId, raw) {
                     intVal
                 ),
                 el('textarea', {
-                    class: 'psy-vf__textarea psy-vf__textarea--compact',
+                    class: 'psy-vf__textarea psy-vf__textarea--compact psy-vf__textarea--autogrow',
                     name: noteName,
                     rows: 1,
                     placeholder: 'uwagi…'
                 }, [noteVal])
+
             ])
         ]);
         wrap.appendChild(row);
@@ -552,11 +571,15 @@ function renderSection(section, raw, ctx = {}) {
             onclick: (e) => e.stopPropagation()
         }, [
             el('label', { class: 'psy-vf__summary-comment-label' }, ['Komentarz:']),
+            // narzędzie dev — 1-linijkowy szybki komentarz w summary; bez auto-grow,
+            // żeby nie rozjechało układu summary collapsible.
             renderTextarea(commentName, comment, {
                 compact: true,
                 rows: 1,
+                autoGrow: false,
                 placeholder: 'krótki komentarz do rozdziału…'
             })
+
         ])
         : null;
 
@@ -870,5 +893,39 @@ export function renderVisitForm(opts = {}) {
     body.addEventListener('input', scheduleAutosave);
     body.addEventListener('change', scheduleAutosave);
 
+    /* ------------------ Auto-grow textarea (PR-J) -----
+     * Notatki/opisy w wizycie muszą skalować się do zawartości, żeby cały
+     * tekst był widoczny bez ręcznego ciągnięcia rogiem. Wyjątki: 1-linijkowy
+     * komentarz w summary (autoGrow:false). */
+    function _growAllAutoTextareas(scope) {
+        (scope || body).querySelectorAll('.psy-vf__textarea--autogrow')
+            .forEach(_autoGrowTextarea);
+    }
+
+    // (a) Initial grow po wstrzyknięciu w DOM (root jest mountowany przez
+    //     AppController._renderView; rAF wystarczy, bo getComputedStyle
+    //     zwraca prawidłowe rozmiary po pierwszym layoutcie).
+    requestAnimationFrame(() => _growAllAutoTextareas());
+
+    // (b) Live grow podczas pisania — bez czekania na autosave (400 ms).
+    body.addEventListener('input', (ev) => {
+        const t = ev.target;
+        if (t && t.tagName === 'TEXTAREA' &&
+            t.classList && t.classList.contains('psy-vf__textarea--autogrow')) {
+            _autoGrowTextarea(t);
+        }
+    });
+
+    // (c) Re-grow po rozwinięciu collapsible — gdy <details> jest closed,
+    //     scrollHeight=0, więc trzeba przeliczyć po otwarciu.
+    //     `toggle` NIE bubbles, dlatego listener na każdym <details>.
+    root.querySelectorAll('details').forEach((d) => {
+        d.addEventListener('toggle', () => {
+            if (d.open) _growAllAutoTextareas(d);
+        });
+    });
+
     return root;
 }
+
+

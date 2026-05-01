@@ -1406,7 +1406,16 @@ body.psy-modal-open {
     min-height: 28px;
 }
 
+/* PR-J: auto-grow textarea — wysokość ustawiana przez JS (`element.style.height`),
+   więc wyłączamy ręczny resize i ukrywamy wewnętrzny scrollbar (height jest
+   zawsze równy scrollHeight zawartości). */
+.psy-vf__textarea--autogrow {
+    resize: none;
+    overflow-y: hidden;
+}
+
 /* Radio / Checkbox groups — inline */
+
 .psy-vf__radio-group,
 .psy-vf__checkbox-group {
     display: flex;
