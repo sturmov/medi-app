@@ -234,6 +234,36 @@ function _seedFromFake() {
     state.tests           = FAKE_TESTS.map((t) => ({ ...t }));
 }
 
+/**
+ * Po wczytaniu danych (z folderu lub seed) ustaw `state.currentPatient`:
+ *   1) próba z `LS_KEY_CURRENT` (ostatnio wybrany w tej przeglądarce),
+ *   2) fallback — pierwszy nie-zarchiwizowany pacjent z listy,
+ *   3) gdy lista pusta — `null` (sidebar zostanie greyed-out, OK).
+ *
+ * Naprawia regresję PR-I, gdzie po `connectLocalFolder` `currentPatient` był
+ * twardo zerowany, przez co sidebar (Historia/Leki/itd.) zostawał greyed-out
+ * mimo że w folderze byli pacjenci.
+ */
+function _restoreCurrentPatient() {
+    if (!Array.isArray(state.patients) || state.patients.length === 0) {
+        state.currentPatient = null;
+        return;
+    }
+    let restored = null;
+    try {
+        const id = window.localStorage.getItem(LS_KEY_CURRENT);
+        if (id) restored = state.patients.find((p) => p.id === id) || null;
+    } catch (_) { /* ignore */ }
+    if (!restored) {
+        restored = state.patients.find((p) => !p.archived) || state.patients[0] || null;
+    }
+    state.currentPatient = restored;
+    try {
+        if (restored) window.localStorage.setItem(LS_KEY_CURRENT, restored.id);
+    } catch (_) { /* ignore */ }
+}
+
+
 function _init() {
     const loaded = _loadFromStorage();
     if (!loaded) {
@@ -711,7 +741,10 @@ export const Store = {
                         state.diagnoses       = Array.isArray(data.diagnoses)       ? data.diagnoses       : [];
                         state.recommendations = Array.isArray(data.recommendations) ? data.recommendations : [];
                         state.tests           = Array.isArray(data.tests)           ? data.tests           : [];
-                        state.currentPatient  = null;
+                        // PR-K: po wczytaniu danych przywróć ostatnio wybranego pacjenta
+                        // (lub auto-wybierz pierwszego nie-zarchiwizowanego), żeby
+                        // sidebar nie był greyed-out po pierwszym podpięciu folderu.
+                        _restoreCurrentPatient();
                         _persist();   // Zaktualizuj localStorage cache
                         emit();
                         return { ok: true };
@@ -727,10 +760,11 @@ export const Store = {
             state.diagnoses = [];
             state.recommendations = [];
             state.tests = [];
-            state.currentPatient = null;
+            state.currentPatient = null;   // pusta lista — nic do wyboru
             _persist();   // wymusi zapis localStorage + folder sync
             emit();
             return { ok: true };
+
         } catch (e) {
             // User anulował picker → AbortError. Inne błędy logujemy.
             if (e && (e.name === 'AbortError' || e.message === 'The user aborted a request.')) {
@@ -812,8 +846,12 @@ export const Store = {
                     console.warn('[restoreLocalFolder] data.json malformed', e);
                 }
             }
+            // PR-K: po restore z poprzedniej sesji wybierz domyślnego pacjenta
+            // (jak po `connectLocalFolder`), żeby sidebar był aktywny od razu.
+            _restoreCurrentPatient();
             emit();
             return true;
+
         } catch (e) {
             console.warn('[restoreLocalFolder]', e);
             return false;
@@ -856,6 +894,8 @@ export const Store = {
                 }
             } catch (_) { /* */ }
         }
+        // PR-K: po reauthorize też przywróć wybór pacjenta
+        _restoreCurrentPatient();
         _persist();
         emit();
         return { ok: true };
@@ -863,6 +903,7 @@ export const Store = {
 
     /**
      * Odepnij folder. Handle z IndexedDB usunięty. Cache w localStorage zostaje.
+
      * Po tej operacji aplikacja działa nadal, ale w trybie tylko-localStorage.
      */
     async disconnectLocalFolder() {
