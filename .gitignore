@@ -18,11 +18,21 @@ docs/_extracted_temp.md
 
 # Lokalne dane testowe pacjentów (XLSX z pseudonimami)
 pacjent/
+pacjenci/
+
+# Zdjęcia z notatkami klientki (referencje do REQUIREMENTS, offline-only)
+docs/z*.jpg
+
+# Artefakty z lokalnych testów / node-runnera (sample XLSX, lock files Excel)
+tools/test_output_*.xlsx
+~$*
 
 # Build / vendor (jeśli kiedyś dodamy)
 node_modules/
 dist/
 build/
+package.json
+package-lock.json
 
 # OS
 .DS_Store

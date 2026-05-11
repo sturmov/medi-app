@@ -168,3 +168,174 @@ export async function writeTextFile(dirHandle, fileName, content) {
         return false;
     }
 }
+
+
+// ============================================================================
+// PR-K2 (2026-05-11) — Binary I/O + subfoldery
+// Wymagane dla pliku `pacjent.xlsx` (binary XLSX) + struktury folderów
+// `pacjenci/{KOD}_{Naz}_{Imię}/pacjent.xlsx` + `dokumenty/` per pacjent.
+// ============================================================================
+
+/**
+ * Czyta plik binarny z folderu.
+ *
+ * @param {FileSystemDirectoryHandle} dirHandle
+ * @param {string} fileName
+ * @returns {Promise<ArrayBuffer|null>}  null gdy plik nie istnieje
+ */
+export async function readBinaryFile(dirHandle, fileName) {
+    try {
+        const fileHandle = await dirHandle.getFileHandle(fileName, { create: false });
+        const file = await fileHandle.getFile();
+        return await file.arrayBuffer();
+    } catch (e) {
+        if (e && e.name === 'NotFoundError') return null;
+        console.warn('[folder-handle.readBinaryFile]', fileName, e);
+        return null;
+    }
+}
+
+/**
+ * Zapisuje bajty do pliku binarnego (tworzy gdy nie istnieje, nadpisuje gdy istnieje).
+ * Atomic write w File System Access API nie jest natywnie wspierany w przeglądarce
+ * (brak rename), więc używamy direct overwrite z `keepExistingData: false`.
+ * Dla jednoosobowej apki bez współbieżności to wystarcza — ryzyko utraty danych
+ * przy crashu w trakcie zapisu jest minimalne.
+ *
+ * @param {FileSystemDirectoryHandle} dirHandle
+ * @param {string} fileName
+ * @param {ArrayBuffer|Uint8Array} bytes
+ * @returns {Promise<boolean>}
+ */
+export async function writeBinaryFile(dirHandle, fileName, bytes) {
+    try {
+        const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
+        const writable = await fileHandle.createWritable({ keepExistingData: false });
+        // `bytes` może być ArrayBuffer lub Uint8Array — WritableStream akceptuje oba
+        await writable.write(bytes);
+        await writable.close();
+        return true;
+    } catch (e) {
+        console.error('[folder-handle.writeBinaryFile]', fileName, e);
+        return false;
+    }
+}
+
+/**
+ * Usuwa plik (lub podfolder) z folderu.
+ *
+ * @param {FileSystemDirectoryHandle} dirHandle
+ * @param {string} name
+ * @param {object} [opts]
+ * @param {boolean} [opts.recursive=false] — dla podfolderów
+ * @returns {Promise<boolean>}
+ */
+export async function deleteEntry(dirHandle, name, opts = {}) {
+    try {
+        await dirHandle.removeEntry(name, { recursive: !!opts.recursive });
+        return true;
+    } catch (e) {
+        if (e && e.name === 'NotFoundError') return true; // już nie ma
+        console.warn('[folder-handle.deleteEntry]', name, e);
+        return false;
+    }
+}
+
+/**
+ * Sprawdza czy plik istnieje w folderze.
+ *
+ * @param {FileSystemDirectoryHandle} dirHandle
+ * @param {string} fileName
+ * @returns {Promise<boolean>}
+ */
+export async function existsFile(dirHandle, fileName) {
+    try {
+        await dirHandle.getFileHandle(fileName, { create: false });
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+/**
+ * Listuje WSZYSTKIE podfoldery (1 poziom w głąb).
+ *
+ * @param {FileSystemDirectoryHandle} dirHandle
+ * @returns {Promise<Array<{name: string, handle: FileSystemDirectoryHandle}>>}
+ */
+export async function listSubfolders(dirHandle) {
+    const out = [];
+    try {
+        for await (const [name, handle] of dirHandle.entries()) {
+            if (handle.kind === 'directory') {
+                out.push({ name, handle });
+            }
+        }
+    } catch (e) {
+        console.warn('[folder-handle.listSubfolders]', e);
+    }
+    return out;
+}
+
+/**
+ * Listuje WSZYSTKIE pliki w folderze (1 poziom w głąb).
+ *
+ * @param {FileSystemDirectoryHandle} dirHandle
+ * @returns {Promise<Array<{name: string, handle: FileSystemFileHandle, size: number, lastModified: number}>>}
+ */
+export async function listFiles(dirHandle) {
+    const out = [];
+    try {
+        for await (const [name, handle] of dirHandle.entries()) {
+            if (handle.kind === 'file') {
+                try {
+                    const file = await handle.getFile();
+                    out.push({
+                        name,
+                        handle,
+                        size: file.size,
+                        lastModified: file.lastModified,
+                        type: file.type || ''
+                    });
+                } catch (_) {
+                    out.push({ name, handle, size: 0, lastModified: 0, type: '' });
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('[folder-handle.listFiles]', e);
+    }
+    return out;
+}
+
+/**
+ * Zwraca handle podfolderu (tworzy gdy nie istnieje).
+ *
+ * @param {FileSystemDirectoryHandle} dirHandle
+ * @param {string} name
+ * @returns {Promise<FileSystemDirectoryHandle|null>}
+ */
+export async function ensureSubfolder(dirHandle, name) {
+    try {
+        return await dirHandle.getDirectoryHandle(name, { create: true });
+    } catch (e) {
+        console.error('[folder-handle.ensureSubfolder]', name, e);
+        return null;
+    }
+}
+
+/**
+ * Otwiera handle podfolderu (BEZ tworzenia jeśli nie istnieje).
+ * Zwraca null gdy podfolder nie istnieje.
+ */
+export async function openSubfolder(dirHandle, name) {
+    try {
+        return await dirHandle.getDirectoryHandle(name, { create: false });
+    } catch (e) {
+        if (e && e.name === 'NotFoundError') return null;
+        console.warn('[folder-handle.openSubfolder]', name, e);
+        return null;
+    }
+}
+
+

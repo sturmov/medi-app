@@ -704,7 +704,15 @@ export function renderVisitForm(opts = {}) {
     let _visitId = opts.visitId || null;
 
     // Typy wizyt, które wymagają pełnego wywiadu (`first` mode).
-    const FIRST_MODE_TYPES = new Set(['interview', 'diagnosis', 'first', 'first-visit']);
+    // PR-J4 (2026-05-11): tylko `first_meeting` wymaga pełnego wywiadu.
+    // Legacy `interview`/`diagnosis` zachowane dla wstecznej kompatybilności
+    // (stare zapisy w localStorage).
+    const FIRST_MODE_TYPES = new Set([
+        'first_meeting',
+        'interview', 'diagnosis',
+        'first', 'first-visit'
+    ]);
+
     function resolveMode(visitType) {
         const t = String(visitType || '').toLowerCase();
         if (FIRST_MODE_TYPES.has(t)) return 'first';

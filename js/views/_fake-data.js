@@ -102,41 +102,82 @@ export const FAKE_PATIENTS = [
 export const FAKE_VISITS = [
     {
         id: 'V1001', patientId: 'P001', date: '2026-04-15', time: '14:30',
-        type: 'followup', paid: true, closed: true,
+        type: 'next_meeting', paid: true, closed: true,
         summary: 'Kontynuacja — poprawa snu, obniżona lękliwość',
-        duration: 50
+        duration: 50,
+        data: { _raw: {
+            'rodzajWizyty': 'Wizyta terapeutyczna',
+            'osobyObecne': 'Pacjent',
+            'cosWaznego': 'Pacjentka relacjonuje znaczącą poprawę jakości snu — od ok. tygodnia zasypia w ciągu 15-20 minut bez leków nasennych. Lękliwość w sytuacjach społecznych obniżona o ok. 40% (subiektywna ocena). Kontynuujemy ekspozycję stopniową.',
+            'planNaNastepne': 'Praca nad asertywnością w kontekście zawodowym. Zadanie domowe: rozmowa z przełożonym o zmianie zakresu obowiązków.'
+        } }
     },
     {
         id: 'V1000', patientId: 'P001', date: '2026-04-01', time: '14:30',
-        type: 'followup', paid: true, closed: true,
+        type: 'next_meeting', paid: true, closed: true,
         summary: 'Wprowadzenie techniki uważności, praca nad automatycznymi myślami',
-        duration: 50
+        duration: 50,
+        data: { _raw: {
+            'rodzajWizyty': 'Wizyta terapeutyczna',
+            'osobyObecne': 'Pacjent',
+            'cosWaznego': 'Wprowadzona technika uważności (skanowanie ciała, 10 min dziennie). Praca nad identyfikacją automatycznych myśli negatywnych. Pacjentka zaczyna zauważać schemat „katastrofizacji".',
+            'planNaNastepne': 'Dziennik myśli automatycznych przez 7 dni. Kontynuacja medytacji.'
+        } }
     },
     {
         id: 'V0999', patientId: 'P001', date: '2026-03-22', time: '15:00',
-        type: 'interview', paid: true, closed: true,
+        type: 'first_meeting', paid: true, closed: true,
         summary: 'Wywiad kliniczny — epizod depresyjny umiarkowany + lęk uogólniony',
-        duration: 90
+        duration: 90,
+        data: { _raw: {
+            'rodzajWizyty': 'Konsultacja diagnostyczna',
+            'osobyObecne': 'Pacjent',
+            'powodKonsultacji': 'Obniżony nastrój utrzymujący się od ok. 6 miesięcy, narastający lęk, problemy ze snem, spadek motywacji w pracy. Pacjentka zgłosiła się sama po rekomendacji lekarza rodzinnego.',
+            'objawyDepresyjne': 'obniżony nastrój, anhedonia, bezsenność, poczucie winy, spadek energii',
+            'objawyLekowe': 'GAD (uogólniony), zamartwianie, lęk antycypacyjny',
+            'hipotezaDiagnostyczna': 'F32.1 Epizod depresyjny umiarkowany; F41.1 Zaburzenia lękowe uogólnione',
+            'plan': 'Psychoterapia CBT 10 sesji (cotygodniowo). Rozważyć konsultację psychiatryczną pod kątem farmakoterapii.'
+        } }
     },
     {
         id: 'V0998', patientId: 'P001', date: '2026-02-11', time: '10:00',
-        type: 'diagnosis', paid: false, closed: true,
+        type: 'first_meeting', paid: false, closed: true,
         summary: 'Diagnoza rozszerzona — historia edukacji, relacje rodzinne',
-        duration: 90
+        duration: 90,
+        data: { _raw: {
+            'rodzajWizyty': 'Diagnoza psychologiczna',
+            'osobyObecne': 'Pacjent',
+            'historiaEdukacji': 'Liceum ogólnokształcące zakończone maturą z wyróżnieniem. Studia (psychologia) ukończone z bardzo dobrą oceną. Trudności z koncentracją w ostatnim semestrze studiów.',
+            'historiaRodzinna': 'Pochodzi z rodziny pełnej. Konflikt z ojcem od czasów licealnych. Bliska relacja z matką. Brak rodzeństwa.',
+            'zasoby': 'Stabilna sytuacja zawodowa, wsparcie partnera, regularna aktywność fizyczna (joga 2× w tygodniu).'
+        } }
     },
     {
         id: 'V1100', patientId: 'P002', date: '2026-04-04', time: '11:00',
-        type: 'interview', paid: true, closed: true,
+        type: 'first_meeting', paid: true, closed: true,
         summary: 'Pierwsza konsultacja z rodzicami, trudności adaptacyjne w szkole',
-        duration: 60
+        duration: 60,
+        data: { _raw: {
+            'rodzajWizyty': 'Konsultacja rodziców',
+            'osobyObecne': 'Matka i ojciec',
+            'powodKonsultacji': 'Trudności adaptacyjne syna (12 l.) po zmianie szkoły — wycofanie, niechęć do wychodzenia z domu, spadek ocen.',
+            'plan': 'Spotkanie indywidualne z dzieckiem za tydzień. Wywiad z wychowawcą klasy (za zgodą rodziców).'
+        } }
     },
     {
         id: 'V1200', patientId: 'P003', date: '2026-04-10', time: '13:00',
-        type: 'interview', paid: true, closed: true,
+        type: 'first_meeting', paid: true, closed: true,
         summary: 'Konsultacja diagnostyczna',
-        duration: 60
+        duration: 60,
+        data: { _raw: {
+            'rodzajWizyty': 'Konsultacja',
+            'osobyObecne': 'Pacjent',
+            'powodKonsultacji': 'Pacjentka zgłasza powracające ataki paniki w sytuacjach zawodowych (prezentacje publiczne). Pierwszy epizod ok. 3 miesiące temu.',
+            'plan': 'Wywiad pogłębiony na kolejnej wizycie. Wstępna rekomendacja: techniki oddechowe + dziennik objawów.'
+        } }
     }
 ];
+
 
 
 // Leki pacjenta (nazwa handlowa, substancja, max dawka, notatki)
@@ -250,36 +291,69 @@ export const TEST_CATALOG = [
 ];
 
 // Typy wizyt (wybór po kliknięciu „+ Nowa wizyta")
+// PR-J4 (2026-05-11) — 6 nazw notatek zgodnie z rysunkiem klientki (z5.jpg):
+//   1) 1sze spotkanie
+//   2) Kolejne spotkanie
+//   3) Superwizja
+//   4) Notatka administracyjna
+//   5) Kontakt telefoniczny
+//   6) Kontakt mailowy
+//
+// Bez migracji legacy `interview`/`followup`/`diagnosis`/`quick` — apka
+// nie jest jeszcze produkcyjna (ustalenie PO 2026-05-11).
+// Aliasy legacy w `visitTypeById()` poniżej dla wstecznej kompatybilności
+// (Store/localStorage może mieć stare zapisane wizyty).
 export const VISIT_TYPES = [
     {
-        id: 'interview',
-        label: 'Wywiad kliniczny (1. wizyta)',
+        id: 'first_meeting',
+        label: '1sze spotkanie',
+        shortLabel: '1sze spotkanie',
         icon: '🆕',
-        description: 'Pełny formularz wywiadu — historia, objawy, funkcjonowanie somatyczne, MSE, rozpoznanie, plan.',
-        recommendedFor: 'pierwsza wizyta / konsultacja diagnostyczna'
+        description: 'Pierwsza wizyta — pełny wywiad kliniczny (historia, objawy, MSE, rozpoznanie).',
+        recommendedFor: 'pierwsza wizyta'
     },
     {
-        id: 'followup',
-        label: 'Kolejna wizyta (kontynuacja)',
+        id: 'next_meeting',
+        label: 'Kolejne spotkanie',
+        shortLabel: 'Kolejne spotkanie',
         icon: '➕',
-        description: 'Skrócony formularz — notatka z bieżącej wizyty + zmiany od poprzedniej.',
+        description: 'Wizyta śledząca — notatka z bieżącej sesji + zmiany od poprzedniej.',
         recommendedFor: 'sesja w toku terapii'
     },
     {
-        id: 'diagnosis',
-        label: 'Diagnoza rozszerzona',
-        icon: '🔬',
-        description: 'Pogłębiony wywiad wielodomenowy (ciąża, edukacja, historia rodzinna, warunki, zasoby).',
-        recommendedFor: 'gdy potrzebne jest pełne rozeznanie'
+        id: 'supervision',
+        label: 'Superwizja',
+        shortLabel: 'Superwizja',
+        icon: '🎓',
+        description: 'Notatka z superwizji — refleksje, wskazówki superwizora, plan działań.',
+        recommendedFor: 'omówienie pacjenta z superwizorem'
     },
     {
-        id: 'quick',
-        label: 'Nowa wizyta (skrót)',
-        icon: '⚡',
-        description: 'Minimalna notatka — data, rodzaj, krótka uwaga. Można rozwinąć później.',
-        recommendedFor: 'szybki zapis w trakcie dnia'
+        id: 'admin_note',
+        label: 'Notatka administracyjna',
+        shortLabel: 'Notatka administracyjna',
+        icon: '📋',
+        description: 'Wpis administracyjny — np. zmiana terminu, korespondencja z poradnią, formalności.',
+        recommendedFor: 'sprawy organizacyjne / formalne'
+    },
+    {
+        id: 'phone_contact',
+        label: 'Kontakt telefoniczny',
+        shortLabel: 'Kontakt telefoniczny',
+        icon: '📞',
+        description: 'Rozmowa telefoniczna z pacjentem lub opiekunem — krótka notatka z treści rozmowy.',
+        recommendedFor: 'kontakt zdalny / pilna konsultacja'
+    },
+    {
+        id: 'email_contact',
+        label: 'Kontakt mailowy',
+        shortLabel: 'Kontakt mailowy',
+        icon: '✉️',
+        description: 'Wymiana e-mailowa — kopia istotnej korespondencji, dyspozycje, ustalenia.',
+        recommendedFor: 'kontakt zdalny / pisemny'
     }
 ];
+
 
 // -- Helpers ----------------------------------------------------------------
 
@@ -311,6 +385,24 @@ export function testsForPatient(patientId) {
         .sort((a, b) => b.date.localeCompare(a.date));
 }
 
+// PR-J4 (2026-05-11) — aliasy legacy `typeId` → nowe id z VISIT_TYPES.
+// Klientka prosiła „bez migracji" (apka jeszcze nie działa produkcyjnie),
+// ale ktoś (Magda) może mieć stare dane w localStorage z poprzednich testów.
+// Mapa zapobiega błędom „Unknown visit type" w UI bez ruszania danych w Store.
+const _LEGACY_VISIT_TYPE_ALIAS = {
+    interview: 'first_meeting',
+    diagnosis: 'first_meeting',
+    followup: 'next_meeting',
+    quick: 'next_meeting'
+};
+
 export function visitTypeById(id) {
-    return VISIT_TYPES.find((t) => t.id === id) || null;
+    if (!id) return null;
+    let found = VISIT_TYPES.find((t) => t.id === id);
+    if (found) return found;
+    const aliased = _LEGACY_VISIT_TYPE_ALIAS[id];
+    if (aliased) return VISIT_TYPES.find((t) => t.id === aliased) || null;
+    return null;
 }
+
+

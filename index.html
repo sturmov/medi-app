@@ -22,7 +22,8 @@
                 id="psy-new-menu-toggle"
                 aria-label="Przełącz menu"
             >☰</button>
-            <div class="psy-new-brand">PsychoApp</div>
+            <div class="psy-new-brand psy-new-brand--placeholder" aria-label="Logo lub nazwa aplikacji">Logo lub nazwa aplikacji</div>
+
         </div>
 
         <div class="psy-new-topbar__center" id="psy-new-topbar-patient">
@@ -76,6 +77,11 @@
         <p>Ta aplikacja wymaga włączonego JavaScript.</p>
     </div>
 </noscript>
+
+<!-- xlsx-js-style: fork SheetJS z pełnym wsparciem styli (merged cells, kolory, headery).
+     Załadowany jako klasyczny <script>, eksponuje globalny `XLSX` używany przez
+     `js/views/_xlsx-codec.js` (paczka K1 — natychmiastowy zapis lokalny). -->
+<script src="lib/xlsx-js-style.min.js"></script>
 
 <script type="module" src="js/app-new.js"></script>
 

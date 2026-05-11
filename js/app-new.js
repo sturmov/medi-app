@@ -40,7 +40,11 @@ import { renderMedForm } from './views/view-med-form.js';
 import { renderPatientForm } from './views/view-patient-form.js';
 import { renderPatientDetail } from './views/view-patient-detail.js';
 import { renderTestRunner } from './views/view-test-runner.js';
+import { renderTreatmentPlan } from './views/view-treatment-plan.js';
+import { renderParameters } from './views/view-parameters.js';
+import { renderDocuments } from './views/view-documents.js';
 import { listAvailableTests } from './views/_tests-catalog.js';
+
 import { showFolderGate, hideFolderGate, shouldShowGate } from './views/view-folder-gate.js';
 
 // ---- helpers ---------------------------------------------------------------
@@ -90,6 +94,33 @@ function ageOf(patient) {
     return '';
 }
 
+/** PR-J2 (2026-05-11) — wiek pacjenta jako liczba (do badge'a pełnoletni/nieletni).
+ *  Zwraca `null` gdy nie da się policzyć. */
+function _computePatientAgeYears(patient) {
+    if (!patient) return null;
+    if (patient.dataUrodzenia) {
+        const d = new Date(patient.dataUrodzenia);
+        if (!isNaN(d.getTime())) {
+            return Math.floor((Date.now() - d.getTime()) / (365.25 * 24 * 3600 * 1000));
+        }
+    }
+    if (patient.wiek) {
+        const n = parseInt(String(patient.wiek).replace(/\D/g, ''), 10);
+        if (!isNaN(n)) return n;
+    }
+    return null;
+}
+
+/** PR-J2 (2026-05-11) — ikona płci dla paska pacjenta. */
+function _sexIcon(plec) {
+    if (!plec) return null;
+    const s = String(plec).toLowerCase();
+    if (s.startsWith('k')) return { glyph: '♀', cls: 'female' };
+    if (s.startsWith('m')) return { glyph: '♂', cls: 'male' };
+    return { glyph: '⚧', cls: 'other' };
+}
+
+
 function toast(variant, title, message) {
     if (window.PsyToast) {
         window.PsyToast.notify({ variant, title, message }, 'psy-app-toasts');
@@ -109,6 +140,12 @@ const _viewFilters = {
 
 // Pamięć dla pickera testów (czy jest otwarty na liście Testów)
 let _testsPickerOpen = false;
+
+// PR-J3 (2026-05-11): stan submenu „Nowa wizyta" w sidebarze.
+// Klientka (z2.jpg): klik „+ Nowa wizyta" rozwija/zwija listę kafelków typów.
+// Stan trzymany w pamięci pomiędzy re-renderami. Domyślnie zamknięte.
+let _sidebarVisitMenuOpen = false;
+
 
 // ============================================================================
 // VIEWS
@@ -252,16 +289,86 @@ function goToDetail(patient) {
 
 // ----- History --------------------------------------------------------------
 //
-// PO 2026-05-01: status „Robocza"/„Zamknięta" wycofany. Filtr usunięty.
-// Wiersz w całości klikalny → `#/visit/form/:id` (= edit, jedno miejsce edycji).
-// Tło wiersza zależy od `paid`: niezapłacona = żółtawe (warning), zapłacona =
-// białe. Badge w kolumnie „Płatność" zachowuje stary wygląd. 🗑 zostało
-// przeniesione do nagłówka formularza wizyty.
+// PR-J5 (2026-05-11): historia wizyt = strumień akapitów (klientka, z5.jpg).
+//   • układ od najnowszej do najstarszej (im niżej scrolluję, tym starsze);
+//   • każda wizyta = osobny <article> z nagłówkiem i pełnym opisem;
+//   • nagłówek: [NAZWA NOTATKI] · typ · data · godzina · badge płatność;
+//   • body: WSZYSTKIE wypełnione pola z `visit.data._raw` (bez skrótów!);
+//   • klik akapitu → `#/visit/form/:id` (= edit, jedyne miejsce edycji);
+//   • tło: paid=false → `psy-history-paragraph--unpaid` (żółtawe).
+//
+// Wcześniejszy widok tabeli (PR-G) usunięty.
+
+/** Sformatuj surowy klucz z `_raw` (np. `cosWaznego`, `visitData.osoby`)
+ *  na czytelną etykietę. Dla nieznanych kluczy — naturalna konwersja
+ *  camelCase / kropki → spacje + capitalize. */
+function _prettyVisitFieldLabel(rawKey) {
+    if (!rawKey) return '';
+    // Zdejmij prefix sekcji ze schematu (np. `visitData.`, `wywiad.`)
+    let key = String(rawKey).replace(/^[a-zA-Z]+\./, '');
+    // Pomiń techniczne kotwice
+    if (key === '__comment' || key === '__notes' || key.endsWith('.__notes') || key.endsWith('.__comment')) {
+        return '';
+    }
+    const map = {
+        rodzajWizyty:           'Rodzaj wizyty',
+        osobyObecne:            'Osoby obecne',
+        powodKonsultacji:       'Powód konsultacji',
+        objawyDepresyjne:       'Objawy depresyjne',
+        objawyLekowe:           'Objawy lękowe',
+        hipotezaDiagnostyczna:  'Hipoteza diagnostyczna',
+        plan:                   'Plan',
+        planNaNastepne:         'Plan na następne spotkanie',
+        cosWaznego:             'Co ważnego',
+        historiaEdukacji:       'Historia edukacji',
+        historiaRodzinna:       'Historia rodzinna',
+        zasoby:                 'Zasoby pacjenta',
+        data:                   'Data',
+        czasOd:                 'Godzina rozpoczęcia',
+        czasTrwania:            'Czas trwania (min)',
+        osoby:                  'Osoby',
+        uczestnicy:             'Uczestnicy'
+    };
+    if (map[key]) return map[key];
+    // Fallback: camelCase / kebab / snake → naturalna fraza
+    return key
+        .replace(/([A-Z])/g, ' $1')
+        .replace(/[_-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/^\w/, (c) => c.toUpperCase());
+}
+
+/** Zwróć tablicę `{label, value}` z `_raw` — w kolejności wstawienia,
+ *  pomijając puste, techniczne, etykiety bez wartości. */
+function _extractVisitContent(raw) {
+    if (!raw || typeof raw !== 'object') return [];
+    const out = [];
+    for (const [k, v] of Object.entries(raw)) {
+        const label = _prettyVisitFieldLabel(k);
+        if (!label) continue;
+        // Pusta wartość (null/empty string/empty array)
+        if (v == null) continue;
+        let display = '';
+        if (Array.isArray(v)) {
+            if (!v.length) continue;
+            display = v.join(', ');
+        } else if (typeof v === 'boolean') {
+            display = v ? 'tak' : 'nie';
+        } else {
+            display = String(v).trim();
+            if (!display) continue;
+        }
+        out.push({ label, value: display });
+    }
+    return out;
+}
 
 function viewHistory() {
     const patient = Store.state.currentPatient;
     if (!patient) return noPatientView('Historia wizyt', '🗓️');
 
+    // `Store.getVisits` zwraca już posortowane od najnowszej (po dacie+godzinie).
     const visits = Store.getVisits(patient.id);
     const unpaidCount = visits.filter((v) => !v.paid).length;
 
@@ -274,7 +381,8 @@ function viewHistory() {
                 ' ' + (visits.length === 1 ? 'wizyta' : 'wizyt') +
                 (unpaidCount > 0
                     ? ` · ${unpaidCount} niezapłacon${unpaidCount === 1 ? 'a' : 'e'}`
-                    : '')
+                    : '') +
+                ' · od najnowszej do najstarszej'
             ])
         ]),
         el('div', { class: 'psy-new-view__actions' }, [
@@ -286,52 +394,85 @@ function viewHistory() {
     ]));
 
     const body = el('div', { class: 'psy-new-view__body psy-new-view__body--plain' });
+
     if (!visits.length) {
         body.appendChild(emptyState('🗓️', 'Brak wizyt',
             'Pacjent nie ma jeszcze wizyt. Dodaj pierwszą klikając przycisk poniżej.', [
             { label: '+ Dodaj pierwszą wizytę', variant: 'primary', onClick: () => (window.location.hash = '#/visit/new') }
         ]));
-    } else {
-        const table = el('table', { class: 'psy-new-table psy-new-table--clickrows' });
-        table.appendChild(el('thead', {}, [
-            el('tr', {}, [
-                el('th', { style: { width: '140px' } }, ['Data']),
-                el('th', {}, ['Typ wizyty']),
-                el('th', {}, ['Podsumowanie']),
-                el('th', { style: { width: '150px' } }, ['Płatność'])
-            ])
-        ]));
-        const tbody = el('tbody', {});
-        for (const v of visits) {
-            const unpaid = !v.paid;
-            tbody.appendChild(el('tr', {
-                title: 'Otwórz wizytę',
-                style: { cursor: 'pointer' },
-                class: unpaid ? 'psy-row-unpaid' : '',
-                onclick: () => { window.location.hash = '#/visit/form/' + v.id; }
-            }, [
-                el('td', {}, [el('strong', {}, [v.date]), v.time ? ' · ' + v.time : '']),
-                el('td', {}, [visitTypeLabel(v.type)]),
-                el('td', { style: { color: '#475569' } }, [v.summary || '(brak podsumowania)']),
-                el('td', {}, [
-                    el('span', {
-                        class: 'psy-new-badge psy-new-badge--clickable ' +
-                            (v.paid ? 'psy-new-badge--success' : 'psy-new-badge--warning'),
-                        title: 'Kliknij, aby zmienić stan płatności',
-                        onclick: (ev) => {
-                            ev.stopPropagation();   // nie otwieraj wizyty
-                            Store.togglePaid(v.id);
-                        }
-                    }, [v.paid ? '✓ Zapłacono' : '☐ Nie zapłacono'])
-                ])
-            ]));
-        }
-        table.appendChild(tbody);
-        body.appendChild(table);
+        root.appendChild(body);
+        return root;
     }
+
+    // Strumień akapitów
+    const stream = el('div', { class: 'psy-history-paragraphs' });
+
+    for (const v of visits) {
+        const typeObj = visitTypeById(v.type);
+        const typeLabel = typeObj ? typeObj.label : (v.type || '');
+        const typeIcon  = typeObj ? typeObj.icon : '📝';
+        // Tytuł akapitu = nazwa notatki (czyli label typu wizyty, klientka z5.jpg)
+        const noteTitle = typeObj ? (typeObj.shortLabel || typeObj.label) : 'Notatka';
+
+        // Header: [ikona + NAZWA NOTATKI] · typ · data · godzina · płatność
+        const header = el('div', { class: 'psy-history-paragraph__header' }, [
+            el('span', { class: 'psy-history-paragraph__title' }, [
+                (typeIcon ? typeIcon + ' ' : '') + noteTitle
+            ]),
+            el('span', { class: 'psy-history-paragraph__type' }, [
+                '· ' + typeLabel
+            ]),
+            el('span', { class: 'psy-history-paragraph__date' }, [
+                '· ' + (v.date || '—') + (v.time ? ' · ' + v.time : '')
+            ]),
+            el('span', { class: 'psy-history-paragraph__payment' }, [
+                el('span', {
+                    class: 'psy-new-badge psy-new-badge--clickable ' +
+                        (v.paid ? 'psy-new-badge--success' : 'psy-new-badge--warning'),
+                    title: 'Kliknij, aby zmienić stan płatności',
+                    onclick: (ev) => {
+                        ev.stopPropagation();
+                        Store.togglePaid(v.id);
+                    }
+                }, [v.paid ? '✓ Zapłacono' : '☐ Nie zapłacono'])
+            ])
+        ]);
+
+        // Body: pełna treść (wszystkie pola z `_raw`), bez skrótu `summary`.
+        const raw = v.data && v.data._raw;
+        const entries = _extractVisitContent(raw);
+
+        let bodyNode;
+        if (entries.length) {
+            const dl = el('dl', {});
+            for (const { label, value } of entries) {
+                dl.appendChild(el('dt', {}, [label]));
+                dl.appendChild(el('dd', {}, [value]));
+            }
+            bodyNode = el('div', { class: 'psy-history-paragraph__body' }, [dl]);
+        } else if (v.summary && v.summary.trim()) {
+            // Fallback dla starych wizyt bez `_raw`
+            bodyNode = el('div', { class: 'psy-history-paragraph__body' }, [v.summary]);
+        } else {
+            bodyNode = el('div', {
+                class: 'psy-history-paragraph__body psy-history-paragraph__body--empty'
+            }, ['(notatka pusta — kliknij, aby otworzyć i uzupełnić)']);
+        }
+
+        const article = el('article', {
+            class: 'psy-history-paragraph' + (v.paid ? '' : ' psy-history-paragraph--unpaid'),
+            title: 'Otwórz notatkę',
+            onclick: () => { window.location.hash = '#/visit/form/' + v.id; }
+        }, [header, bodyNode]);
+
+        stream.appendChild(article);
+    }
+
+    body.appendChild(stream);
     root.appendChild(body);
     return root;
 }
+
 
 // ----- Meds ----------------------------------------------------------------
 
@@ -834,22 +975,49 @@ function viewPatientForm() {
     return renderPatientDetail({ id: m ? decodeURIComponent(m[1]) : null, tab: 'patient' });
 }
 
-// Detale pacjenta — read-only widok wzorowany na karcie ATOL.
-//   #/patients/detail/:id              → tab="patient"
-//   #/patients/detail/:id/documents    → tab="documents"
+// Detale pacjenta — single-column layout (PR-J10).
+// Param `tab` (Pacjent/Dokumenty) został wycofany — Dokumenty są w głównym
+// sidebarze pod osobnym route'em `#/documents`.
 function viewPatientDetail() {
     const hash = window.location.hash || '';
-    const m = hash.match(/^#\/patients\/detail\/([^/?]+)(?:\/([a-zA-Z0-9-]+))?/);
-    const id  = m ? decodeURIComponent(m[1]) : null;
-    const tab = m && m[2] ? decodeURIComponent(m[2]) : 'patient';
-    return renderPatientDetail({ id, tab });
+    const m = hash.match(/^#\/patients\/detail\/([^/?]+)/);
+    const id = m ? decodeURIComponent(m[1]) : null;
+    return renderPatientDetail({ id });
 }
+
 
 function viewTestRunner() {
     const hash = window.location.hash || '';
     const m = hash.match(/^#\/tests\/run\/([^/?]+)/);
     return renderTestRunner({ code: m ? decodeURIComponent(m[1]) : null });
 }
+
+// PR-J (2026-05-11): nowe sekcje w sidebarze.
+//
+// Plan leczenia (route `#/treatment-plan`) — drzewo celów L1 + zadania per cel.
+function viewTreatmentPlan() {
+    return renderTreatmentPlan();
+}
+
+// Parametry (route `#/parameters`) — wzrost/waga/BMI/ciśnienie/tętno.
+function viewParameters() {
+    return renderParameters();
+}
+
+// Dokumenty (route `#/documents`) — stub UI uploadera + lista placeholder.
+function viewDocuments() {
+    return renderDocuments();
+}
+
+// Dane identyfikacyjne (route `#/patient-data`, rename z „Pacjent") —
+// delegat na widok detali pacjenta (`view-patient-detail.js`) z bieżącym
+// pacjentem ze Store. Klientka prosiła o tę nazwę w menu (z2.jpg + z4.jpg).
+function viewPatientData() {
+    const cp = Store.state.currentPatient;
+    if (!cp) return noPatientView('Dane identyfikacyjne', '📇');
+    return renderPatientDetail({ id: cp.id, tab: 'patient' });
+}
+
 
 // ----- Settings -------------------------------------------------------------
 
@@ -1047,10 +1215,17 @@ const ROUTE_MAP = {
     '#/visit/form':           { renderer: viewVisitForm,           menuId: 'history',         needsPatient: true },
     '#/visit/new':            { renderer: viewVisitNew,            menuId: 'visit-new',       needsPatient: true },
 
+    // PR-J (2026-05-11): nowe sekcje pacjenta
+    '#/treatment-plan':       { renderer: viewTreatmentPlan,       menuId: 'treatment-plan',  needsPatient: true },
+    '#/patient-data':         { renderer: viewPatientData,         menuId: 'patient-data',    needsPatient: true },
+    '#/parameters':           { renderer: viewParameters,          menuId: 'parameters',      needsPatient: true },
+    '#/documents':            { renderer: viewDocuments,           menuId: 'documents',       needsPatient: true },
+
     // Pozostałe
     '#/history':              { renderer: viewHistory,             menuId: 'history',         needsPatient: true },
     '#/settings':             { renderer: viewSettings,            menuId: null }
 };
+
 
 function resolveRoute(hash) {
     const h = (hash || '').split('?')[0];
@@ -1225,23 +1400,83 @@ const AppController = {
         const nav = el('ul', { class: 'psy-new-sidebar__nav' });
 
         for (const item of APP_MENU) {
-            if (item.cta) {
-                nav.appendChild(el('li', { class: 'psy-new-sidebar__separator' }));
+            // PR-J3 (2026-05-11): „+ Nowa wizyta" obsługuje submenu (kafelki
+            // typów notatek wizyt). Klik rozwija/zwija listę. Pozostałe
+            // pozycje działają normalnie (nawigacja).
+            const isSubmenu = item.submenu === true;
+            const expanded  = isSubmenu && _sidebarVisitMenuOpen;
+
+            // PR-J11 (2026-05-11): bez ikon przy elementach menu — klientka
+            // jasno: same etykiety. Render samej etykiety + ewentualnego
+            // chevronu dla submenu.
+            const labelChildren = [
+                el('span', { class: 'psy-new-sidebar__label' }, [item.label])
+            ];
+            // Strzałka rozwijania dla submenu — ▾ (open) / ▸ (closed)
+            if (isSubmenu) {
+                labelChildren.push(el('span', {
+                    class: 'psy-new-sidebar__chevron',
+                    'aria-hidden': 'true'
+                }, [expanded ? '▾' : '▸']));
             }
+
             const li = el('li', {
-                class: 'psy-new-sidebar__item' + (item.cta ? ' psy-new-sidebar__item--cta' : ''),
+                class: 'psy-new-sidebar__item'
+                    + (item.cta ? ' psy-new-sidebar__item--cta' : '')
+                    + (isSubmenu ? ' psy-new-sidebar__item--has-submenu' : '')
+                    + (expanded ? ' psy-new-sidebar__item--expanded' : ''),
                 'data-menu-id': item.id,
                 onclick: () => this._onMenuClick(item)
-            }, [
-                el('span', { class: 'psy-new-sidebar__icon' }, [item.icon]),
-                el('span', { class: 'psy-new-sidebar__label' }, [item.label])
-            ]);
+            }, labelChildren);
+
             nav.appendChild(li);
+
+            // Submenu — render tylko gdy rozwinięte
+            if (isSubmenu && expanded) {
+                const submenu = el('ul', { class: 'psy-new-sidebar__submenu' });
+                for (const t of VISIT_TYPES) {
+                    submenu.appendChild(el('li', {
+                        class: 'psy-new-sidebar__submenu-item',
+                        title: t.description,
+                        onclick: (ev) => {
+                            ev.stopPropagation();
+                            if (!Store.state.currentPatient) {
+                                toast('warning', 'Wybierz pacjenta',
+                                    'Aby utworzyć wizytę, najpierw wybierz pacjenta.');
+                                window.location.hash = APP_PATIENTS_ROUTE;
+                                return;
+                            }
+                            // Zwiń submenu po wyborze (mniej zaśmieconego widoku)
+                            _sidebarVisitMenuOpen = false;
+                            window.location.hash = '#/visit/form/new/' + t.id;
+                        }
+                    }, [
+                        // PR-J11: bez ikony typu wizyty w submenu — sama etykieta.
+                        el('span', { class: 'psy-new-sidebar__submenu-label' }, [t.shortLabel || t.label])
+                    ]));
+                }
+                nav.appendChild(submenu);
+            }
         }
         this.sidebarEl.appendChild(nav);
     },
 
     _onMenuClick(item) {
+        // PR-J3 (2026-05-11): „+ Nowa wizyta" z submenu = rozwija/zwija
+        // listę kafelków typów, bez nawigacji. Reszta pozycji = nawigacja.
+        if (item.submenu === true) {
+            if (!Store.state.currentPatient) {
+                toast('warning', 'Wybierz pacjenta',
+                    'Aby utworzyć wizytę, najpierw wybierz pacjenta z listy.');
+                window.location.hash = APP_PATIENTS_ROUTE;
+                return;
+            }
+            _sidebarVisitMenuOpen = !_sidebarVisitMenuOpen;
+            this._renderSidebar();
+            this._updateSidebarActive();
+            return;
+        }
+
         if (!Store.state.currentPatient) {
             toast('warning', 'Wybierz pacjenta', 'Aby użyć tej sekcji, najpierw wybierz pacjenta z listy.');
             window.location.hash = APP_PATIENTS_ROUTE;
@@ -1250,6 +1485,7 @@ const AppController = {
         window.location.hash = item.route;
         this.shellEl.classList.remove('psy-new-shell--menu-open');
     },
+
 
     _onHashChange() {
         const resolved = resolveRoute(window.location.hash);
@@ -1316,29 +1552,228 @@ const AppController = {
         const p = Store.state.currentPatient;
         if (!p) return;
 
-        // PO 2026-05-01: klik w tag (poza przyciskiem „Zmień") otwiera detale.
+        // PR-J2 (2026-05-11): sticky profil pacjenta — wyrazisty pasek
+        // (laptop 14"/tablet) z PESEL · ikona płci · imię (II imię) nazwisko ·
+        // wiek · telefon · mail · badge auto „Pełnoletni" / „Nieletni" · 🔍 lupa.
+        // Lupa otwiera popover z search'em pacjenta — klik wyniku natychmiast
+        // przełącza pacjenta + redirect do detali.
+
+        const ageNum = _computePatientAgeYears(p);
+        const adult = ageNum >= 18;
+        const minorBadge = ageNum != null
+            ? (adult
+                ? el('span', {
+                    class: 'psy-new-patient-tag__badge psy-new-patient-tag__badge--adult',
+                    title: 'Wiek: ' + ageNum + ' lat (pełnoletni)'
+                }, ['✓ Pełnoletni'])
+                : el('span', {
+                    class: 'psy-new-patient-tag__badge psy-new-patient-tag__badge--minor',
+                    title: 'Wiek: ' + ageNum + ' lat (nieletni)'
+                }, ['⚠ Nieletni']))
+            : null;
+
+        const sexIcon = _sexIcon(p.plec);
+
+        // Nazwisko: Imię (II imię) Nazwisko
+        const nameParts = [
+            p.imie || '',
+            p.drugieImie ? ' (' + p.drugieImie + ')' : '',
+            p.nazwisko ? ' ' + p.nazwisko : ''
+        ].join('').trim() || '— bez nazwiska —';
+
         const tag = el('div', {
-            class: 'psy-new-patient-tag psy-new-patient-tag--clickable',
-            title: 'Otwórz kartę pacjenta',
-            onclick: () => { goToDetail(p); }
+            class: 'psy-new-patient-tag psy-new-patient-tag--big psy-new-patient-tag--clickable',
+            title: 'Otwórz kartę pacjenta'
         }, [
-            el('span', { class: 'psy-new-patient-tag__name' }, [p.imie + ' ' + p.nazwisko]),
-            el('span', { class: 'psy-new-patient-tag__meta' }, [
-                ageOf(p) ? `· ${ageOf(p)}` : '',
-                p.telefon ? `· ${p.telefon}` : '',
-                p.pesel ? `· PESEL ${p.pesel}` : ''
-            ].filter(Boolean).join(' ')),
+            // PESEL na początku (klientka, z3.jpg)
+            p.pesel
+                ? el('span', {
+                    class: 'psy-new-patient-tag__field psy-new-patient-tag__field--pesel',
+                    title: 'PESEL',
+                    onclick: () => goToDetail(p)
+                }, [p.pesel])
+                : null,
+
+            // Ikona płci
+            sexIcon
+                ? el('span', {
+                    class: 'psy-new-patient-tag__sex psy-new-patient-tag__sex--' + sexIcon.cls,
+                    title: 'Płeć: ' + (p.plec || 'nieznana'),
+                    onclick: () => goToDetail(p)
+                }, [sexIcon.glyph])
+                : null,
+
+            // Imię + drugie imię + nazwisko (klikalne → detale)
+            el('span', {
+                class: 'psy-new-patient-tag__name',
+                onclick: () => goToDetail(p),
+                title: 'Otwórz dane identyfikacyjne'
+            }, [nameParts]),
+
+            // Wiek
+            ageNum != null
+                ? el('span', { class: 'psy-new-patient-tag__field' }, [ageNum + ' lat'])
+                : null,
+
+            // Telefon
+            p.telefon
+                ? el('span', {
+                    class: 'psy-new-patient-tag__field psy-new-patient-tag__field--tel',
+                    title: 'Telefon'
+                }, ['📞 ' + p.telefon])
+                : null,
+
+            // E-mail
+            p.email
+                ? el('span', {
+                    class: 'psy-new-patient-tag__field psy-new-patient-tag__field--mail',
+                    title: 'E-mail'
+                }, ['✉ ' + p.email])
+                : null,
+
+            // Badge pełnoletni / nieletni (auto z daty urodzenia)
+            minorBadge,
+
+            // 🔍 Lupa — wyszukiwarka pacjenta (PR-J2)
+            el('button', {
+                type: 'button',
+                class: 'psy-new-patient-tag__search',
+                title: 'Wyszukaj pacjenta (Ctrl+K)',
+                onclick: (ev) => {
+                    ev.stopPropagation();
+                    AppController._togglePatientSearchPopover();
+                }
+            }, ['🔍']),
+
+            // „Zmień" — kierunek do listy pacjentów (back-compat)
             el('button', {
                 class: 'psy-new-patient-tag__change',
-                title: 'Wybierz innego pacjenta',
+                title: 'Otwórz listę pacjentów',
                 onclick: (e) => {
-                    e.stopPropagation();   // nie wpadnij w klik tagu (detale)
+                    e.stopPropagation();
                     window.location.hash = APP_PATIENTS_ROUTE;
                 }
             }, ['Zmień'])
-        ]);
+        ].filter(Boolean));
+
         this.patientHostEl.appendChild(tag);
+    },
+
+    /** PR-J2: popover z wyszukiwarką pacjenta (lupa). */
+    _togglePatientSearchPopover() {
+        // Toggle: jeśli istnieje — zamknij; jeśli nie — otwórz.
+        const existing = document.getElementById('psy-new-patient-search-popover');
+        if (existing) {
+            existing.remove();
+            return;
+        }
+        this._showPatientSearchPopover();
+    },
+
+    _showPatientSearchPopover() {
+        const popover = el('div', {
+            id: 'psy-new-patient-search-popover',
+            class: 'psy-new-search-popover',
+            role: 'dialog',
+            'aria-label': 'Wyszukaj pacjenta'
+        });
+
+        const input = el('input', {
+            type: 'search',
+            class: 'psy-new-search-popover__input',
+            placeholder: 'Imię, nazwisko, kod lub PESEL…',
+            autocomplete: 'off'
+        });
+
+        const results = el('div', { class: 'psy-new-search-popover__results' });
+
+        function close() {
+            popover.remove();
+            document.removeEventListener('keydown', onKeydown);
+            document.removeEventListener('mousedown', onClickOutside);
+        }
+
+        function pickPatient(p) {
+            Store.selectPatient(p);
+            close();
+            window.location.hash = '#/patients/detail/' + p.id;
+        }
+
+        function renderResults() {
+            results.innerHTML = '';
+            const q = (input.value || '').trim().toLowerCase();
+            const allPatients = Store.state.patients
+                .filter((p) => !p.archived);   // tylko aktywni w wyszukiwarce
+            const matched = q
+                ? allPatients.filter((p) => {
+                    const s = [
+                        p.imie || '', p.nazwisko || '', p.drugieImie || '',
+                        p.pesel || '', p.id || '', p.kodPacjenta || '',
+                        p.telefon || '', p.email || ''
+                    ].join(' ').toLowerCase();
+                    return s.includes(q);
+                })
+                : allPatients.slice(0, 12);
+
+            if (!matched.length) {
+                results.appendChild(el('div', { class: 'psy-new-search-popover__empty' }, [
+                    q ? 'Brak pacjentów pasujących do „' + q + '"' : 'Brak aktywnych pacjentów.'
+                ]));
+                return;
+            }
+            for (const p of matched.slice(0, 12)) {
+                results.appendChild(el('div', {
+                    class: 'psy-new-search-popover__item',
+                    title: 'Otwórz kartę pacjenta',
+                    onclick: () => pickPatient(p)
+                }, [
+                    el('span', { class: 'psy-new-search-popover__item-code' }, [p.id || '']),
+                    el('span', { class: 'psy-new-search-popover__item-name' }, [
+                        (p.imie || '') + ' ' + (p.nazwisko || '')
+                    ]),
+                    el('span', { class: 'psy-new-search-popover__item-meta' }, [
+                        p.pesel ? p.pesel : (p.telefon || '')
+                    ])
+                ]));
+            }
+        }
+
+        function onKeydown(ev) {
+            if (ev.key === 'Escape') { close(); return; }
+            if (ev.key === 'Enter') {
+                // Wybierz pierwszy wynik
+                const first = results.querySelector('.psy-new-search-popover__item');
+                if (first) first.click();
+            }
+        }
+
+        function onClickOutside(ev) {
+            if (!popover.contains(ev.target)) close();
+        }
+
+        input.addEventListener('input', renderResults);
+        document.addEventListener('keydown', onKeydown);
+        // setTimeout, bo `mousedown` z kliknięcia lupy by od razu zamknął
+        setTimeout(() => document.addEventListener('mousedown', onClickOutside), 0);
+
+        popover.appendChild(input);
+        popover.appendChild(results);
+
+        // Pozycjonuj popover obok przycisku lupy
+        const btn = this.patientHostEl.querySelector('.psy-new-patient-tag__search');
+        if (btn) {
+            const rect = btn.getBoundingClientRect();
+            popover.style.position = 'fixed';
+            popover.style.top = (rect.bottom + 6) + 'px';
+            popover.style.right = (window.innerWidth - rect.right) + 'px';
+            popover.style.zIndex = '1500';
+        }
+
+        document.body.appendChild(popover);
+        renderResults();
+        input.focus();
     }
+
 
 };
 

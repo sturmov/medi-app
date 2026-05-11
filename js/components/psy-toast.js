@@ -1,13 +1,16 @@
 // ============================================================================
 // psy-toast - pojedyncze nieblokujące powiadomienie.
 //
-// W fazie dev `duration=0` (sticky) jest domyślnym trybem — produkcyjne
-// wartości zostaną dobrane w Fazie 5 (hardening).
+// F5.1 (2026-05-11): produkcyjne czasy trwania ustawiane są w
+// `psy-toast-container.js` per variant (info/success: 4 s, warning/danger: 8 s).
+// Sam `psy-toast` w konstruktorze ma `duration = 0` (sticky fallback dla
+// użycia poza containerem). Container nadpisuje to defaultem variant'u
+// gdy `options.duration` nie został podany jawnie.
 //
 // Atrybuty:
 //   - variant   : "info|success|warning|danger"   (default "info")
 //   - title     : opcjonalny nagłówek pogrubiony
-//   - duration  : ms, 0 = sticky                   (default 0 w dev)
+//   - duration  : ms, 0 = sticky                   (default 0; container nadpisuje)
 //   - closable  : Boolean                          (default true)
 //   - icon      : opcjonalna ikona (emoji/tekst) nadpisująca ikonę wariantu
 //   - toast-id  : id zewnętrzne

@@ -56,6 +56,20 @@ import {
     verifyPermission, readTextFile, writeTextFile
 } from './_folder-handle.js';
 
+// PR-K3 (2026-05-11): zapis per pacjent do pliku XLSX zamiast wspólnego
+// `data.json`. Format zdefiniowany w `_storage-format.js` (sekcja 20 .clinerules).
+// F5.3 (2026-05-11): używamy `renamePatientFolderIfNeeded` w `_doFolderSync`,
+// żeby zmiana nazwiska automatycznie przemianowała folder na dysku.
+import {
+    scanPatientFolders,
+    loadPatient as loadPatientFromFolder,
+    savePatient as savePatientToFolder,
+    renamePatientFolderIfNeeded
+} from './_local-folder-store.js';
+
+// F5.3 — helper do wyliczenia oczekiwanej nazwy folderu pacjenta.
+import { patientFolderName } from './_storage-format.js';
+
 // --- storage keys -----------------------------------------------------------
 
 const LS_KEY_DATA         = 'psy-new:data';
@@ -92,6 +106,194 @@ let _saveStatusTimer = null;
 // Persist do IndexedDB realizuje `_folder-handle.js`.
 let _dirHandle = null;
 let _folderSyncTimer = null;
+
+// PR-K3 (2026-05-11): śledzimy które pacjentów wymagają zapisu do folderu.
+// Każda mutacja oznacza patientId, `_doFolderSync` zapisuje per pacjent
+// (XLSX), nie wspólnego `data.json`. Set, by uniknąć duplikatów przy
+// wielokrotnych edycjach jednego pacjenta przed debouncem.
+const _dirtyPatientIds = new Set();
+
+// F5.2 (2026-05-11): error recovery dla File System Access.
+// Sticky toast referencja (żeby nie spamować duplikatami przy każdej próbie),
+// watcher (interval) który cicho sprawdza permission gdy folder w stanie 'denied'.
+let _unavailableToast = null;
+let _healthCheckTimer = null;
+const FOLDER_HEALTH_CHECK_MS = 60000;   // 1 min
+
+/**
+ * Helper PR-K3: oznacza patientId jako wymagający zapisu do folderu.
+ */
+function _markDirty(patientId) {
+    if (!patientId) return;
+    _dirtyPatientIds.add(patientId);
+}
+
+/**
+ * Helper PR-K3: składa `FullPatient` (pacjent + wszystkie powiązane dane)
+ * dla pojedynczego pacjenta z bieżącego state. Format zgodny z
+ * `writePatientWorkbook` w `_xlsx-codec.js`.
+ */
+function _buildFullPatient(patient) {
+    return {
+        patient,
+        visits:          state.visits.filter((v) => v.patientId === patient.id),
+        meds:            state.meds.filter((m) => m.patientId === patient.id),
+        diagnoses:       state.diagnoses.filter((d) => d.patientId === patient.id),
+        recommendations: state.recommendations.filter((r) => r.patientId === patient.id),
+        tests:           state.tests.filter((t) => t.patientId === patient.id),
+        treatmentPlan:   patient.treatmentPlan || null,
+        parameters:      Array.isArray(patient.parameters) ? patient.parameters
+                            : (patient.parameters ? [patient.parameters] : [])
+    };
+}
+
+/**
+ * Helper PR-K3: konwertuje metadane z `scanPatientFolders` na obiekt pacjenta
+ * w shape spójnym z `state.patients[]`.
+ */
+function _metaToPatient(meta) {
+    return {
+        id: meta.kod,
+        kodPacjenta: meta.kod,
+        imie: meta.imie || '',
+        nazwisko: meta.nazwisko || '',
+        pesel: meta.pesel || '',
+        telefon: meta.telefon || '',
+        email: meta.email || '',
+        dataUrodzenia: meta.dataUrodzenia || '',
+        archived: meta.archived === true,
+        _folderName: meta.folderName
+    };
+}
+
+/**
+ * Helper PR-K3: ładuje pełną zawartość folderu pacjentów do state.
+ * Wywoływane z `connectLocalFolder`/`restoreLocalFolder`/`reauthorizeLocalFolder`.
+ *
+ * @param {FileSystemDirectoryHandle} handle
+ * @returns {Promise<{loaded: number, total: number, errors: number}>}
+ */
+async function _loadAllFromFolder(handle) {
+    const scanned = await scanPatientFolders(handle);
+    const result = { loaded: 0, total: scanned.length, errors: 0 };
+
+    if (scanned.length === 0) {
+        return result;
+    }
+
+    const patients = [];
+    const visits = [];
+    const meds = [];
+    const diagnoses = [];
+    const recommendations = [];
+    const tests = [];
+
+    for (const meta of scanned) {
+        try {
+            const full = await loadPatientFromFolder(handle, meta.folderName);
+            if (!full || !full.patient) {
+                result.errors++;
+                // dorzuć szkielet, żeby pacjent nie zniknął z listy
+                patients.push(_metaToPatient(meta));
+                continue;
+            }
+            // Zapamiętaj nazwę folderu na obiekcie (do rename'a przy zmianie nazwiska)
+            full.patient._folderName = meta.folderName;
+            patients.push(full.patient);
+            visits.push(...(full.visits || []));
+            meds.push(...(full.meds || []));
+            diagnoses.push(...(full.diagnoses || []));
+            recommendations.push(...(full.recommendations || []));
+            tests.push(...(full.tests || []));
+            result.loaded++;
+        } catch (e) {
+            console.error('[loadAllFromFolder] błąd ładowania', meta.folderName, e);
+            result.errors++;
+            patients.push(_metaToPatient(meta));
+        }
+    }
+
+    state.patients = patients;
+    state.visits = visits;
+    state.meds = meds;
+    state.diagnoses = diagnoses;
+    state.recommendations = recommendations;
+    state.tests = tests;
+
+    return result;
+}
+
+/**
+ * Helper PR-K3: migracja bieżącego state do XLSX-ów przy pierwszym podpięciu
+ * pustego folderu. Zaznacza WSZYSTKICH pacjentów jako dirty i wymusza
+ * natychmiastowy zapis (bez debounce'a).
+ */
+async function _migrateLocalStateToFolder(handle) {
+    if (!handle || state.patients.length === 0) return { migrated: 0 };
+    let migrated = 0;
+    let errors = 0;
+    for (const patient of state.patients) {
+        const full = _buildFullPatient(patient);
+        try {
+            const ok = await savePatientToFolder(handle, full);
+            if (ok) migrated++;
+            else errors++;
+        } catch (e) {
+            console.error('[migrate] fail for', patient.id, e);
+            errors++;
+        }
+    }
+    return { migrated, errors };
+}
+
+/**
+ * Helper PR-K3: inicjalizuje state po podpięciu folderu.
+ * Priorytet źródeł danych:
+ *   1. pliki XLSX w subfolderach `pacjenci/{KOD}_{Naz}_{Imię}/pacjent.xlsx` → load
+ *   2. legacy `data.json` (z PR-I) → load + migracja do XLSX
+ *   3. folder pusty + state nie-pusty (np. fake-data po seed) → migracja state → XLSX
+ *   4. folder pusty + state pusty → no-op (apka startuje od pustej bazy)
+ *
+ * @returns {Promise<{source: string, loaded: number, total: number}>}
+ */
+async function _initStateFromFolder(handle) {
+    // 1. Scan plików XLSX (nowy format K1+)
+    const scanResult = await _loadAllFromFolder(handle);
+    if (scanResult.total > 0) {
+        return { source: 'xlsx', loaded: scanResult.loaded, total: scanResult.total };
+    }
+
+    // 2. Legacy data.json (z PR-I) → załaduj + migruj do XLSX
+    const legacyJson = await readTextFile(handle, DATA_FILE_NAME);
+    if (legacyJson) {
+        try {
+            const data = JSON.parse(legacyJson);
+            if (data && typeof data === 'object') {
+                state.patients        = Array.isArray(data.patients)        ? data.patients        : [];
+                state.visits          = Array.isArray(data.visits)          ? data.visits          : [];
+                state.meds            = Array.isArray(data.meds)            ? data.meds            : [];
+                state.diagnoses       = Array.isArray(data.diagnoses)       ? data.diagnoses       : [];
+                state.recommendations = Array.isArray(data.recommendations) ? data.recommendations : [];
+                state.tests           = Array.isArray(data.tests)           ? data.tests           : [];
+                console.log('[Store] Migracja legacy data.json → XLSX', state.patients.length, 'pacjentów');
+                const mig = await _migrateLocalStateToFolder(handle);
+                return { source: 'legacy-json', loaded: mig.migrated, total: state.patients.length };
+            }
+        } catch (e) {
+            console.warn('[Store] data.json malformed', e);
+        }
+    }
+
+    // 3. Folder pusty + state nie-pusty → migracja bieżącego state (fake-data lub localStorage)
+    if (state.patients.length > 0) {
+        console.log('[Store] Migracja state → XLSX', state.patients.length, 'pacjentów');
+        const mig = await _migrateLocalStateToFolder(handle);
+        return { source: 'state', loaded: mig.migrated, total: state.patients.length };
+    }
+
+    // 4. Folder pusty + state pusty (np. po wipeAll + connect)
+    return { source: 'empty', loaded: 0, total: 0 };
+}
 
 // --- helpers: ID generation -------------------------------------------------
 
@@ -150,8 +352,16 @@ function _persist() {
         window.localStorage.setItem(LS_KEY_DATA, _serialize());
         window.localStorage.setItem(LS_KEY_SCHEMA_VER, String(SCHEMA_VERSION));
 
-        // 2) folder lokalny = source-of-truth (gdy podpięty), debounce 500ms
+        // 2) folder lokalny = source-of-truth (gdy podpięty).
+        //    PR-K3 (2026-05-11): zapis per pacjent do `pacjent.xlsx` zamiast
+        //    wspólnego data.json. Zaznaczamy currentPatient jako dirty —
+        //    typowo wszystkie mutations dotyczą obecnie wybranego pacjenta.
+        //    Edge case (addPatient, archivePatient innego niż current) jest
+        //    obsłużony explicit `_markDirty(...)` w tych metodach.
         if (state.folderConnected && _dirHandle) {
+            if (state.currentPatient && state.currentPatient.id) {
+                _markDirty(state.currentPatient.id);
+            }
             _scheduleFolderSync();
         }
 
@@ -163,31 +373,203 @@ function _persist() {
     }
 }
 
-/** Zaplanuj zapis `data.json` do podpiętego folderu (debounce 500ms). */
+/** Zaplanuj zapis pacjentów do podpiętego folderu (debounce 800ms). */
 function _scheduleFolderSync() {
     if (_folderSyncTimer) clearTimeout(_folderSyncTimer);
-    _folderSyncTimer = setTimeout(_doFolderSync, 500);
+    _folderSyncTimer = setTimeout(_doFolderSync, 800);
 }
 
+/**
+ * F5.2 (2026-05-11): wykrywa typowe błędy „folder niedostępny" (User wyłączył
+ * dysk, przeniósł folder, cofnął permission). Inne błędy (np. uszkodzony
+ * plik XLSX) zostają zaraportowane przez `_setSaveStatus('error')`.
+ */
+function _isFolderUnavailableError(err) {
+    if (!err) return false;
+    const name = err.name || '';
+    return name === 'NotFoundError'      // folder/plik nie istnieje
+        || name === 'NotAllowedError'    // permission revoked
+        || name === 'SecurityError'      // ogólne permission denied
+        || name === 'InvalidStateError'  // handle stale
+        || name === 'AbortError';        // anulowane (rzadkie poza picker'em)
+}
+
+/**
+ * F5.2 (2026-05-11): reakcja na utratę folderu w trakcie pracy.
+ * Pokazuje sticky warning toast z akcją „Przywróć dostęp", uruchamia
+ * watcher który co minutę sprawdza czy permission wrócił.
+ */
+function _onFolderUnavailable() {
+    state.folderConnected = false;
+    state.folderStatus = 'denied';
+    emit();
+    if (_unavailableToast) return; // już pokazany — nie duplikuj
+    if (typeof window !== 'undefined' && window.Toast) {
+        _unavailableToast = window.Toast.sticky({
+            variant: 'warning',
+            title: '⚠ Folder niedostępny',
+            message: 'Aplikacja straciła dostęp do folderu „'
+                + (state.folderName || '?')
+                + '". Zmiany są zachowane w pamięci — kliknij „Przywróć dostęp" '
+                + 'lub poczekaj na auto-detekcję (do 1 min).',
+            actions: [{
+                label: 'Przywróć dostęp',
+                variant: 'primary',
+                onClick: async (_ev, toast) => {
+                    const result = await Store.reauthorizeLocalFolder();
+                    if (result && result.ok) {
+                        if (toast && toast.dismiss) toast.dismiss('api');
+                        _unavailableToast = null;
+                    }
+                }
+            }]
+        });
+    }
+    _startFolderHealthCheck();
+}
+
+/**
+ * F5.2: reakcja na powrót folderu — domykamy sticky toast i pushujemy
+ * dirty pacjentów do zapisu.
+ */
+function _onFolderRecovered() {
+    if (_unavailableToast && typeof window !== 'undefined' && window.Toast) {
+        window.Toast.dismiss(_unavailableToast);
+    }
+    _unavailableToast = null;
+    const dirtyCount = _dirtyPatientIds.size;
+    if (typeof window !== 'undefined' && window.Toast) {
+        window.Toast.success(
+            dirtyCount > 0
+                ? 'Synchronizuję ' + dirtyCount + ' pacjent(ów)…'
+                : 'Folder dostępny',
+            '✓ Folder znów dostępny'
+        );
+    }
+    if (dirtyCount > 0) {
+        _scheduleFolderSync();
+    }
+}
+
+/**
+ * F5.2: cichy watcher (interval 60 s) — gdy folder w stanie 'denied',
+ * próbuje `verifyPermission` BEZ prompt'a. Sukces → push dirty + toast success.
+ */
+function _startFolderHealthCheck() {
+    if (_healthCheckTimer) return;
+    _healthCheckTimer = window.setInterval(async () => {
+        // Watcher żyje tylko gdy w stanie 'denied' z zapamiętanym handle'm.
+        if (!_dirHandle || state.folderStatus !== 'denied') {
+            _stopFolderHealthCheck();
+            return;
+        }
+        try {
+            const ok = await verifyPermission(_dirHandle, 'readwrite', false);
+            if (ok) {
+                state.folderConnected = true;
+                state.folderStatus = 'connected';
+                emit();
+                _stopFolderHealthCheck();
+                _onFolderRecovered();
+            }
+        } catch (e) {
+            // Tichaczem — błąd cichego pinga to OK (np. handle dalej stale).
+            console.warn('[folder-health-check]', e && e.name ? e.name : e);
+        }
+    }, FOLDER_HEALTH_CHECK_MS);
+}
+
+function _stopFolderHealthCheck() {
+    if (_healthCheckTimer) {
+        window.clearInterval(_healthCheckTimer);
+        _healthCheckTimer = null;
+    }
+}
+
+/**
+ * PR-K3 (2026-05-11): zapis zmienionych pacjentów do plików XLSX.
+ * Iteruje po `_dirtyPatientIds` i wywołuje `savePatientToFolder` per pacjent.
+ * Po sukcesie czyści Set; gdy są błędy, status zmienia się na 'error'.
+ *
+ * F5.2 (2026-05-11): wykrywa „folder niedostępny" — w tym przypadku przerywa
+ * iterację, PRZYWRACA wszystkie nieprzetworzone ID do `_dirtyPatientIds`
+ * (żeby się nie zgubiły) i odpala sticky toast + watcher.
+ */
 async function _doFolderSync() {
     if (!_dirHandle) return;
-    try {
-        const payload = JSON.stringify({
-            schema: SCHEMA_VERSION,
-            version: 'psy-app-1.0',
-            lastWrite: new Date().toISOString(),
-            patients: state.patients,
-            visits: state.visits,
-            meds: state.meds,
-            diagnoses: state.diagnoses,
-            recommendations: state.recommendations,
-            tests: state.tests
-        }, null, 2);
-        const ok = await writeTextFile(_dirHandle, DATA_FILE_NAME, payload);
-        if (!ok) _setSaveStatus('error');
-    } catch (e) {
-        console.error('[store folder sync]', e);
+    if (_dirtyPatientIds.size === 0) return;
+
+    const ids = Array.from(_dirtyPatientIds);
+    _dirtyPatientIds.clear();
+
+    let errors = 0;
+    let folderUnavailable = false;
+    let processedIdx = -1;
+
+    for (let i = 0; i < ids.length; i++) {
+        const id = ids[i];
+        const patient = state.patients.find((p) => p.id === id);
+        if (!patient) { processedIdx = i; continue; }   // pacjent skasowany w międzyczasie
+
+        const full = _buildFullPatient(patient);
+        try {
+            // F5.3 (2026-05-11): używamy `renamePatientFolderIfNeeded` zamiast
+            // plain `savePatientToFolder`. Funkcja sama wykrywa czy nazwa
+            // folderu jest aktualna i — jeśli nie — kopiuje plik + dokumenty,
+            // a stary folder usuwa.
+            const expectedName = patientFolderName(patient);
+            const oldName = patient._folderName || expectedName;
+            const result = await renamePatientFolderIfNeeded(_dirHandle, oldName, full);
+
+            if (!result) {
+                errors++;
+            } else {
+                // Zaktualizuj zapisaną nazwę folderu na obiekcie pacjenta.
+                patient._folderName = result.folderName;
+                if (result.renamed) {
+                    console.log('[doFolderSync] rename:', oldName, '→', result.folderName);
+                    if (typeof window !== 'undefined' && window.Toast) {
+                        window.Toast.info(
+                            'Folder pacjenta przemianowany: ' + result.folderName,
+                            '📁 Aktualizacja struktury'
+                        );
+                    }
+                } else if (result.conflict) {
+                    console.warn('[doFolderSync] konflikt nazwy:', expectedName, 'już istnieje');
+                    if (typeof window !== 'undefined' && window.Toast) {
+                        window.Toast.warning(
+                            'Folder docelowy „' + expectedName + '" już istnieje. '
+                                + 'Pacjent zapisany w starym folderze („' + oldName + '"). '
+                                + 'Zmień KOD pacjenta lub usuń konflikt.',
+                            '⚠ Konflikt nazwy folderu'
+                        );
+                    }
+                }
+            }
+            processedIdx = i;
+        } catch (e) {
+            if (_isFolderUnavailableError(e)) {
+                console.warn('[doFolderSync] folder niedostępny:', e.name, '— przerywam i kolejkuję retry');
+                folderUnavailable = true;
+                // Przywróć ten i wszystkie następne ID do dirty
+                for (let j = i; j < ids.length; j++) {
+                    _markDirty(ids[j]);
+                }
+                break;
+            }
+            console.error('[doFolderSync] savePatient fail', id, e);
+            errors++;
+            processedIdx = i;
+        }
+    }
+
+    if (folderUnavailable) {
+        _onFolderUnavailable();
         _setSaveStatus('error');
+    } else if (errors > 0) {
+        _setSaveStatus('error');
+    } else {
+        _setSaveStatus('saved');
     }
 }
 
@@ -307,6 +689,8 @@ export const Store = {
             kodPacjenta: code
         };
         state.patients.push(patient);
+        // PR-K3: explicit mark — nowy pacjent może nie być jeszcze currentPatient
+        _markDirty(code);
         _persist();
         emit();
         return patient;
@@ -729,41 +1113,20 @@ export const Store = {
             state.devMode = false;
             try { window.localStorage.removeItem(LS_KEY_DEV_MODE); } catch (_) { /* */ }
 
-            // Spróbuj wczytać data.json z folderu (overwrite localStorage).
-            const json = await readTextFile(handle, DATA_FILE_NAME);
-            if (json) {
-                try {
-                    const data = JSON.parse(json);
-                    if (data && typeof data === 'object') {
-                        state.patients        = Array.isArray(data.patients)        ? data.patients        : [];
-                        state.visits          = Array.isArray(data.visits)          ? data.visits          : [];
-                        state.meds            = Array.isArray(data.meds)            ? data.meds            : [];
-                        state.diagnoses       = Array.isArray(data.diagnoses)       ? data.diagnoses       : [];
-                        state.recommendations = Array.isArray(data.recommendations) ? data.recommendations : [];
-                        state.tests           = Array.isArray(data.tests)           ? data.tests           : [];
-                        // PR-K: po wczytaniu danych przywróć ostatnio wybranego pacjenta
-                        // (lub auto-wybierz pierwszego nie-zarchiwizowanego), żeby
-                        // sidebar nie był greyed-out po pierwszym podpięciu folderu.
-                        _restoreCurrentPatient();
-                        _persist();   // Zaktualizuj localStorage cache
-                        emit();
-                        return { ok: true };
-                    }
-                } catch (e) {
-                    console.warn('[connectLocalFolder] data.json malformed', e);
-                }
-            }
-            // Brak data.json → wykonaj wipe + zapisz pusty plik
-            state.patients = [];
-            state.visits = [];
-            state.meds = [];
-            state.diagnoses = [];
-            state.recommendations = [];
-            state.tests = [];
-            state.currentPatient = null;   // pusta lista — nic do wyboru
-            _persist();   // wymusi zapis localStorage + folder sync
+            // PR-K3: scan XLSX w folderze (lub migracja legacy data.json / fake-data)
+            const initRes = await _initStateFromFolder(handle);
+            console.log('[connectLocalFolder] źródło danych:', initRes.source,
+                'załadowano:', initRes.loaded, '/', initRes.total);
+
+            // Przywróć ostatnio wybranego pacjenta (lub pierwszego z listy)
+            _restoreCurrentPatient();
+            // Cache do localStorage (offline fallback)
+            try {
+                window.localStorage.setItem(LS_KEY_DATA, _serialize());
+                window.localStorage.setItem(LS_KEY_SCHEMA_VER, String(SCHEMA_VERSION));
+            } catch (_) { /* */ }
             emit();
-            return { ok: true };
+            return { ok: true, source: initRes.source };
 
         } catch (e) {
             // User anulował picker → AbortError. Inne błędy logujemy.
@@ -825,29 +1188,16 @@ export const Store = {
             state.folderStatus = 'connected';
             state.devMode = false;
 
-            // Wczytaj data.json (jeśli istnieje, overwrite localStorage)
-            const json = await readTextFile(handle, DATA_FILE_NAME);
-            if (json) {
-                try {
-                    const data = JSON.parse(json);
-                    if (data && typeof data === 'object') {
-                        state.patients        = Array.isArray(data.patients)        ? data.patients        : [];
-                        state.visits          = Array.isArray(data.visits)          ? data.visits          : [];
-                        state.meds            = Array.isArray(data.meds)            ? data.meds            : [];
-                        state.diagnoses       = Array.isArray(data.diagnoses)       ? data.diagnoses       : [];
-                        state.recommendations = Array.isArray(data.recommendations) ? data.recommendations : [];
-                        state.tests           = Array.isArray(data.tests)           ? data.tests           : [];
-                        // Cache do localStorage
-                        try {
-                            window.localStorage.setItem(LS_KEY_DATA, _serialize());
-                        } catch (_) { /* */ }
-                    }
-                } catch (e) {
-                    console.warn('[restoreLocalFolder] data.json malformed', e);
-                }
-            }
-            // PR-K: po restore z poprzedniej sesji wybierz domyślnego pacjenta
-            // (jak po `connectLocalFolder`), żeby sidebar był aktywny od razu.
+            // PR-K3: scan XLSX w folderze (lub migracja legacy)
+            const initRes = await _initStateFromFolder(handle);
+            console.log('[restoreLocalFolder] źródło danych:', initRes.source,
+                'załadowano:', initRes.loaded, '/', initRes.total);
+
+            // Cache do localStorage (offline fallback)
+            try {
+                window.localStorage.setItem(LS_KEY_DATA, _serialize());
+                window.localStorage.setItem(LS_KEY_SCHEMA_VER, String(SCHEMA_VERSION));
+            } catch (_) { /* */ }
             _restoreCurrentPatient();
             emit();
             return true;
@@ -879,26 +1229,26 @@ export const Store = {
         state.folderName = _dirHandle.name || '';
         state.folderStatus = 'connected';
         state.devMode = false;
-        // Odczyt data.json
-        const json = await readTextFile(_dirHandle, DATA_FILE_NAME);
-        if (json) {
-            try {
-                const data = JSON.parse(json);
-                if (data && typeof data === 'object') {
-                    state.patients        = Array.isArray(data.patients)        ? data.patients        : [];
-                    state.visits          = Array.isArray(data.visits)          ? data.visits          : [];
-                    state.meds            = Array.isArray(data.meds)            ? data.meds            : [];
-                    state.diagnoses       = Array.isArray(data.diagnoses)       ? data.diagnoses       : [];
-                    state.recommendations = Array.isArray(data.recommendations) ? data.recommendations : [];
-                    state.tests           = Array.isArray(data.tests)           ? data.tests           : [];
-                }
-            } catch (_) { /* */ }
+
+        // F5.2: jeśli straciliśmy folder w trakcie pracy (sticky toast aktywny),
+        // domknij toast + zatrzymaj watcher + pushuj dirty.
+        _stopFolderHealthCheck();
+        if (_unavailableToast) {
+            if (typeof window !== 'undefined' && window.Toast) {
+                window.Toast.dismiss(_unavailableToast);
+            }
+            _unavailableToast = null;
         }
-        // PR-K: po reauthorize też przywróć wybór pacjenta
+
+        // PR-K3: scan XLSX w folderze (lub migracja legacy)
+        const initRes = await _initStateFromFolder(_dirHandle);
+        console.log('[reauthorizeLocalFolder] źródło danych:', initRes.source,
+            'załadowano:', initRes.loaded, '/', initRes.total);
+
         _restoreCurrentPatient();
         _persist();
         emit();
-        return { ok: true };
+        return { ok: true, source: initRes.source };
     },
 
     /**
@@ -909,6 +1259,14 @@ export const Store = {
     async disconnectLocalFolder() {
         try { await clearHandle(); } catch (_) { /* */ }
         if (_folderSyncTimer) { clearTimeout(_folderSyncTimer); _folderSyncTimer = null; }
+        // F5.2: cleanup sticky toasta + watcher'a (gdyby były aktywne).
+        _stopFolderHealthCheck();
+        if (_unavailableToast) {
+            if (typeof window !== 'undefined' && window.Toast) {
+                window.Toast.dismiss(_unavailableToast);
+            }
+            _unavailableToast = null;
+        }
         _dirHandle = null;
         state.folderConnected = false;
         state.folderName = '';
@@ -942,6 +1300,16 @@ export const Store = {
 
     getSaveStatus() {
         return state.saveStatus;
+    },
+
+    // ---- Root folder accessor (PR-K4) --------------------------------------
+
+    /**
+     * Zwraca handle do root folderu pacjentów (do operacji w `_documents-store.js`,
+     * `_local-folder-store.js`). `null` gdy folder nie jest podpięty.
+     */
+    getRootFolderHandle() {
+        return _dirHandle;
     }
 };
 

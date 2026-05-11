@@ -29,6 +29,16 @@ const VALID_POSITION = new Set([
     'top-right', 'top-left', 'bottom-right', 'bottom-left', 'top-center', 'bottom-center'
 ]);
 
+// F5.1 (2026-05-11): produkcyjne domyślne czasy trwania toastów per variant.
+// Krótkie info/success znikają po 4 s, ostrzeżenia/błędy wiszą dłużej (8 s),
+// można wymusić sticky przez explicit `duration: 0`.
+const DEFAULT_DURATION_BY_VARIANT = {
+    info: 4000,
+    success: 4000,
+    warning: 8000,
+    danger: 8000
+};
+
 export class PsyToastContainer extends LitElement {
     static properties = {
         position: { type: String, reflect: true },
@@ -85,12 +95,19 @@ export class PsyToastContainer extends LitElement {
      */
     push(options = {}) {
         const toast = document.createElement('psy-toast');
+        const variant = options.variant || 'info';
         if (options.variant) toast.setAttribute('variant', options.variant);
         if (options.title) toast.setAttribute('title', options.title);
         if (options.icon) toast.setAttribute('icon', options.icon);
         if (options.closable === false) toast.closable = false;
+        // F5.1: gdy duration nie podany — użyj variant-default (4 s / 8 s).
+        // Explicit `duration: 0` → sticky (manual close).
         if (Number.isFinite(options.duration)) {
             toast.duration = options.duration;
+        } else {
+            toast.duration = DEFAULT_DURATION_BY_VARIANT[variant] != null
+                ? DEFAULT_DURATION_BY_VARIANT[variant]
+                : 4000;
         }
 
         // Zawartość:
@@ -178,6 +195,72 @@ if (!customElements.get('psy-toast-container')) {
 // Udogodnienie dla kodu biznesowego: globalny `window.PsyToast.notify(...)`
 if (typeof window !== 'undefined' && !window.PsyToast) {
     window.PsyToast = {
+        notify: (options, containerId) => PsyToastContainer.notify(options, containerId)
+    };
+}
+
+// ============================================================================
+// F5.1 (2026-05-11): krótki helper `window.Toast` z metodami per-variant.
+//
+// Użycie:
+//   Toast.success('Zapisano')                           // 4 s
+//   Toast.info('Wczytano pacjenta P004')                // 4 s
+//   Toast.warning('Folder niedostępny')                 // 8 s
+//   Toast.danger('Nie udało się zapisać pliku')         // 8 s, role=alert
+//   Toast.sticky({ title:'Wymaga akcji', message:'...', actions:[...] })  // sticky, manual close
+//   Toast.dismiss(toastEl)                              // ręczne zamknięcie
+//
+// Drugi argument metod variant może być:
+//   - string  → użyty jako `title`
+//   - object  → pełne `options` (title, actions, html, icon, duration, containerId, ...)
+// ============================================================================
+
+function _normalizeToastArgs(message, titleOrOpts) {
+    let opts = {};
+    if (typeof titleOrOpts === 'string') {
+        opts.title = titleOrOpts;
+    } else if (titleOrOpts && typeof titleOrOpts === 'object') {
+        opts = Object.assign({}, titleOrOpts);
+    }
+    if (message != null && opts.message == null && opts.html == null) {
+        opts.message = message;
+    }
+    return opts;
+}
+
+function _toastVariant(variant, message, titleOrOpts) {
+    const opts = _normalizeToastArgs(message, titleOrOpts);
+    opts.variant = variant;
+    const containerId = opts.containerId;
+    delete opts.containerId;
+    return PsyToastContainer.notify(opts, containerId);
+}
+
+if (typeof window !== 'undefined' && !window.Toast) {
+    window.Toast = {
+        success: (message, titleOrOpts) => _toastVariant('success', message, titleOrOpts),
+        info: (message, titleOrOpts) => _toastVariant('info', message, titleOrOpts),
+        warning: (message, titleOrOpts) => _toastVariant('warning', message, titleOrOpts),
+        danger: (message, titleOrOpts) => _toastVariant('danger', message, titleOrOpts),
+        /**
+         * Sticky toast (duration=0). `opts` obowiązkowy obiekt — variant default `info`.
+         * Zwraca element toasta — można go zapisać i potem `Toast.dismiss(t)`.
+         */
+        sticky: (opts = {}) => {
+            const merged = Object.assign({ variant: 'info', closable: true }, opts, { duration: 0 });
+            const containerId = merged.containerId;
+            delete merged.containerId;
+            return PsyToastContainer.notify(merged, containerId);
+        },
+        /**
+         * Ręczne zamknięcie istniejącego toasta.
+         */
+        dismiss: (toast) => {
+            if (toast && typeof toast.dismiss === 'function') {
+                toast.dismiss('api');
+            }
+        },
+        // Surowe API — gdyby ktoś potrzebował pełnej kontroli
         notify: (options, containerId) => PsyToastContainer.notify(options, containerId)
     };
 }

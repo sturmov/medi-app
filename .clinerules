@@ -111,7 +111,81 @@
 - **Routing:** `#/patients/edit/:id` przekierowuje do `viewPatientDetail` (alias). `viewPatientForm` jest cienkim delegatem (do skasowania w kolejnym PR).
 - **Kontrolka edytowalna:** klasa `.psy-pdf__input` (patient detail form input) — spójna stylistycznie z `.psy-vf__input` (formularz wizyty).
 
+## 17) Ustalenia PO 2026-05-11 (paczka PR-J — sticky profil + 10 sekcji + 5 podzakładek + Plan/Parametry/Dokumenty)
+Pełna analiza w `docs/REQUIREMENTS_2026-05-11.md` (zdjęcia `docs/z1.jpg`..`z7.jpg`).
+
+- **Topbar — placeholder logo.** `<div class="psy-new-brand">PsychoApp</div>` → `<div class="psy-new-brand psy-new-brand--placeholder">Logo lub nazwa aplikacji</div>`. Tekst „PsychoApp" zostaje w `<title>` i `<noscript>` (wewnętrzna nazwa kodu); zmiana dotyczy wyłącznie brandu w pasku.
+- **Sticky profil pacjenta — duży, czytelny (laptop 14"/tablet).** Pasek pacjenta zawiera: PESEL · Imię (Drugie imię) Nazwisko · ikona płci ♂/♀ · wiek · telefon · mail · badge auto „Pełnoletni" / „Nieletni" (wyliczany z `dataUrodzenia`). Odcienie badge'a **delikatne**: dorosły → jasny niebieski (`#E0F2FE`), dziecko → jasny róż (`#FCE7F3`). Pasek pozostaje **jednowierszowy**, sticky we wszystkich widokach.
+- **Lupa = wyszukiwarka pacjenta.** Ikona 🔍 w prawej części paska pacjenta otwiera popover z `<input>`em search. Wpisanie frazy filtruje listę pacjentów po imieniu/nazwisku/kodzie/PESEL; klik wyniku → `Store.selectPatient(p)` + nawigacja do `#/patients/detail/:id` (natychmiastowe przełączenie). Bez wchodzenia w `#/patients` (lista).
+- **Menu boczne = 10 pozycji** (rename + nowe). Kolejność: 1) **+ Nowa wizyta** (dropdown z 6 typami notatek), 2) Historia wizyt, 3) Leki, 4) Testy, 5) Zalecenia, 6) **Plan leczenia** (NOWE), 7) **Dane identyfikacyjne** (rename z „Pacjent"), 8) Diagnozy, 9) **Parametry** (NOWE), 10) **Dokumenty** (NOWE).
+- **„Nowa wizyta" = submenu w sidebarze.** Klik rozwija/zwija 6 kafelków typów notatek (`1sze spotkanie / Kolejne spotkanie / Superwizja / Notatka administracyjna / Kontakt telefoniczny / Kontakt mailowy`). Stary widok kafelkowy `#/visit/new` zachowany dla wstecznej kompatybilności, ale **domyślny entry-point to submenu** (klik kafelka → `#/visit/form/new/:typeId`).
+- **6 typów notatek wizyt.** `VISIT_TYPES` w `_visit-dict.js` zredukowany do 6 pozycji: `first_meeting`, `next_meeting`, `supervision`, `admin_note`, `phone_contact`, `email_contact`. **Bez migracji** istniejących danych — apka jeszcze nie działa produkcyjnie. `FAKE_VISITS` w `_fake-data.js` zaktualizowane na nowe `typeId`.
+- **Historia wizyt = strumień akapitów.** `viewHistory()` przebudowany z tabeli na listę akapitów, **od najnowszej do najstarszej** (klientka: „im niżej scrolluję, tym starsze"). Każdy akapit ma nagłówek `[NAZWA NOTATKI] · [typ wizyty] · [data] · [płatność]` i **pełny opis** wizyty z `visit.data._raw` (bez skrótów `buildSummary()`). Klik akapitu → `#/visit/form/:id`.
+- **„Dane identyfikacyjne" = 5 podzakładek.** Karta pacjenta (`view-patient-detail.js`) ma drugi rząd tabs w prawej kolumnie:
+  1) **Ogólne** (= dotychczasowe dane: PESEL, imię, II imię, nazwisko, adres, telefon, mail — **bez pola Kraj** które klientka przekreśliła),
+  2) **Osoby upoważnione** (lista: Imię, Nazwisko, Telefon, Komentarz; „komu przekazywać dane med + opiekun"),
+  3) **Zgoda RODO** (checkbox + data + komentarz),
+  4) **Inne** (wolne pole tekstowe; klientka: „nie wiem jeszcze jakie"),
+  5) **Opieka medyczna** (lista poprzednich kontaktów medycznych: Imię, Nazwisko, Specjalność, Data od/do, Komentarz).
+- **Plan leczenia ≠ Zalecenia.** Klientka jasno: Zalecenia = do domu / samodzielne działanie pacjenta. Plan leczenia = wspólnie z doktorem (drzewo celów L1/L2 + zadania per cel). Dwie osobne sekcje, dwa osobne widoki.
+- **Parametry.** Nowa sekcja (`view-parameters.js`) — na start: wzrost, waga, BMI auto, ciśnienie skurczowe/rozkurczowe, tętno. Klientka: „to co już mamy idzie na górę, reszta niżej; sekcja powstaje na przyszłość". Schemat danych w `Store.patient.parameters{...}`.
+- **Dokumenty.** Nowa sekcja w sidebarze (`view-documents.js`). Na razie **stub UI** (uploader + lista placeholder). Pełna integracja storage w Fazie 3 (PR-10/PR-11).
+
+## 18) Ustalenia PO 2026-05-11 cd. (PR-J11 — bez ikon w menu bocznym)
+- **Menu boczne BEZ emoji/ikon przy elementach.** Klientka jednoznacznie: zarówno 10 głównych pozycji (Historia wizyt, Leki, Testy, Zalecenia, Plan leczenia, Dane identyfikacyjne, Diagnozy, Parametry, Dokumenty) jak i 6 typów wizyt w submenu „Nowa wizyta" (1sze spotkanie, Kolejne spotkanie, Superwizja, Notatka administracyjna, Kontakt telefoniczny, Kontakt mailowy) renderowane są **tylko jako etykiety tekstowe**, bez kolumny ikon. Profesjonalny, czysty wygląd zamiast „emoji UI".
+- **Pole `icon` w `APP_MENU` (`_menu.js`) zostało usunięte** całkowicie. Pole `icon` w `VISIT_TYPES` (`_visit-dict.js` / `_fake-data.js`) **pozostaje** — używane w innych miejscach (kafelki picker'a w `viewVisitNew`, ikony nagłówków akapitów w historii wizyt, ikony per typ wizyty w nagłówku formularza). Tylko sidebar submenu nie wyświetla ich.
+- **Element `+` w „+ Nowa wizyta" zostaje** — to część etykiety tekstowej (per z2.jpg klientki), nie emoji-ikona.
+- **Chevron `▾`/`▸` przy „Nowa wizyta" zostaje** — funkcjonalny wskaźnik rozwijania, nie dekoracja.
+- **Klasy CSS `.psy-new-sidebar__icon` i `.psy-new-sidebar__submenu-icon` pozostają w stylesheet z `display: none`** (legacy, gdyby coś zewnętrznego importowało). Renderowanie span'ów ikon usunięte z `_renderSidebar()` w `app-new.js`.
+
+## 19) Ustalenia PO 2026-05-11 cd. 2 (PR-J12 — kolor nagłówka karty pacjenta wg wieku)
+- **Nagłówek karty pacjenta** (`view-patient-detail.js`: `.psy-patient-detail__header`) ma **delikatne tło i lewy pasek akcentu** zależne od wieku pacjenta:
+  - **Pełnoletni (≥ 18 lat)** → tło `linear-gradient(180deg, #E0F2FE 0%, #F0F9FF 100%)` + lewy pasek `#0EA5E9`. Subtitle/breadcrumb w odcieniu `#075985`/`#0369A1`.
+  - **Nieletni (< 18 lat)** → tło `linear-gradient(180deg, #FCE7F3 0%, #FDF2F8 100%)` + lewy pasek `#EC4899`. Subtitle/breadcrumb w odcieniu `#9D174D`/`#BE185D`.
+  - **Brak danych o wieku** (nowy pacjent, brak `dataUrodzenia` i `wiek`) → tło neutralne (białe, bez modyfikatora).
+- **Zakres = Wariant A** (jedyne miejsce z kolorem): tylko nagłówek widoku karty pacjenta (`#/patients/detail/:id`). Inne widoki (Historia, Leki, Testy, …) zostają neutralne. Sticky pasek pacjenta w topbarze nie zmienia tła (już ma badge „Pełnoletni"/„Nieletni").
+- **Próg wieku**: 18 lat (na bazie `dataUrodzenia`, fallback z pola `wiek`). Logika w `view-patient-detail.js` używa `ageOf(patient)` → `parseInt`. Klasy CSS: `.psy-new-view__header--adult` / `.psy-new-view__header--minor` (dodawane warunkowo do `psy-new-view__header psy-patient-detail__header`).
+- **Tooltip**: `title="Pacjent pełnoletni"` / `title="Pacjent nieletni"` na headerze (a11y).
+- **Spójność kolorystyczna**: dokładnie te same kolory bazowe co badge „Pełnoletni"/„Nieletni" w pasku pacjenta (sekcja 17).
+
+## 20) Ustalenia PO 2026-05-11 cd. 3 (paczka K — format XLSX = przyszły Google Sheet)
+- **1 plik `pacjent.xlsx` per pacjent** w folderze `pacjenci/{KOD}_{Nazwisko}_{Imię}/`. Załączniki w podfolderze `dokumenty/`. Bez `_index.xlsx` master (jednoosobowa apka — lista pacjentów = skan folderu).
+- **8 zakładek w pliku** (mapowanie 1:1 z menu apki, poza akcją „+ Nowa wizyta" i widokiem Dokumenty który jest folderem):
+  1. `Pacjent` — KV z 7 sekcjami (Ogólne / Dodatkowe / Kontakt / Osoby upoważnione / RODO / Inne / Opieka medyczna), separatory merged-cell
+  2. `Wizyty` — **akapity drzewkowe**: każda wizyta = blok z headerem + sekcją „Dane wizyty" + sekcją „Treść notatki" (wszystkie pola z `visit.data._raw`)
+  3. `Leki` — tabela
+  4. `Testy` — tabela
+  5. `Zalecenia` — tabela
+  6. `PlanLeczenia` — tabela hierarchiczna (CEL / ZADANIE w kolumnie „Poziom")
+  7. `Diagnozy` — tabela (ICD-10)
+  8. `Parametry` — tabela (wzrost/waga/BMI/ciśnienie/tętno)
+- **Cel formatu = czytelność dla człowieka** gdyby klientka porzuciła apkę. Pełna stylizacja (merged cells, granat header `1F4E78`, niebieski section `2E75B6`, jasny label `E8EEF7`, ramki, autofiltry, freeze panes) — wzorzec ze starego `xlsx-handler.js`. Wartości boolean kolorowane (zielony TAK / szary NIE). Wiersz wizyty niezapłaconej ma żółty header.
+- **Identyczny format z przyszłym Google Sheets w Drive** (Faza 4) — zmiana tylko backendu, nie modelu danych.
+- **Stary `js/xlsx-handler.js` zostaje nietknięty** — to legacy dla `legacy.html` / `app.js`. Nowa apka używa `js/views/_xlsx-codec.js` (paczka K1).
+- **Bez wsparcia dla konfliktów / współbieżnej edycji** — jednoosobowa apka.
+- **Biblioteka XLSX:** `lib/xlsx-js-style.min.js` (fork SheetJS z pełnym wsparciem styli). Załadowana w `index.html` przez klasyczny `<script>` przed module-script. W Node test-runnerach wymagany pusty shim `lib/cpexcel.js`.
+- **Pliki paczki K1:**
+  - `js/views/_storage-format.js` — semantyczne mapowanie (sekcje, kolumny, etykiety pól po polsku)
+  - `js/views/_xlsx-codec.js` — `writePatientWorkbook(fullPatient) → ArrayBuffer` + `downloadPatientWorkbook(...)` + `buildFullPatient(store, id)`
+  - `tools/test-xlsx-codec.js` — test offline z fake-data → `tools/test_output_pacjent.xlsx` (sample do oceny)
+  - Przycisk testowy `⬇ Pobierz XLSX` w nagłówku karty pacjenta (`view-patient-detail.js`) — do usunięcia w paczce K3 gdy autozapis przejmie zadanie.
+- **Kolejne paczki:** K2 — `_local-folder-store.js` (File System Access API); K3 — integracja Store + autozapis 800ms + migracja localStorage→XLSX; K4 — realne Dokumenty.
+
+## 21) Procedura kontynuacji między sesjami (NEXT_STEPS.md)
+- **Na końcu każdej paczki / sesji** developer aktualizuje `docs/NEXT_STEPS.md` — krótką notatkę kontekstową która pozwala wystartować nowy czat lub `/smol` bez utraty kontekstu.
+- **Pierwszy plik do odczytu w nowym czacie** to `docs/NEXT_STEPS.md` (przed `.clinerules`, `IMPLEMENTATION_PLAN.md` i resztą).
+- Struktura `NEXT_STEPS.md`:
+  1. „Ostatnia sesja" — data + lista ukończonych paczek
+  2. „Stan apki — co działa" — przegląd funkcjonalności (UI + storage + …)
+  3. „Następna paczka" — szczegółowy plan najbliższej paczki (pliki, kroki, edge cases, test ręczny)
+  4. „Plan kolejnych faz" — krótki zarys 2-3 faz w przód
+  5. „Pliki — szybkie odniesienie" — drzewo `js/views/`, `docs/`, `tools/`, `lib/`
+  6. „Jak odpalić lokalnie" — komendy
+  7. „Aktualne ustalenia PO" — tabela sekcji `.clinerules`
+- Na końcu sesji developer dorzuca do commita aktualizację `NEXT_STEPS.md` razem ze zmianami kodu.
+
 ## 11) Dokumentacja planu
+
 - Pełny, wykonawczy plan wszystkich faz znajduje się w `docs/IMPLEMENTATION_PLAN.md`.
-- Każdy chat/dev przed rozpoczęciem pracy czyta: `.clinerules` → `docs/PO_PRIORYTETY_2026-04-04.md` → `docs/IMPLEMENTATION_PLAN.md` → `components-demo.html`.
+- Każdy chat/dev przed rozpoczęciem pracy czyta: **`docs/NEXT_STEPS.md` → `.clinerules` → `docs/PO_PRIORYTETY_2026-04-04.md` → `docs/IMPLEMENTATION_PLAN.md`** → `components-demo.html`.
 - Postęp realizacji śledzony jest w sekcji 8 `docs/IMPLEMENTATION_PLAN.md` (checklisty) i w liście PR (sekcja 4).

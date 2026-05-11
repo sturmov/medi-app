@@ -1,27 +1,29 @@
 // ============================================================================
-// view-patient-detail.js — karta pacjenta (edit = view, jedno miejsce).
+// view-patient-detail.js — karta pacjenta (Dane identyfikacyjne).
 //
-// Po PR-H (2026-05-01 cd. 2): zakładka „Pacjent" jest **edytowalna inline**
-// z autozapisem 400 ms — bez przycisku „✎ Edytuj" i bez osobnego
-// `view-patient-form.js`. Analogicznie do wizyty: edit = view.
+// PR-J10 (2026-05-11): single-column layout.
+//   • Klientka: „pacjent to właśnie ta główna strona; dokumenty są już w menu".
+//   • Usunięta lewa kolumna z awatarem + pionowe zakładki + skróty.
+//   • Usunięty przełącznik „📇 Pacjent / 📁 Dokumenty" — Dokumenty są pod
+//     osobnym routem `#/documents` w głównym sidebarze (PR-J9).
+//   • Główny przełącznik wewnątrz widoku to 5 podzakładek z PR-J6:
+//     Ogólne / Osoby upoważnione / Zgoda RODO / Inne / Opieka medyczna.
 //
 // Hash:
-//   #/patients/new                   – nowy pacjent, lazy create przy 1. wpisie
-//   #/patients/detail/:id            – edycja istniejącego, zakładka „Pacjent"
-//   #/patients/detail/:id/documents  – zakładka „Dokumenty" (stub, Faza 3)
-//   #/patients/edit/:id              – alias do `/detail/:id` (legacy)
+//   #/patients/new                   — nowy pacjent (lazy create)
+//   #/patients/detail/:id            — edycja istniejącego
+//   #/patients/edit/:id              — alias legacy → /detail/:id
 //
-// Layout ATOL: lewa kolumna (avatar + pionowe zakładki + skróty), prawa
-// kolumna — karty „Pacjent" + „Dane kontaktowe + adres + adres koresp." +
-// „Powiązania z innymi kontami" (gdy minor lub są opiekunowie).
-//
-// Akcje w nagłówku:
-//   • ← Wróć do listy
-//   • 📦 Archiwizuj pacjenta / ↩ Przywróć z archiwum  (z `openConfirm`)
+// Karta jest **edytowalna inline** z autozapisem 400 ms.
 // ============================================================================
 
 import { Store } from './_store.js';
 import { openConfirm } from './_modal.js';
+import { downloadPatientWorkbook, buildFullPatient } from './_xlsx-codec.js';
+// F5.4 (2026-05-11): walidatory PESEL/tel/mail + autofill z PESEL
+import {
+    validatePesel, parsePesel, validatePhone, validateEmail
+} from './_form-helpers.js';
 
 // ---- helpers (lokalne) -----------------------------------------------------
 
@@ -85,19 +87,7 @@ function toast(variant, title, message) {
 
 /**
  * Wiersz formularza w karcie detali pacjenta — etykieta po lewej, kontrolka
- * po prawej (analogicznie do read-only field-row, ale z `<input>`).
- *
- * @param {object} opts
- *   - label: widoczna etykieta (z dwukropkiem na końcu doklei się sam)
- *   - name : atrybut `name` na inpucie (= klucz pola pacjenta)
- *   - value: wartość początkowa
- *   - type : 'text' (default) | 'date' | 'tel' | 'email' | 'select' | 'textarea' | 'checkbox'
- *   - options: tablica { value, label } dla `type='select'`
- *   - readonly: true → input read-only (tło szare)
- *   - placeholder
- *   - mono: monospace (np. PESEL/telefon)
- *   - rows: liczba wierszy textarea
- *   - inputAttrs: dodatkowe atrybuty (np. maxlength)
+ * po prawej.
  */
 function editableRow(opts = {}) {
     const {
@@ -152,30 +142,17 @@ function editableRow(opts = {}) {
     ]);
 }
 
-// ---- TABS ------------------------------------------------------------------
-
-const REAL_TABS = [
-    { id: 'patient',   label: 'Pacjent',   icon: '📇' },
-    { id: 'documents', label: 'Dokumenty', icon: '📁' }
-];
-
-const SHORTCUT_TABS = [
-    { id: 'history',         label: 'Historia wizyt', icon: '🗓️',  route: '#/history',         counter: (pid) => Store.getVisits(pid).length },
-    { id: 'meds',            label: 'Leki',           icon: '💊', route: '#/meds',            counter: (pid) => Store.getMeds(pid).length },
-    { id: 'diagnoses',       label: 'Diagnozy',       icon: '🏥', route: '#/diagnoses',       counter: (pid) => Store.getDiagnoses(pid).length },
-    { id: 'recommendations', label: 'Zalecenia',      icon: '📋', route: '#/recommendations', counter: (pid) => Store.getRecommendations(pid).length },
-    { id: 'tests',           label: 'Testy',          icon: '📊', route: '#/tests',           counter: (pid) => Store.getTests(pid).length }
-];
-
 // ---- ENTRYPOINT ------------------------------------------------------------
 
 /**
  * @param {object} opts
  *   - id: string|null  — `null` = nowy pacjent (lazy create)
- *   - tab: 'patient' | 'documents'
+ *
+ * UWAGA: parametr `tab` (Pacjent / Dokumenty) został wycofany w PR-J10.
+ * Dokumenty są dostępne pod osobnym route'em `#/documents` z głównego sidebara.
  */
 export function renderPatientDetail(opts = {}) {
-    const { id = null, tab = 'patient' } = opts;
+    const { id = null } = opts;
     let _id = id;
     let patient = _id ? (Store.state.patients.find((p) => p.id === _id) || null) : null;
     const isNew = !patient;
@@ -238,7 +215,50 @@ export function renderPatientDetail(opts = {}) {
         }
     }, [initial.archived ? '↩ Przywróć z archiwum' : '📦 Archiwizuj pacjenta']) : null;
 
-    root.appendChild(el('div', { class: 'psy-new-view__header' }, [
+    // PR-K3 (2026-05-11) — Ad-hoc eksport pełnej dokumentacji pacjenta do
+    // pliku XLSX (kopia/backup). Po podpięciu folderu autozapis robi to
+    // automatycznie do `pacjenci/{KOD}_*/pacjent.xlsx` — ten przycisk pozwala
+    // pobrać kopię ręcznie (np. do wysłania mailem, backupu, archiwum).
+    const downloadXlsxBtn = !isNew ? el('button', {
+        class: 'btn btn--secondary',
+        title: 'Pobierz pełną kartę pacjenta jako plik XLSX (kopia/backup)',
+        onclick: () => {
+            try {
+                const fullPatient = buildFullPatient(Store, _id);
+                if (!fullPatient) {
+                    toast('error', 'Brak pacjenta', 'Nie udało się znaleźć danych pacjenta.');
+                    return;
+                }
+                downloadPatientWorkbook(fullPatient);
+                toast('success', 'Wygenerowano kopię XLSX',
+                    'Plik pobierany do folderu Pobrane.');
+            } catch (e) {
+                console.error('[downloadPatientWorkbook]', e);
+                toast('error', 'Błąd generowania XLSX', String(e && e.message || e));
+            }
+        }
+    }, ['⬇ Pobierz kopię']) : null;
+
+    // PR-J12 (2026-05-11): nagłówek karty pacjenta zmienia kolor wg wieku
+    // (Wariant A wymagań klientki). Próg 18 lat: dorosły → jasny niebieski,
+    // dziecko → jasny róż. Spójne z badge'm „Pełnoletni"/„Nieletni" w pasku
+    // pacjenta (sekcja 17 `.clinerules`). Stan „brak daty urodzenia" =
+    // neutralny (bez modyfikatora).
+    const _ageStr = ageOf(initial);
+    const _ageNum = _ageStr ? parseInt(_ageStr, 10) : NaN;
+    const _hasAge = !isNew && !isNaN(_ageNum);
+    const _ageClass = _hasAge
+        ? (_ageNum >= 18
+            ? ' psy-new-view__header--adult'
+            : ' psy-new-view__header--minor')
+        : '';
+
+    root.appendChild(el('div', {
+        class: 'psy-new-view__header psy-patient-detail__header' + _ageClass,
+        title: _hasAge
+            ? (_ageNum >= 18 ? 'Pacjent pełnoletni' : 'Pacjent nieletni')
+            : undefined
+    }, [
         el('div', {}, [
             breadcrumb,
             el('h1', { class: 'psy-new-view__title psy-patient-detail__title' }, titleParts),
@@ -247,34 +267,19 @@ export function renderPatientDetail(opts = {}) {
                     ? 'Kod nadany po pierwszej zmianie · '
                     : ('Kod: ' + initial.id +
                         (initial.pesel ? ' · PESEL ' + initial.pesel : '') +
-                        (ageOf(initial) ? ' · ' + ageOf(initial) + ' lat' : '') + ' · '),
+                        (_ageStr ? ' · ' + _ageStr + ' lat' : '') + ' · '),
                 el('span', { class: 'psy-new-hint' }, ['💾 autozapis aktywny'])
             ])
         ]),
         el('div', { class: 'psy-new-view__actions' }, [
-            backBtn, archiveBtn
+            backBtn, downloadXlsxBtn, archiveBtn
         ].filter(Boolean))
     ]));
 
-    /* === Body: 2-column layout === */
-    const layout = el('div', { class: 'psy-patient-detail__layout' });
-
-    // === LEFT COL: avatar + tabs ===
-    const sidebar = el('aside', { class: 'psy-patient-detail__sidebar' });
-    sidebar.appendChild(renderAvatar(initial, isNew));
-    sidebar.appendChild(renderSidebarNav(initial, tab, isNew));
-    layout.appendChild(sidebar);
-
-    // === RIGHT COL: tab content ===
-    const main = el('section', { class: 'psy-patient-detail__main' });
-    if (tab === 'documents') {
-        main.appendChild(renderDocumentsTab(initial, isNew));
-    } else {
-        main.appendChild(renderPatientTab(initial));
-    }
-    layout.appendChild(main);
-
-    root.appendChild(layout);
+    /* === Body: single column (PR-J10) === */
+    const main = el('section', { class: 'psy-patient-detail__main psy-patient-detail__main--full' });
+    main.appendChild(renderPatientTab(initial));
+    root.appendChild(main);
 
     /* === Autozapis + lazy create === */
     let _autosaveTimer = null;
@@ -329,6 +334,7 @@ export function renderPatientDetail(opts = {}) {
             tytul: data.tytul || '',
             imie: String(data.imie || '').trim(),
             nazwisko: String(data.nazwisko || '').trim(),
+            drugieImie: (data.drugieImie || '').trim(),
             pesel: (data.pesel || '').trim(),
             plec: data.plec || '',
             dataUrodzenia: data.dataUrodzenia || '',
@@ -350,13 +356,23 @@ export function renderPatientDetail(opts = {}) {
             ojciecEmail: data.ojciecEmail || '',
             kontaktNaglyImie: data.kontaktNaglyImie || '',
             kontaktNaglyTelefon: data.kontaktNaglyTelefon || '',
-            kontaktNaglyRelacja: data.kontaktNaglyRelacja || ''
+            kontaktNaglyRelacja: data.kontaktNaglyRelacja || '',
+            // PR-J6 (2026-05-11): pola z nowych podzakładek
+            //   Zgoda RODO / Inne / Opieka medyczna
+            zgodaRodo: !!data.zgodaRodo,
+            zgodaRodoData: data.zgodaRodoData || '',
+            zgodaRodoKomentarz: (data.zgodaRodoKomentarz || '').trim(),
+            innePole: (data.innePole || '').trim(),
+            opiekaMedycznaHistoria: (data.opiekaMedycznaHistoria || '').trim()
         };
 
         Store.updatePatient(_id, payload);
     }
 
     function scheduleAutosave() {
+        // F5.4: walidatory synchroniczne (PESEL/tel/mail) + autofill z PESEL —
+        // pokazujemy błąd OD RAZU, nie czekamy na debounce.
+        _runPatientValidators(root);
         if (_autosaveTimer) clearTimeout(_autosaveTimer);
         _autosaveTimer = setTimeout(autosaveNow, 400);
     }
@@ -364,84 +380,186 @@ export function renderPatientDetail(opts = {}) {
     root.addEventListener('input', scheduleAutosave);
     root.addEventListener('change', scheduleAutosave);
 
+    // F5.4: pierwsze uruchomienie walidatorów po renderze — żeby istniejące
+    // legacy dane z błędnym formatem od razu pokazały ostrzeżenie.
+    setTimeout(() => _runPatientValidators(root), 0);
+
     return root;
 }
 
-// ---- AVATAR ---------------------------------------------------------------
+// ============================================================================
+// F5.4 (2026-05-11): walidatory pól PESEL/tel/mail + autofill z PESEL.
+//
+// Walidacja jest OSTRZEGAWCZA — autozapis zawsze działa, błędny format pokazuje
+// tylko czerwony inline-tekst pod polem. Klientka może wpisywać krok po kroku
+// (np. „123…" → „12345…" → pełen PESEL), w międzyczasie walidator skarży się
+// ale nic nie blokuje.
+//
+// Po wprowadzeniu poprawnego (checksum OK) PESEL, jeśli pola `dataUrodzenia` /
+// `plec` są PUSTE — autofill z parsowanego PESEL + toast info. Nie nadpisujemy
+// ręcznie wpisanych wartości.
+// ============================================================================
 
-function renderAvatar(patient, isNew) {
-    const initials = isNew
-        ? '?'
-        : [(patient.imie || '?').charAt(0), (patient.nazwisko || '?').charAt(0)]
-            .join('').toUpperCase();
-    return el('div', { class: 'psy-patient-detail__avatar' }, [
-        el('div', { class: 'psy-patient-detail__avatar-img' }, [
-            el('span', { class: 'psy-patient-detail__avatar-initials' }, [initials])
-        ]),
-        el('div', { class: 'psy-patient-detail__avatar-caption' }, [
-            isNew ? '(nowy)' : (patient.id || '')
-        ])
-    ]);
-}
+const _patientValidationFields = [
+    { name: 'pesel',                fn: validatePesel, msg: 'Nieprawidłowy PESEL (sprawdź 11 cyfr i sumę kontrolną).' },
+    { name: 'telefon',              fn: validatePhone, msg: 'Format: +48 XXX XXX XXX lub 9 cyfr.' },
+    { name: 'email',                fn: validateEmail, msg: 'Nieprawidłowy format e-maila (np. jan@example.com).' },
+    { name: 'matkaTelefon',         fn: validatePhone, msg: 'Format: +48 XXX XXX XXX lub 9 cyfr.' },
+    { name: 'matkaEmail',           fn: validateEmail, msg: 'Nieprawidłowy format e-maila.' },
+    { name: 'ojciecTelefon',        fn: validatePhone, msg: 'Format: +48 XXX XXX XXX lub 9 cyfr.' },
+    { name: 'ojciecEmail',          fn: validateEmail, msg: 'Nieprawidłowy format e-maila.' },
+    { name: 'kontaktNaglyTelefon',  fn: validatePhone, msg: 'Format: +48 XXX XXX XXX lub 9 cyfr.' }
+];
 
-// ---- SIDEBAR NAV ----------------------------------------------------------
+// Stan modułowy — żeby autofill z PESEL odpalał się TYLKO po transition
+// „niepoprawny → poprawny", nie przy każdym keystroke po wpisaniu valid PESEL.
+let _lastPeselValid = false;
 
-function renderSidebarNav(patient, activeTab, isNew) {
-    const wrap = el('nav', { class: 'psy-patient-detail__tabs' });
+function _runPatientValidators(root) {
+    if (!root) return;
 
-    // Realne zakładki
-    for (const t of REAL_TABS) {
-        const active = activeTab === t.id;
-        wrap.appendChild(el('button', {
-            type: 'button',
-            class: 'psy-patient-detail__tab' + (active ? ' is-active' : ''),
-            onclick: () => {
-                if (isNew) return; // dla nowego pacjenta jeszcze nie ma route
-                window.location.hash = '#/patients/detail/' + patient.id +
-                    (t.id === 'patient' ? '' : '/' + t.id);
+    for (const v of _patientValidationFields) {
+        const input = root.querySelector(`[name="${v.name}"]`);
+        if (!input) continue;
+        const ok = v.fn(input.value || '');
+        const fieldValue = input.closest('.psy-patient-detail__field-value');
+        if (!fieldValue) continue;
+        let errEl = fieldValue.querySelector('.psy-pdf__error');
+        if (!ok) {
+            if (!errEl) {
+                errEl = el('div', { class: 'psy-pdf__error' });
+                fieldValue.appendChild(errEl);
             }
-        }, [
-            el('span', { class: 'psy-patient-detail__tab-icon' }, [t.icon]),
-            el('span', { class: 'psy-patient-detail__tab-label' }, [t.label])
-        ]));
-    }
-
-    // Skróty (tylko gdy pacjent istnieje)
-    if (!isNew) {
-        wrap.appendChild(el('div', { class: 'psy-patient-detail__tabs-sep' }, ['Sekcje pacjenta']));
-        for (const s of SHORTCUT_TABS) {
-            const count = (typeof s.counter === 'function') ? s.counter(patient.id) : 0;
-            wrap.appendChild(el('button', {
-                type: 'button',
-                class: 'psy-patient-detail__tab psy-patient-detail__tab--shortcut',
-                onclick: (e) => {
-                    e.stopPropagation();
-                    Store.selectPatient(patient);
-                    window.location.hash = s.route;
-                },
-                title: 'Otwórz w głównym menu'
-            }, [
-                el('span', { class: 'psy-patient-detail__tab-icon' }, [s.icon]),
-                el('span', { class: 'psy-patient-detail__tab-label' }, [s.label]),
-                el('span', { class: 'psy-patient-detail__tab-count' }, [String(count)])
-            ]));
+            errEl.textContent = v.msg;
+            errEl.hidden = false;
+            input.classList.add('psy-pdf__input--invalid');
+            input.setAttribute('aria-invalid', 'true');
+        } else {
+            if (errEl) {
+                errEl.hidden = true;
+                errEl.textContent = '';
+            }
+            input.classList.remove('psy-pdf__input--invalid');
+            input.removeAttribute('aria-invalid');
         }
     }
 
-    return wrap;
+    // F5.4 autofill z PESEL — tylko po transition false → true
+    const peselInput = root.querySelector('[name="pesel"]');
+    if (peselInput) {
+        const val = String(peselInput.value || '').trim();
+        const digits = val.replace(/\D/g, '');
+        const isCurrentValid = digits.length === 11 && validatePesel(digits);
+        if (isCurrentValid && !_lastPeselValid) {
+            const parsed = parsePesel(digits);
+            if (parsed) {
+                let filled = [];
+                const dataInput = root.querySelector('[name="dataUrodzenia"]');
+                if (dataInput && !String(dataInput.value || '').trim()) {
+                    dataInput.value = parsed.dataUrodzenia;
+                    filled.push('data urodzenia');
+                }
+                const plecInput = root.querySelector('[name="plec"]');
+                if (plecInput && !String(plecInput.value || '').trim()) {
+                    plecInput.value = parsed.plec === 'M' ? 'Mężczyzna' : 'Kobieta';
+                    filled.push('płeć');
+                }
+                // Wiek — autofill jeśli puste (czytany potem przez autosaveNow)
+                const wiekInput = root.querySelector('[name="wiek"]');
+                if (wiekInput && dataInput) {
+                    wiekInput.value = ageFromDate(parsed.dataUrodzenia);
+                }
+                if (filled.length > 0 && typeof window !== 'undefined' && window.Toast) {
+                    window.Toast.info(
+                        'Wypełniono z PESEL: ' + filled.join(', ') + '.',
+                        '✓ Autofill'
+                    );
+                }
+            }
+        }
+        _lastPeselValid = isCurrentValid;
+    }
 }
 
-// ---- ZAKŁADKA „Pacjent" — edytowalny formularz ----------------------------
+// ---- ZAKŁADKA „Pacjent" — 5 podzakładek (PR-J6) ---------------------------
+//
+// PR-J6 (2026-05-11): 5 podzakładek wewnątrz karty pacjenta (z6.jpg):
+//   1) Ogólne                    — dotychczasowe dane (PESEL/imię/adres/tel/mail)
+//   2) Osoby upoważnione         — komu przekazywać dane medyczne, opiekun
+//   3) Zgoda RODO                — checkbox + data + komentarz
+//   4) Inne                      — wolne pole tekstowe
+//   5) Opieka medyczna           — historia poprzednich kontaktów medycznych
+//
+// Pole „Kraj" nigdy nie zostało dodane (klientka przekreśliła w z3.jpg).
+
+const PATIENT_SUBTABS = [
+    { id: 'general',       label: 'Ogólne',             icon: '🆔' },
+    { id: 'guardians',     label: 'Osoby upoważnione',  icon: '👥' },
+    { id: 'rodo',          label: 'Zgoda RODO',         icon: '📜' },
+    { id: 'other',         label: 'Inne',               icon: '➕' },
+    { id: 'medical-care',  label: 'Opieka medyczna',    icon: '🏥' }
+];
+
+// Stan podzakładki — pamiętamy między re-renderami widoku (UI-side state, nie URL).
+let _patientDetailSubTab = 'general';
 
 function renderPatientTab(patient) {
     const wrap = el('div', { class: 'psy-patient-detail__tab-content' });
+
+    // Drugi rząd tabsów (klientka, z3.jpg + z6.jpg)
+    const tabsRow = el('div', { class: 'psy-patient-detail__subtabs' });
+    for (const t of PATIENT_SUBTABS) {
+        const active = _patientDetailSubTab === t.id;
+        tabsRow.appendChild(el('button', {
+            type: 'button',
+            class: 'psy-patient-detail__subtab' + (active ? ' is-active' : ''),
+            onclick: () => {
+                _patientDetailSubTab = t.id;
+                if (window.AppController) window.AppController._renderView(true);
+            }
+        }, [
+            el('span', { class: 'psy-patient-detail__subtab-icon' }, [t.icon]),
+            el('span', { class: 'psy-patient-detail__subtab-label' }, [t.label])
+        ]));
+    }
+    wrap.appendChild(tabsRow);
+
+    // Body — zawartość wybranej podzakładki
+    const body = el('div', { class: 'psy-patient-detail__subtab-body' });
+
+    switch (_patientDetailSubTab) {
+        case 'guardians':
+            body.appendChild(renderSubtabGuardians(patient));
+            break;
+        case 'rodo':
+            body.appendChild(renderSubtabRodo(patient));
+            break;
+        case 'other':
+            body.appendChild(renderSubtabOther(patient));
+            break;
+        case 'medical-care':
+            body.appendChild(renderSubtabMedicalCare(patient));
+            break;
+        case 'general':
+        default:
+            body.appendChild(renderSubtabGeneral(patient));
+            break;
+    }
+
+    wrap.appendChild(body);
+    return wrap;
+}
+
+/* --- Subtab #1: Ogólne -- karty Pacjent + Kontakt + Powiązania (gdy minor) */
+function renderSubtabGeneral(patient) {
+    const wrap = el('div', { class: 'psy-patient-detail__subtab-content' });
 
     const cards = el('div', { class: 'psy-patient-detail__cards' });
     cards.appendChild(renderPatientCard(patient));
     cards.appendChild(renderContactCard(patient));
     wrap.appendChild(cards);
 
-    // Karta „Powiązania" — domyślnie ukryta gdy nie minor (toggle w autosave)
+    // Karta „Powiązania" — domyślnie ukryta gdy nie minor.
     const relationsCard = renderRelationsCard(patient);
     if (!patient.minor && !patient.matkaImie && !patient.ojciecImie && !patient.kontaktNaglyImie) {
         relationsCard.style.display = 'none';
@@ -450,6 +568,136 @@ function renderPatientTab(patient) {
 
     return wrap;
 }
+
+/* --- Subtab #2: Osoby upoważnione --- */
+function renderSubtabGuardians(patient) {
+    const wrap = el('div', { class: 'psy-patient-detail__subtab-content' });
+    wrap.appendChild(el('div', { class: 'psy-new-hint', style: { marginBottom: '12px' } }, [
+        'Lista osób, którym wolno przekazywać informacje o stanie zdrowia pacjenta '
+        + '(opiekunowie prawni, rodzina, inni). Klientka, z6.jpg: „komu przekazywać dane med + opiekun".'
+    ]));
+
+    // Reuse karty „Powiązania" — w niej są pola Matka/Ojciec/Kontakt awaryjny.
+    const card = renderRelationsCard(patient);
+    card.style.display = '';   // zawsze widoczna w tej zakładce
+    wrap.appendChild(card);
+
+    // Lista dodatkowych osób upoważnionych — stub do Fazy 5.
+    const stubCard = el('div', { class: 'psy-patient-detail__card psy-patient-detail__card--full' }, [
+        el('h2', { class: 'psy-patient-detail__card-title' }, ['Dodatkowe osoby upoważnione']),
+        el('div', { class: 'psy-new-empty', style: { padding: '24px 14px', background: '#F9FAFB', borderRadius: '8px' } }, [
+            el('div', { class: 'psy-new-empty__icon' }, ['👥']),
+            el('div', { class: 'psy-new-empty__title' }, ['Lista w przygotowaniu']),
+            el('div', { class: 'psy-new-empty__description' }, [
+                'W kolejnej iteracji dodamy pełną listę osób upoważnionych z polami: '
+                + 'Imię, Nazwisko, Telefon, Komentarz. Obecnie używamy karty „Powiązania" powyżej.'
+            ])
+        ])
+    ]);
+    wrap.appendChild(stubCard);
+
+    return wrap;
+}
+
+/* --- Subtab #3: Zgoda RODO --- */
+function renderSubtabRodo(patient) {
+    const wrap = el('div', { class: 'psy-patient-detail__subtab-content' });
+
+    const card = el('div', { class: 'psy-patient-detail__card psy-patient-detail__card--full' });
+    card.appendChild(el('h2', { class: 'psy-patient-detail__card-title' }, ['Zgoda na przetwarzanie danych']));
+    card.appendChild(el('div', { class: 'psy-new-hint', style: { marginBottom: '12px', textAlign: 'left' } }, [
+        'Zgoda na przetwarzanie danych osobowych zgodnie z RODO. Należy potwierdzić, '
+        + 'zaznaczając checkbox po zapoznaniu pacjenta z klauzulą informacyjną.'
+    ]));
+
+    const tbl = el('div', { class: 'psy-patient-detail__field-table' });
+
+    tbl.appendChild(editableRow({
+        label: 'Pacjent wyraził zgodę',
+        name: 'zgodaRodo',
+        value: !!patient.zgodaRodo,
+        type: 'checkbox'
+    }));
+    tbl.appendChild(editableRow({
+        label: 'Data wyrażenia zgody',
+        name: 'zgodaRodoData',
+        value: patient.zgodaRodoData || '',
+        type: 'date'
+    }));
+    tbl.appendChild(editableRow({
+        label: 'Komentarz',
+        name: 'zgodaRodoKomentarz',
+        value: patient.zgodaRodoKomentarz || '',
+        type: 'textarea',
+        rows: 3,
+        placeholder: 'np. zgoda na przesyłanie wyników mailem, zgoda na kontakt z opiekunem…'
+    }));
+
+    card.appendChild(tbl);
+    wrap.appendChild(card);
+    return wrap;
+}
+
+/* --- Subtab #4: Inne --- */
+function renderSubtabOther(patient) {
+    const wrap = el('div', { class: 'psy-patient-detail__subtab-content' });
+
+    const card = el('div', { class: 'psy-patient-detail__card psy-patient-detail__card--full' });
+    card.appendChild(el('h2', { class: 'psy-patient-detail__card-title' }, ['Inne informacje']));
+    card.appendChild(el('div', { class: 'psy-new-hint', style: { marginBottom: '12px', textAlign: 'left' } }, [
+        'Dowolne dodatkowe informacje, które nie mieszczą się w pozostałych sekcjach.'
+    ]));
+
+    const tbl = el('div', { class: 'psy-patient-detail__field-table' });
+    tbl.appendChild(editableRow({
+        label: 'Dodatkowe informacje',
+        name: 'innePole',
+        value: patient.innePole || '',
+        type: 'textarea',
+        rows: 8,
+        placeholder: 'wpisz dowolne notatki — np. uczulenia, preferencje, ograniczenia, kontakty pomocnicze…'
+    }));
+
+    card.appendChild(tbl);
+    wrap.appendChild(card);
+    return wrap;
+}
+
+/* --- Subtab #5: Opieka medyczna --- */
+function renderSubtabMedicalCare(patient) {
+    const wrap = el('div', { class: 'psy-patient-detail__subtab-content' });
+
+    const card = el('div', { class: 'psy-patient-detail__card psy-patient-detail__card--full' });
+    card.appendChild(el('h2', { class: 'psy-patient-detail__card-title' }, ['Opieka medyczna']));
+    card.appendChild(el('div', { class: 'psy-new-hint', style: { marginBottom: '12px', textAlign: 'left' } }, [
+        'Lista poprzednich kontaktów medycznych pacjenta — z kim pacjent miał wcześniej '
+        + 'kontakt terapeutyczny lub psychiatryczny. Klientka, z6.jpg.'
+    ]));
+
+    const tbl = el('div', { class: 'psy-patient-detail__field-table' });
+    tbl.appendChild(editableRow({
+        label: 'Historia kontaktów medycznych',
+        name: 'opiekaMedycznaHistoria',
+        value: patient.opiekaMedycznaHistoria || '',
+        type: 'textarea',
+        rows: 8,
+        placeholder: 'np. „2024–2025 — dr Kowalski (psychiatra, terapia farmakologiczna). 2023 — mgr Nowak (psycholog, CBT)."…'
+    }));
+
+    card.appendChild(tbl);
+    wrap.appendChild(card);
+    wrap.appendChild(el('div', {
+        class: 'psy-new-hint',
+        style: { marginTop: '12px', padding: '10px 14px', background: '#FEFCE8', borderRadius: '6px', textAlign: 'left' }
+    }, [
+        '🚧 W kolejnej iteracji: zamiana wolnego tekstu na strukturalną listę rekordów '
+        + '(Imię, Nazwisko, Specjalność, Data od, Data do, Komentarz).'
+    ]));
+
+    return wrap;
+}
+
+// ---- Karty pacjenta (legacy, używane w „Ogólne") --------------------------
 
 function renderPatientCard(patient) {
     const card = el('div', { class: 'psy-patient-detail__card' });
@@ -463,6 +711,10 @@ function renderPatientCard(patient) {
     }));
     tbl.appendChild(editableRow({
         label: 'Imię', name: 'imie', value: patient.imie || ''
+    }));
+    tbl.appendChild(editableRow({
+        label: 'Drugie imię', name: 'drugieImie', value: patient.drugieImie || '',
+        placeholder: '(opcjonalnie)'
     }));
     tbl.appendChild(editableRow({
         label: 'Nazwisko', name: 'nazwisko', value: patient.nazwisko || ''
@@ -585,47 +837,4 @@ function renderRelationsCard(patient) {
 
     card.appendChild(tbl);
     return card;
-}
-
-// ---- ZAKŁADKA „Dokumenty" — STUB do Fazy 3 --------------------------------
-
-function renderDocumentsTab(patient, isNew) {
-    const wrap = el('div', { class: 'psy-patient-detail__tab-content' });
-
-    const card = el('div', { class: 'psy-patient-detail__card psy-patient-detail__card--full' });
-    card.appendChild(el('div', { class: 'psy-patient-detail__docs-header' }, [
-        el('h2', { class: 'psy-patient-detail__card-title', style: { margin: '0' } }, ['Dokumenty pacjenta']),
-        el('button', {
-            class: 'btn btn--primary',
-            onclick: () => {
-                toast('warning', 'Wymaga podpięcia folderu',
-                    'Upload plików zostanie aktywowany po podpięciu folderu lokalnego lub Google Drive (Faza 3 — model folder per pacjent).');
-            }
-        }, ['⬆ Wgraj plik'])
-    ]));
-
-    if (!isNew) {
-        card.appendChild(el('div', { class: 'psy-patient-detail__hint', style: { marginBottom: '12px' } }, [
-            '💡 Dokumenty będą przechowywane w folderze pacjenta: ',
-            el('code', {}, ['pacjenci/' + (patient.id || '?') + '_' +
-                (patient.imie || '') + '_' + (patient.nazwisko || '') + '/']),
-            ' (lokalnie lub na Google Drive).'
-        ]));
-    }
-
-    card.appendChild(el('div', { class: 'psy-new-empty', style: { padding: '40px 20px', background: '#F9FAFB', borderRadius: '8px' } }, [
-        el('div', { class: 'psy-new-empty__icon' }, ['📁']),
-        el('div', { class: 'psy-new-empty__title' }, ['Brak dokumentów']),
-        el('div', { class: 'psy-new-empty__description' }, [
-            'Wgraj pierwszy plik, aby utworzyć folder pacjenta. ' +
-            'Obsługiwane: PDF, DOCX, XLSX, JPG, PNG.'
-        ]),
-        el('div', { class: 'psy-new-hint', style: { marginTop: '14px', fontSize: '12px' } }, [
-            '⚠ Funkcja zostanie aktywowana w Fazie 3 (PR-10/PR-11). ' +
-            'W obecnej fazie dane pacjenta są w localStorage — bez plików.'
-        ])
-    ]));
-
-    wrap.appendChild(card);
-    return wrap;
 }

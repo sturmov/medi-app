@@ -560,9 +560,70 @@ Każda jako kompozycja szablonów + fake-data (placeholder):
     **Zaktualizowane reguły** w `.clinerules` sekcja **15** (Ustalenia PO 2026-05-01 cd.) — dokumentują wszystkie powyższe wybory.
 
 
+  - **Paczka PR-J (2026-05-11)** — **sticky profil pacjenta + menu 10 sekcji + 5 podzakładek pacjenta + Plan/Parametry/Dokumenty**:
+    Pełna analiza wymagań w `docs/REQUIREMENTS_2026-05-11.md` (zdjęcia od klientki `docs/z1.jpg`..`docs/z7.jpg`).
+
+    Realizacja w 9 mini-PR-ach (J1–J9) wg ustalenia PO 2026-05-11 „idziemy szerokim frontem":
+
+    - **PR-J1 · Placeholder logo w topbarze.** `index.html` linia 25: `<div class="psy-new-brand">PsychoApp</div>` → `<div class="psy-new-brand psy-new-brand--placeholder">Logo lub nazwa aplikacji</div>`. CSS w `app-new.css`: ramka punktowana, kursywa, jasne tło, kolor `#94A3B8`. `<title>` i `<noscript>` zachowują „PsychoApp" (kod wewnętrzny).
+
+    - **PR-J2 · Sticky profil pacjenta z lupą.** `_renderPatientTag()` w `app-new.js`: rozszerzenie do wyrazistego paska (laptop 14"/tablet). Treść: `[ikona ♂/♀] [PESEL] [Imię (II imię) Nazwisko] [wiek] [📞 tel] [✉ mail] [badge Pełnoletni/Nieletni auto] [🔍 lupa]`. Badge auto wyliczany z `dataUrodzenia` (≥18 lat = jasny niebieski `#E0F2FE`, <18 = jasny róż `#FCE7F3`). Lupa otwiera popover z `<input>`em search + listą wyników (filtr po imię/nazwisko/kod/PESEL); klik wyniku → `Store.selectPatient(p)` + redirect `#/patients/detail/:id`. Przycisk „Zmień" zachowany.
+
+    - **PR-J3 · Menu 10 pozycji + submenu „Nowa wizyta".** `_menu.js`: nowa lista `APP_MENU` w kolejności wg z2+z4: 1) + Nowa wizyta (z polem `submenu: VISIT_TYPES`), 2) Historia wizyt, 3) Leki, 4) Testy, 5) Zalecenia, 6) Plan leczenia (NOWE), 7) Dane identyfikacyjne (rename z „Pacjent"), 8) Diagnozy, 9) Parametry (NOWE), 10) Dokumenty (NOWE). `_renderSidebar()` w `app-new.js` wspiera `submenu` — klik rozwija/zwija listę kafelków typów notatek; klik kafelka → `#/visit/form/new/:typeId`. Stan rozwinięcia trzymany w `_sidebarState.visitNewExpanded`.
+
+    - **PR-J4 · 6 typów notatek wizyt.** `_visit-dict.js` `VISIT_TYPES` zredukowany do: `first_meeting`, `next_meeting`, `supervision`, `admin_note`, `phone_contact`, `email_contact`. Bez migracji legacy `interview`/`followup`/`diagnosis` (klientka: „apka jeszcze nie działa"). `FAKE_VISITS` w `_fake-data.js` zaktualizowane na nowe `typeId`. `resolveMode(typeId)` w `view-visit-form.js` mapuje: `first_meeting` → `first`, wszystko inne → `followup` (z możliwością przełączenia dev-switcherem).
+
+    - **PR-J5 · Historia wizyt jako strumień akapitów.** `viewHistory()` w `app-new.js` przebudowany z `<table>` na listę `<article>`-akapitów. Sortowanie: od najnowszej (`b.date - a.date`). Każdy akapit:
+      - nagłówek: `[NAZWA NOTATKI] · [typ wizyty] · [data] · [📅 godzina] · [💰 badge płatność]`
+      - body: pełna treść z `visit.data._raw` (mapowanie wszystkich wypełnionych pól, bez `buildSummary()`)
+      - klik akapitu → `#/visit/form/:id`
+      - tło akapitu: `paid=false` → `#FFFBEB`, `paid=true` → białe.
+      Klasa `.psy-history-paragraph`.
+
+    - **PR-J6 · 5 podzakładek w „Dane identyfikacyjne" + usunięcie pola Kraj.** Refactor `view-patient-detail.js`:
+      - drugi rząd tabs w prawej kolumnie: `Ogólne / Osoby upoważnione / Zgoda RODO / Inne / Opieka medyczna`
+      - **Ogólne**: dotychczasowe pola pacjenta (PESEL, imię, II imię, nazwisko, adres) **minus pole „Kraj"**
+      - **Osoby upoważnione**: lista wpisów z polami Imię, Nazwisko, Telefon, Komentarz; przyciski „+ Dodaj osobę" / 🗑 per wpis; współdzielone z istniejącymi `patient.guardians[]` (rozszerzone o pole `komentarz`)
+      - **Zgoda RODO**: checkbox `consents.rodo`, data `consents.rodoDate`, textarea `consents.rodoComment`
+      - **Inne**: wolne pole textarea `patient.otherInfo`
+      - **Opieka medyczna**: lista wpisów `patient.medicalCare[]` z polami `firstName, lastName, specialty, dateFrom, dateTo, comment`; przyciski „+ Dodaj wpis" / 🗑 per wpis
+      Wszystkie pola z autozapisem (debounce 400 ms).
+
+    - **PR-J7 · Nowy widok „Plan leczenia".** `view-treatment-plan.js`:
+      - drzewo celów L1 (główne) + L2 (podcele) + zadania per cel
+      - klik „+ Dodaj cel" — lazy create rekordu `treatmentPlan.goals[]`
+      - per cel: pola `title`, `description`, `priority` (low/medium/high), lista `tasks[]` (każde z `text`, `done`, `dueDate`)
+      - autozapis 400 ms
+      - route `#/treatment-plan`
+      Klientka: „Plan leczenia robiony wspólnie z doktorem — inaczej niż Zalecenia (do domu)".
+
+    - **PR-J8 · Nowy widok „Parametry".** `view-parameters.js`:
+      - pola na górze (od klientki): wzrost (cm), waga (kg), BMI auto (z wzrost+waga), ciśnienie skurczowe (mmHg), ciśnienie rozkurczowe (mmHg), tętno (bpm)
+      - poniżej placeholder „Dodatkowe parametry — sekcja w rozwoju" (klientka: „reszta niżej, na przyszłość")
+      - autozapis 400 ms na każdym polu
+      - route `#/parameters`
+      - dane w `patient.parameters{}`
+
+    - **PR-J9 · Nowy widok „Dokumenty" (stub).** `view-documents.js`:
+      - karta `<psy-file-input>` z napisem „Upload zostanie podpięty w Fazie 3 (storage)"
+      - lista placeholder „Brak dokumentów (struktura folderowa: `pacjenci/{KOD}/`)" — gotowy slot pod `listPatientAttachments(p)` z PR-10/PR-11
+      - route `#/documents`
+
+    **Zmiany w Store (`_store.js`):**
+    - rozszerzony patient: `consents{rodo, rodoDate, rodoComment}`, `otherInfo`, `medicalCare[]`, `parameters{}`, `treatmentPlan{goals[]}`
+    - rozszerzone guardian: dodatkowo pole `komentarz`
+    - nowe metody: `addMedicalCareEntry(patientId, entry)`, `removeMedicalCareEntry(patientId, idx)`, `addTreatmentGoal(patientId, goal)`, `removeTreatmentGoal(patientId, goalId)`, `addTask(patientId, goalId, task)`, `removeTask(patientId, goalId, taskIdx)`
+    - migracja seedu: istniejące pacjenci z `_fake-data.js` dostają puste obiekty consents/parameters/treatmentPlan/medicalCare, by stary zapis localStorage się nie wykrzaczał
+
+    **Routing (`ROUTE_MAP` w `app-new.js`):** dodane `#/treatment-plan`, `#/parameters`, `#/documents`. Wszystkie wymagają wybranego pacjenta (jak `#/history`).
+
+    **CSS (`css/app-new.css`):** klasy `.psy-new-brand--placeholder`, `.psy-new-patient-tag--big` (rozszerzony pasek), `.psy-new-patient-tag__field`, `.psy-new-patient-tag__badge--adult/--minor`, `.psy-new-search-popover` + items, `.psy-new-sidebar__submenu`, `.psy-history-paragraph` + nagłówek, sekcja podzakładek pacjenta, plan-leczenia tree, parameters grid, documents stub.
+
+    **Zaktualizowane reguły** w `.clinerules` sekcja **17** (Ustalenia PO 2026-05-11).
 
 
 - [ ] **Faza 3 — Google Drive folderowy**
+
   - [ ] 3.A config `rootFolderName` (default „pacjenci”) + `rootFolderId`
   - [ ] 3.B metody ensureRoot/ensurePatientFolder/listPatients/sheet/attachments (PR-10, PR-11)
   - [ ] 3.C spójny kontrakt w StorageProvider

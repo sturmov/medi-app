@@ -92,6 +92,27 @@ a:hover { text-decoration: underline; }
     letter-spacing: -0.01em;
 }
 
+/* PR-J1 (2026-05-11) — placeholder pod logo do podmiany na <img> gdy klientka
+   dostarczy plik graficzny. Wewnątrz divu napis „Logo lub nazwa aplikacji". */
+.psy-new-brand--placeholder {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 180px;
+    height: 32px;
+    padding: 0 12px;
+    font-size: 12px;
+    font-weight: 500;
+    font-style: italic;
+    color: #94A3B8;
+    background: #F8FAFC;
+    border: 1px dashed #CBD5E1;
+    border-radius: 6px;
+    letter-spacing: 0;
+    user-select: none;
+}
+
+
 .psy-new-topbar__menu-toggle {
     display: none;                 /* na desktop sidebar zawsze widoczny */
     align-items: center;
@@ -207,11 +228,14 @@ a:hover { text-decoration: underline; }
     padding: 0;
 }
 
+/* PR-J11 (2026-05-11): bez ikon przy pozycjach menu — sama etykieta.
+   `gap` zredukowany do 6px (dla chevronu w submenu CTA), padding poziomy
+   minimalnie zwiększony, by tekst nie kleił się do lewej krawędzi. */
 .psy-new-sidebar__item {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 12px 18px;
+    gap: 6px;
+    padding: 11px 16px;
     margin: 2px 10px;
     border-radius: 8px;
     border-left: 4px solid transparent;
@@ -245,11 +269,11 @@ a:hover { text-decoration: underline; }
     color: #374151;
 }
 
+/* PR-J11 (2026-05-11): klasa `psy-new-sidebar__icon` pozostawiona jako
+   legacy (na wypadek importów zewnętrznych). Renderowanie usunięte —
+   menu pokazuje tylko etykiety. */
 .psy-new-sidebar__icon {
-    font-size: 18px;
-    line-height: 1;
-    min-width: 22px;
-    text-align: center;
+    display: none;
 }
 
 .psy-new-sidebar__label {
@@ -1677,6 +1701,55 @@ body.psy-modal-open {
     flex-wrap: wrap;
 }
 
+/* ============================================================================
+   PR-J12 (2026-05-11) — kolorowy nagłówek karty pacjenta wg wieku.
+   Wariant A wymagań klientki: tylko nagłówek (breadcrumb + tytuł + meta +
+   przyciski akcji) ma delikatne tło dorosły/nieletni. Reszta widoku
+   pozostaje neutralna.
+   Próg: 18 lat (modyfikator dodawany w `view-patient-detail.js`).
+   Kolory spójne z badge'm „Pełnoletni"/„Nieletni" (sekcja 17 `.clinerules`).
+   ============================================================================ */
+
+.psy-patient-detail__header {
+    /* baseline — gdy brak danych o wieku (newPatient lub brak dataUrodzenia) */
+    position: relative;
+    padding: 12px 16px;
+    margin: -4px -4px 16px;
+    border-radius: 10px;
+    border-bottom: 1px solid #E5E7EB;
+    transition: background-color 0.18s ease, border-color 0.18s ease;
+}
+
+/* Pełnoletni — jasny niebieski */
+.psy-new-view__header--adult.psy-patient-detail__header {
+    background: linear-gradient(180deg, #E0F2FE 0%, #F0F9FF 100%);
+    border-bottom-color: #BAE6FD;
+    border-left: 4px solid #0EA5E9;
+}
+
+/* Nieletni — jasny róż */
+.psy-new-view__header--minor.psy-patient-detail__header {
+    background: linear-gradient(180deg, #FCE7F3 0%, #FDF2F8 100%);
+    border-bottom-color: #FBCFE8;
+    border-left: 4px solid #EC4899;
+}
+
+/* Mały kontrast dla tekstu meta (subtitle) — bez zmian kolorystyki tytułu */
+.psy-new-view__header--adult.psy-patient-detail__header .psy-new-view__subtitle {
+    color: #075985;
+}
+.psy-new-view__header--minor.psy-patient-detail__header .psy-new-view__subtitle {
+    color: #9D174D;
+}
+
+/* Breadcrumb — utrzymanie czytelności na kolorowym tle */
+.psy-new-view__header--adult.psy-patient-detail__header .psy-new-breadcrumb__link {
+    color: #0369A1;
+}
+.psy-new-view__header--minor.psy-patient-detail__header .psy-new-breadcrumb__link {
+    color: #BE185D;
+}
+
 /* Topbar pacjenta — kursor na nazwę (klik = detale) */
 .psy-new-patient-tag--clickable {
     cursor: pointer;
@@ -1687,13 +1760,17 @@ body.psy-modal-open {
     border-color: #93C5FD;
 }
 
-/* Layout dwukolumnowy */
+/* Layout — PR-J10 (2026-05-11): single column. Klientka: „pacjent to główna
+   strona, dokumenty są już w menu". Legacy klasy .psy-patient-detail__sidebar
+   i .psy-patient-detail__avatar zostają w pliku jako dead-CSS, ale nieużywane. */
 .psy-patient-detail__layout {
-    display: grid;
-    grid-template-columns: 240px 1fr;
-    gap: 16px;
-    align-items: start;
+    display: block;   /* single column */
 }
+
+.psy-patient-detail__main--full {
+    max-width: 100%;
+}
+
 
 /* === LEFT COL: avatar + tabs === */
 .psy-patient-detail__sidebar {
@@ -2228,3 +2305,899 @@ body.psy-folder-gate-open {
     .psy-folder-gate__title { font-size: 22px; }
     .psy-folder-gate__icon { font-size: 44px; }
 }
+
+
+/* ============================================================================
+   PR-J3 (2026-05-11) — submenu „Nowa wizyta" w sidebarze.
+   Klientka (z2.jpg): klik „+ Nowa wizyta" rozwija listę kafelków typów notatek.
+   ============================================================================ */
+
+.psy-new-sidebar__chevron {
+    font-size: 11px;
+    margin-left: auto;
+    opacity: 0.75;
+    flex-shrink: 0;
+    transition: transform 0.12s ease;
+}
+
+.psy-new-sidebar__item--cta .psy-new-sidebar__chevron {
+    color: #FFFFFF;
+}
+
+.psy-new-sidebar__submenu {
+    list-style: none;
+    margin: 0 14px 8px 28px;
+    padding: 4px 0;
+    border-left: 2px solid #BFDBFE;
+}
+
+/* PR-J11 (2026-05-11): submenu „Nowa wizyta" bez ikon — sama etykieta. */
+.psy-new-sidebar__submenu-item {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    padding: 7px 12px;
+    margin: 2px 0 2px 6px;
+    border-radius: 6px;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+}
+
+.psy-new-sidebar__submenu-item:hover {
+    background: #EFF6FF;
+    color: #1D4ED8;
+}
+
+/* Legacy — render usunięty w PR-J11, klasa pozostawiona dla wstecznej kompatybilności. */
+.psy-new-sidebar__submenu-icon {
+    display: none;
+}
+
+.psy-new-sidebar__submenu-label {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+
+/* ============================================================================
+   PR-J5 (2026-05-11) — Historia wizyt jako strumień akapitów.
+   Każda wizyta = osobny <article>. Najnowsza u góry. Pełne treści (bez skrótów).
+   Nagłówek: [NAZWA NOTATKI] · typ · data · godzina · płatność.
+   ============================================================================ */
+
+.psy-history-paragraphs {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.psy-history-paragraph {
+    background: #FFFFFF;
+    border: 1px solid #E5E7EB;
+    border-radius: 10px;
+    padding: 14px 18px;
+    cursor: pointer;
+    transition: border-color 0.12s, box-shadow 0.12s;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.psy-history-paragraph:hover {
+    border-color: #93C5FD;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);
+}
+
+.psy-history-paragraph--unpaid {
+    background: #FFFBEB;
+    border-color: #FDE68A;
+}
+
+.psy-history-paragraph--unpaid:hover {
+    border-color: #FBBF24;
+    background: #FEF3C7;
+}
+
+.psy-history-paragraph__header {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #F1F5F9;
+    margin-bottom: 8px;
+}
+
+.psy-history-paragraph__title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #0F172A;
+    flex: 0 0 auto;
+}
+
+.psy-history-paragraph__type {
+    font-size: 13px;
+    color: #2563EB;
+    font-weight: 500;
+}
+
+.psy-history-paragraph__date {
+    font-size: 13px;
+    color: #475569;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.psy-history-paragraph__payment {
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.psy-history-paragraph__body {
+    font-size: 13.5px;
+    color: #334155;
+    line-height: 1.6;
+    white-space: pre-wrap;
+}
+
+.psy-history-paragraph__body--empty {
+    color: #94A3B8;
+    font-style: italic;
+}
+
+.psy-history-paragraph__body dl {
+    margin: 0;
+    display: grid;
+    grid-template-columns: minmax(140px, max-content) 1fr;
+    gap: 4px 12px;
+}
+
+.psy-history-paragraph__body dt {
+    font-weight: 600;
+    color: #64748B;
+    font-size: 12.5px;
+    padding-top: 1px;
+}
+
+.psy-history-paragraph__body dd {
+    margin: 0;
+    color: #0F172A;
+    white-space: pre-wrap;
+}
+
+
+/* ============================================================================
+   PR-J7 (2026-05-11) — Plan leczenia (view-treatment-plan.js).
+   ============================================================================ */
+
+.psy-tp {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.psy-tp__goal {
+    background: #FFFFFF;
+    border: 1px solid #E5E7EB;
+    border-radius: 10px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+    overflow: hidden;
+}
+
+.psy-tp__goal-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: #F8FAFC;
+    border-bottom: 1px solid #E5E7EB;
+}
+
+.psy-tp__goal-num {
+    font-weight: 700;
+    color: #1D4ED8;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    min-width: 50px;
+}
+
+.psy-tp__goal-priority {
+    flex: 0 1 200px;
+    margin-right: auto;
+}
+
+.psy-tp__priority--low    { border-left: 3px solid #94A3B8; }
+.psy-tp__priority--medium { border-left: 3px solid #F59E0B; }
+.psy-tp__priority--high   { border-left: 3px solid #DC2626; }
+
+.psy-tp__goal-body {
+    padding: 14px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.psy-tp__field-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #64748B;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-top: 6px;
+}
+
+.psy-tp__goal-title-input {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.psy-tp__tasks {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-left: 2px;
+}
+
+.psy-tp__task {
+    display: grid;
+    grid-template-columns: 22px 1fr 140px 34px;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 8px;
+    background: #F9FAFB;
+    border-radius: 6px;
+    border-left: 3px solid transparent;
+    transition: background 0.12s, border-color 0.12s;
+}
+
+.psy-tp__task:hover {
+    background: #F1F5F9;
+}
+
+.psy-tp__task--done {
+    background: #F0FDF4;
+    border-left-color: #22C55E;
+}
+
+.psy-tp__task--done .psy-tp__task-text {
+    text-decoration: line-through;
+    color: #6B7280;
+}
+
+.psy-tp__task-check {
+    width: 16px;
+    height: 16px;
+    accent-color: #22C55E;
+    margin: 0;
+}
+
+.psy-tp__add-task {
+    align-self: flex-start;
+    margin-top: 4px;
+}
+
+
+/* ============================================================================
+   PR-J8 (2026-05-11) — Parametry (view-parameters.js).
+   ============================================================================ */
+
+.psy-params {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.psy-params__section-title {
+    margin: 6px 0 0 0;
+    font-size: 13px;
+    font-weight: 700;
+    color: #475569;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid #E5E7EB;
+    padding-bottom: 6px;
+}
+
+.psy-params__section-title--muted {
+    color: #94A3B8;
+    margin-top: 18px;
+}
+
+.psy-params__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    padding: 6px 0 14px;
+}
+
+.psy-params__field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.psy-params__label {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #374151;
+}
+
+.psy-params__input-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.psy-params__input-row .psy-pdf__input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.psy-params__unit {
+    font-size: 12px;
+    color: #64748B;
+    font-weight: 500;
+    flex-shrink: 0;
+}
+
+.psy-params__extra {
+    font-size: 12px;
+    color: #1D4ED8;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.psy-params__hint {
+    font-size: 11.5px;
+    color: #94A3B8;
+}
+
+
+/* ============================================================================
+   PR-J9 (2026-05-11) — Dokumenty (view-documents.js) — stub UI.
+   ============================================================================ */
+
+.psy-docs__uploader {
+    text-align: center;
+    padding: 28px 16px;
+    background: linear-gradient(135deg, #F8FAFC 0%, #EFF6FF 100%);
+    border: 2px dashed #BFDBFE;
+    border-radius: 10px;
+    margin-bottom: 18px;
+}
+
+.psy-docs__uploader-icon {
+    font-size: 36px;
+    line-height: 1;
+    margin-bottom: 8px;
+}
+
+.psy-docs__uploader-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1D4ED8;
+    margin-bottom: 4px;
+}
+
+.psy-docs__uploader-hint {
+    font-size: 12px;
+    color: #64748B;
+    margin-bottom: 12px;
+}
+
+.psy-docs__list-title {
+    margin: 18px 0 8px 0;
+    font-size: 13px;
+    font-weight: 700;
+    color: #475569;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.psy-docs__dev-hint {
+    margin-top: 18px;
+    padding: 10px 14px;
+    background: #FEFCE8;
+    border: 1px dashed #FDE68A;
+    border-radius: 6px;
+    font-size: 12px;
+    color: #78350F;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    word-break: break-all;
+}
+
+.psy-docs__dev-hint code {
+    background: rgba(0, 0, 0, 0.06);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 11.5px;
+}
+
+/* ============================================================================
+   PR-K4 (2026-05-11) — Realne Dokumenty (`view-documents.js`).
+   Tabela plików + drag&drop overlay + modal podglądu PDF/JPG.
+   ============================================================================ */
+
+/* Drag & drop highlight — całe body widoku po `dragover` */
+.psy-docs.psy-docs--dragover {
+    background: rgba(59, 130, 246, 0.05);
+    outline: 3px dashed #3B82F6;
+    outline-offset: -8px;
+}
+
+.psy-docs.psy-docs--dragover .psy-docs__uploader {
+    background: linear-gradient(135deg, #DBEAFE 0%, #BFDBFE 100%);
+    border-color: #3B82F6;
+    border-style: solid;
+    transform: scale(1.01);
+}
+
+/* Loading state listy */
+.psy-docs__list-loading {
+    text-align: center;
+    padding: 32px 16px;
+    color: #94A3B8;
+    font-size: 13px;
+}
+
+.psy-docs__list-container {
+    margin-top: 18px;
+}
+
+/* Tabela plików */
+.psy-docs__table tbody tr:hover {
+    background: #F1F5F9;
+}
+
+.psy-docs__row-icon {
+    text-align: center;
+    font-size: 20px;
+    line-height: 1;
+}
+
+.psy-docs__row-name {
+    font-weight: 500;
+    color: #0F172A;
+    word-break: break-word;
+}
+
+.psy-docs__row-name-link {
+    color: #2563EB;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.psy-docs__row-name-link:hover {
+    color: #1D4ED8;
+    text-decoration: underline;
+}
+
+.psy-docs__row-size {
+    color: #64748B;
+    font-size: 12.5px;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.psy-docs__row-date {
+    color: #64748B;
+    font-size: 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: nowrap;
+}
+
+.psy-docs__row-actions {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.psy-docs__row-actions .btn--icon {
+    margin-left: 2px;
+}
+
+/* Modal podglądu (PDF/obraz) — wykorzystuje `.psy-modal*` z _modal.js */
+.psy-docs__preview-modal {
+    width: 95vw;
+    max-width: 1100px;
+    max-height: 92vh;
+}
+
+.psy-docs__preview-body {
+    padding: 0;
+    height: 75vh;
+    overflow: auto;
+    background: #1F2937;   /* ciemne tło pod plikiem (kontrast dla PDF/obrazu) */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.psy-docs__preview-iframe {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: #FFFFFF;
+}
+
+.psy-docs__preview-image {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    display: block;
+}
+
+@media (max-width: 900px) {
+    .psy-docs__preview-modal {
+        width: 100vw;
+        max-width: 100vw;
+        max-height: 100vh;
+        border-radius: 0;
+    }
+    .psy-docs__preview-body {
+        height: calc(100vh - 120px);
+    }
+    .psy-docs__row-date {
+        display: none;
+    }
+}
+
+
+/* ============================================================================
+   PR-J2 (2026-05-11) — sticky profil pacjenta + lupa (wyszukiwarka).
+   Wyrazisty pasek na laptop 14"/tablet. PESEL · ikona płci · imię nazwisko ·
+   wiek · telefon · mail · badge auto Pełnoletni/Nieletni · 🔍.
+   ============================================================================ */
+
+.psy-new-patient-tag--big {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 8px 6px 14px;
+    background: #EFF6FF;
+    border: 1px solid #BFDBFE;
+    border-radius: 8px;
+    max-width: 100%;
+    flex-wrap: nowrap;
+    overflow: hidden;
+    font-size: 13px;
+    line-height: 1.2;
+}
+
+.psy-new-patient-tag--big .psy-new-patient-tag__name {
+    font-weight: 700;
+    color: #0F172A;
+    font-size: 14.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 280px;
+    cursor: pointer;
+    padding: 0 2px;
+}
+
+.psy-new-patient-tag--big .psy-new-patient-tag__name:hover {
+    color: #1D4ED8;
+    text-decoration: underline;
+}
+
+.psy-new-patient-tag__field {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: #1E40AF;
+    font-weight: 500;
+    white-space: nowrap;
+    padding: 0 4px;
+}
+
+.psy-new-patient-tag__field--pesel {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-weight: 600;
+    color: #1E3A8A;
+    background: #FFFFFF;
+    border: 1px solid #DBEAFE;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 12.5px;
+    cursor: pointer;
+}
+
+.psy-new-patient-tag__field--pesel:hover {
+    background: #DBEAFE;
+}
+
+.psy-new-patient-tag__field--tel,
+.psy-new-patient-tag__field--mail {
+    color: #475569;
+    font-size: 12.5px;
+}
+
+.psy-new-patient-tag__sex {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    font-size: 14px;
+    font-weight: 700;
+    color: #FFFFFF;
+    cursor: pointer;
+    user-select: none;
+    flex-shrink: 0;
+}
+
+.psy-new-patient-tag__sex--female {
+    background: #EC4899;            /* różowy — ♀ */
+}
+
+.psy-new-patient-tag__sex--male {
+    background: #2563EB;            /* niebieski — ♂ */
+}
+
+.psy-new-patient-tag__sex--other {
+    background: #94A3B8;
+}
+
+/* Badge Pełnoletni / Nieletni — delikatne odcienie (zgodnie z .clinerules §17:
+   dorosły → jasny niebieski #E0F2FE, dziecko → jasny róż #FCE7F3). */
+.psy-new-patient-tag__badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 600;
+    line-height: 1.3;
+    border: 1px solid;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.psy-new-patient-tag__badge--adult {
+    background: #E0F2FE;
+    color: #075985;
+    border-color: #BAE6FD;
+}
+
+.psy-new-patient-tag__badge--minor {
+    background: #FCE7F3;
+    color: #9D174D;
+    border-color: #FBCFE8;
+}
+
+/* Lupa — przycisk wyszukiwarki pacjenta */
+.psy-new-patient-tag__search {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    margin-left: 4px;
+    background: #FFFFFF;
+    border: 1px solid #BFDBFE;
+    border-radius: 6px;
+    font-size: 14px;
+    color: #1D4ED8;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s, transform 0.1s;
+    flex-shrink: 0;
+}
+
+.psy-new-patient-tag__search:hover {
+    background: #DBEAFE;
+    border-color: #93C5FD;
+    transform: scale(1.04);
+}
+
+.psy-new-patient-tag__search:active {
+    transform: scale(0.96);
+}
+
+/* Adaptacja: ukryj mniej istotne fragmenty przy wąskim oknie */
+@media (max-width: 1280px) {
+    .psy-new-patient-tag__field--mail {
+        display: none;
+    }
+}
+
+@media (max-width: 1100px) {
+    .psy-new-patient-tag__field--tel {
+        display: none;
+    }
+}
+
+
+/* ---- Popover wyszukiwarki pacjenta (PR-J2) ------------------------------- */
+
+.psy-new-search-popover {
+    width: 360px;
+    max-width: calc(100vw - 32px);
+    max-height: 480px;
+    background: #FFFFFF;
+    border: 1px solid #D1D5DB;
+    border-radius: 10px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: psy-search-pop-fade-in 0.14s ease-out;
+}
+
+@keyframes psy-search-pop-fade-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.psy-new-search-popover__input {
+    width: 100%;
+    padding: 10px 14px;
+    border: 0;
+    border-bottom: 1px solid #E5E7EB;
+    font-size: 14px;
+    background: #F8FAFC;
+    outline: none;
+}
+
+.psy-new-search-popover__input:focus {
+    background: #FFFFFF;
+    border-bottom-color: #2563EB;
+    box-shadow: inset 0 -2px 0 #2563EB;
+}
+
+.psy-new-search-popover__results {
+    overflow-y: auto;
+    flex: 1 1 auto;
+    padding: 4px 0;
+}
+
+.psy-new-search-popover__item {
+    display: grid;
+    grid-template-columns: 60px 1fr auto;
+    gap: 10px;
+    align-items: baseline;
+    padding: 8px 14px;
+    cursor: pointer;
+    transition: background 0.12s;
+}
+
+.psy-new-search-popover__item:hover {
+    background: #EFF6FF;
+}
+
+.psy-new-search-popover__item-code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-weight: 700;
+    color: #1D4ED8;
+    font-size: 12.5px;
+}
+
+.psy-new-search-popover__item-name {
+    color: #0F172A;
+    font-weight: 600;
+    font-size: 13.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.psy-new-search-popover__item-meta {
+    color: #94A3B8;
+    font-size: 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    text-align: right;
+}
+
+.psy-new-search-popover__empty {
+    padding: 18px 14px;
+    text-align: center;
+    color: #94A3B8;
+    font-size: 13px;
+}
+
+
+/* ============================================================================
+   PR-J6 (2026-05-11) — 5 podzakładek w „Dane identyfikacyjne".
+   Drugi rząd tabsów nad zawartością karty pacjenta:
+   Ogólne / Osoby upoważnione / Zgoda RODO / Inne / Opieka medyczna.
+   ============================================================================ */
+
+.psy-patient-detail__subtabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+    padding: 4px;
+    background: #F1F5F9;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    overflow-x: auto;
+}
+
+.psy-patient-detail__subtab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #475569;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.12s, color 0.12s, box-shadow 0.12s;
+}
+
+.psy-patient-detail__subtab:hover {
+    background: #E2E8F0;
+    color: #0F172A;
+}
+
+.psy-patient-detail__subtab.is-active {
+    background: #FFFFFF;
+    color: #1D4ED8;
+    font-weight: 700;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.psy-patient-detail__subtab-icon {
+    font-size: 15px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.psy-patient-detail__subtab-label {
+    flex: 0 1 auto;
+}
+
+.psy-patient-detail__subtab-body {
+    display: block;
+}
+
+.psy-patient-detail__subtab-content {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+@media (max-width: 900px) {
+    .psy-patient-detail__subtabs {
+        flex-wrap: wrap;
+    }
+}
+
+/* ============================================================================
+ * F5.4 (2026-05-11) — inline-walidatory pól PESEL / telefon / e-mail.
+ *
+ * Walidacja jest OSTRZEGAWCZA — czerwony tekst pod polem (nie blokuje
+ * autozapisu). `.psy-pdf__input--invalid` dorzucany do inputa, `.psy-pdf__error`
+ * to text-message poniżej.
+ * ========================================================================= */
+
+.psy-pdf__input--invalid {
+    border-color: #DC2626 !important;
+    background-color: #FEF2F2;
+}
+
+.psy-pdf__input--invalid:focus {
+    outline: 2px solid #FCA5A5;
+    outline-offset: -1px;
+}
+
+.psy-pdf__error {
+    color: #DC2626;
+    font-size: 12px;
+    line-height: 1.35;
+    margin-top: 4px;
+    padding: 2px 0;
+}
+
+
+
+
+

@@ -239,3 +239,94 @@ export function readForm(root) {
     });
     return out;
 }
+
+// ============================================================================
+// F5.4 (2026-05-11): walidatory pól (PESEL, telefon, e-mail).
+// Wszystkie zwracają boolean — `true` gdy OK, `false` gdy błąd. Pole puste
+// jest traktowane jako OK (walidatory są ostrzegawcze, nie blokujące — autozapis
+// zawsze działa, tylko inline-error pokazuje że format jest zły).
+// ============================================================================
+
+/**
+ * Waliduje numer PESEL (11 cyfr + suma kontrolna).
+ * Algorytm: waga {1,3,7,9,1,3,7,9,1,3} × digit_i, suma mod 10,
+ * suma kontrolna = (10 − mod) % 10 i porównanie z 11-tą cyfrą.
+ *
+ * @param {string} s
+ * @returns {boolean}
+ */
+export function validatePesel(s) {
+    if (!s) return true;   // puste = OK (pole opcjonalne, nie blokuje)
+    const digits = String(s).replace(/\D/g, '');
+    if (digits.length !== 11) return false;
+    const weights = [1, 3, 7, 9, 1, 3, 7, 9, 1, 3];
+    let sum = 0;
+    for (let i = 0; i < 10; i++) {
+        sum += parseInt(digits[i], 10) * weights[i];
+    }
+    const checksum = (10 - (sum % 10)) % 10;
+    return checksum === parseInt(digits[10], 10);
+}
+
+/**
+ * Parsuje PESEL → `{ dataUrodzenia: 'YYYY-MM-DD', plec: 'M'|'K' }` lub `null`
+ * gdy nieprawidłowy. Obsługuje kodowanie wieku w miesiącu (3-4 cyfra):
+ *
+ *   - 1800-1899: mm + 80
+ *   - 1900-1999: mm
+ *   - 2000-2099: mm + 20
+ *   - 2100-2199: mm + 40
+ *   - 2200-2299: mm + 60
+ *
+ * Płeć: 10-ta cyfra nieparzysta = M, parzysta = K.
+ *
+ * @param {string} s
+ * @returns {{dataUrodzenia: string, plec: 'M'|'K'} | null}
+ */
+export function parsePesel(s) {
+    if (!validatePesel(s) || !s) return null;
+    const digits = String(s).replace(/\D/g, '');
+    if (digits.length !== 11) return null;
+    const yy = parseInt(digits.substr(0, 2), 10);
+    const mmRaw = parseInt(digits.substr(2, 2), 10);
+    const dd = parseInt(digits.substr(4, 2), 10);
+
+    let century;
+    let mm;
+    if (mmRaw >= 81 && mmRaw <= 92)      { century = 1800; mm = mmRaw - 80; }
+    else if (mmRaw >= 1 && mmRaw <= 12)  { century = 1900; mm = mmRaw; }
+    else if (mmRaw >= 21 && mmRaw <= 32) { century = 2000; mm = mmRaw - 20; }
+    else if (mmRaw >= 41 && mmRaw <= 52) { century = 2100; mm = mmRaw - 40; }
+    else if (mmRaw >= 61 && mmRaw <= 72) { century = 2200; mm = mmRaw - 60; }
+    else return null;
+
+    const year = century + yy;
+    const sexDigit = parseInt(digits[9], 10);
+    const plec = sexDigit % 2 === 0 ? 'K' : 'M';
+    const dataUrodzenia = `${year}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+    return { dataUrodzenia, plec };
+}
+
+/**
+ * Waliduje numer telefonu — luźno (akceptuje +48 prefix, spacje, myślniki,
+ * nawiasy). Wymaga 9 cyfr po opcjonalnym prefixie +48.
+ *
+ * @param {string} s
+ * @returns {boolean}
+ */
+export function validatePhone(s) {
+    if (!s) return true;   // puste = OK
+    const stripped = String(s).replace(/[\s\-()]/g, '');
+    return /^(\+48)?\d{9}$/.test(stripped);
+}
+
+/**
+ * Waliduje e-mail. Regex zgodny z RFC 5322 (uproszczony).
+ *
+ * @param {string} s
+ * @returns {boolean}
+ */
+export function validateEmail(s) {
+    if (!s) return true;   // puste = OK
+    return /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~\-]+@[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$/.test(String(s).trim());
+}
