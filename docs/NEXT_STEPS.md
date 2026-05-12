@@ -122,6 +122,43 @@ Identyczny interfejs (`listPatientFolders`, `loadPatient`, `savePatient`, dokume
 
 ---
 
+## Odłożone / wycofane
+
+### Import ze starego silnika (legacy XLSX) — WYCOFANE 2026-05-12
+
+**Kontekst:** Klientka przed wdrożeniem paczki K1-K4 (storage XLSX, 2026-05-11)
+pracowała kilka dni na starym silniku (`legacy.html` + `js/xlsx-handler.js`):
+6 zakładek `Dane / Wywiad / MSE / Sesje / Testy / Plan`, jeden plik XLSX per
+pacjent w płaskiej strukturze folderu (bez podfolderu per pacjent).
+
+**Próba migracji 2026-05-12 ranna:** rozpoczęto implementację ręcznego
+importera (Settings → „📥 Import ze starego formatu" → file picker → migracja).
+Zaimplementowane:
+- `_legacy-xlsx-parser.js` (parser 6 zakładek, mapowania pól)
+- `_legacy-importer.js` (mapper stary→nowy, backup do `_archive-legacy/`)
+- `Store.importLegacyFile()` + `Store.detectLegacyFiles()` API
+
+**Decyzja PO 2026-05-12:** Klientka po rozmowie zaakceptowała utratę
+dotychczasowych wpisów (jej stare Excele zostają jako backup poza apką,
+zaczyna od nowa w nowym silniku). Importer NIE jest potrzebny — kod wycofany.
+
+**Stan po wycofaniu:** repo czyste, commit `9004cad` na main. Wszystkie 3
+pliki (parser + importer + zmiany w `_store.js`) usunięte przez `git checkout`
++ `del`. Brak długu technicznego.
+
+**Gdyby wrócić w przyszłości** (klientka zmieni zdanie):
+- Wzorzec parsera: czysty port `_daneLabels`/`_wywiadLabels`/`_mseLabels`/
+  `_sesjaHeaders`/`_testHeaders`/`_planLabels` + funkcji `_aoaToKv`/
+  `_parseSesjeSheet`/`_parsePlanSheet`/`_parseTestySheet` z `js/xlsx-handler.js`.
+- Mapping high-level: `dane`→`patient.*`, `wywiad`→1 wizyta `first_meeting`,
+  `mse`→ta sama wizyta (jeśli data blisko) lub osobna, `sesje`→kolejne
+  wizyty `next_meeting` (S/O/A/P→`data._raw.soap_*`), `testy`→`tests[]`,
+  `plan`→`treatmentPlan{goals[],_legacy{...}}`.
+- Safety net: nieznane pola → `_legacy.{key}` w każdej sekcji.
+- Effort ponownej implementacji: ~2-3h (parser + mapper + UI w Settings).
+
+---
+
 ## Pliki — szybkie odniesienie
 
 ```
