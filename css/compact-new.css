@@ -1,0 +1,511 @@
+/* =============================================================================
+   compact-new.css — tryb kompaktowy dla NOWEJ apki (app-new.css)
+   -----------------------------------------------------------------------------
+   PR-J13 (2026-05-13) — klientka prosi o więcej treści na ekranie 1366×768.
+   `app-new.css` używa hardcoded values (padding/margin/font-size), więc nie
+   reaguje na :root.theme--compact zdefiniowane w tokens.css (które działa
+   tylko dla starych zmiennych --psy-*). Ten plik dorzuca override-y dla
+   wszystkich klas `.psy-new-*`, `.psy-patient-detail__*`, `.psy-pdf__*`
+   oraz wspólnych (`.btn`, `.btn--sm`, `.psy-tabs`, h1-h4).
+
+   Skala: ~30% redukcja paddingów + ~10-15% redukcja fontów. Wartości dobrane
+   tak, by:
+   - elementy interaktywne pozostały klikalne (min-height ≥ 26px),
+   - czcionki nie schodziły poniżej 11px (czytelność),
+   - apka zmieściła ~60% więcej treści na ekranie 1366×768.
+
+   Aktywacja: `<html class="theme--compact">` w index.html.
+   Rollback: usunięcie klasy z <html> (1 linia) → apka wraca do "comfortable".
+
+   UWAGA: NIE modyfikujemy `app-new.css` ani widoków `.js` — tylko ten plik.
+   ========================================================================== */
+
+/* === SHELL ================================================================= */
+
+:root.theme--compact .psy-new-shell {
+    grid-template-columns: 220px 1fr;
+    grid-template-rows: 40px 1fr;
+}
+
+/* === TOPBAR =============================================================== */
+
+:root.theme--compact .psy-new-topbar {
+    padding: 0 14px;
+    gap: 10px;
+}
+
+:root.theme--compact .psy-new-topbar__left,
+:root.theme--compact .psy-new-topbar__center,
+:root.theme--compact .psy-new-topbar__right {
+    gap: 8px;
+}
+
+:root.theme--compact .psy-new-brand {
+    font-size: 15px;
+}
+
+:root.theme--compact .psy-new-brand--placeholder {
+    min-width: 140px;
+    height: 26px;
+    padding: 0 10px;
+    font-size: 11px;
+}
+
+:root.theme--compact .psy-new-topbar__menu-toggle {
+    width: 28px;
+    height: 28px;
+    font-size: 13px;
+}
+
+:root.theme--compact .psy-new-topbar__btn--icon {
+    width: 28px;
+    height: 26px;
+    font-size: 14px;
+}
+
+:root.theme--compact .psy-new-topbar__save {
+    padding: 2px 8px;
+    font-size: 11.5px;
+}
+
+/* Pasek pacjenta — kluczowa zwartość */
+:root.theme--compact .psy-new-patient-tag {
+    gap: 8px;
+    padding: 3px 10px;
+}
+
+:root.theme--compact .psy-new-patient-tag__name {
+    font-size: 13px;
+    max-width: 200px;
+}
+
+:root.theme--compact .psy-new-patient-tag__meta {
+    gap: 8px;
+    font-size: 11.5px;
+}
+
+:root.theme--compact .psy-new-patient-tag__change {
+    font-size: 11.5px;
+    padding: 1px 5px;
+}
+
+/* === SIDEBAR ============================================================== */
+
+:root.theme--compact .psy-new-sidebar {
+    padding: 5px 0;
+}
+
+:root.theme--compact .psy-new-sidebar__item {
+    padding: 5px 12px;
+    margin: 1px 6px;
+    font-size: 13px;
+    gap: 6px;
+    border-left-width: 3px;
+    border-radius: 6px;
+}
+
+:root.theme--compact .psy-new-sidebar__separator {
+    margin: 6px 10px;
+}
+
+:root.theme--compact .psy-new-sidebar__item--cta {
+    margin-top: 4px;
+    font-size: 12px;
+    padding: 7px 12px;
+    letter-spacing: 0.02em;
+}
+
+/* === MAIN ================================================================= */
+
+:root.theme--compact .psy-new-main {
+    padding: 10px 14px;
+}
+
+/* === VIEW ================================================================= */
+
+:root.theme--compact .psy-new-view__header {
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    gap: 10px;
+}
+
+:root.theme--compact .psy-new-view__title {
+    font-size: 17px;
+    line-height: 1.2;
+}
+
+:root.theme--compact .psy-new-view__subtitle {
+    margin-top: 2px;
+    font-size: 12px;
+}
+
+:root.theme--compact .psy-new-view__actions {
+    gap: 6px;
+}
+
+:root.theme--compact .psy-new-view__body {
+    padding: 10px;
+    border-radius: 8px;
+}
+
+/* === BREADCRUMB =========================================================== */
+
+:root.theme--compact .psy-new-breadcrumb {
+    font-size: 12px;
+    margin-bottom: 2px;
+    gap: 4px;
+}
+
+/* === PATIENT DETAIL: HEADER (kolorowy nagłówek wg wieku) ================== */
+
+:root.theme--compact .psy-patient-detail__header {
+    padding: 6px 12px !important;
+    margin-bottom: 6px !important;
+}
+
+/* === PATIENT DETAIL: LEFT COL (avatar + tabs) ============================= */
+
+:root.theme--compact .psy-patient-detail__sidebar {
+    top: 8px;
+    gap: 8px;
+}
+
+:root.theme--compact .psy-patient-detail__avatar {
+    padding: 8px;
+    border-radius: 8px;
+}
+
+:root.theme--compact .psy-patient-detail__avatar-img {
+    max-width: 110px;
+    border-radius: 6px;
+}
+
+:root.theme--compact .psy-patient-detail__avatar-initials {
+    font-size: 36px;
+}
+
+:root.theme--compact .psy-patient-detail__avatar-caption {
+    margin-top: 4px;
+    font-size: 11px;
+}
+
+:root.theme--compact .psy-patient-detail__tabs {
+    padding: 4px;
+    border-radius: 8px;
+    gap: 1px;
+}
+
+:root.theme--compact .psy-patient-detail__tab {
+    padding: 5px 10px;
+    gap: 7px;
+    font-size: 12.5px;
+    border-radius: 4px;
+}
+
+:root.theme--compact .psy-patient-detail__tab-icon {
+    font-size: 14px;
+    min-width: 16px;
+}
+
+:root.theme--compact .psy-patient-detail__tab-count {
+    font-size: 10.5px;
+    padding: 0 6px;
+    min-width: 18px;
+}
+
+:root.theme--compact .psy-patient-detail__tabs-sep {
+    margin: 5px 6px 2px;
+    padding-top: 5px;
+    font-size: 10px;
+}
+
+/* === PATIENT DETAIL: SUBTABS (Ogólne / Osoby upoważnione / ...) ========== */
+
+:root.theme--compact .psy-patient-detail__subtabs {
+    padding: 4px;
+    gap: 3px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+}
+
+:root.theme--compact .psy-patient-detail__subtab {
+    padding: 5px 12px;
+    gap: 5px;
+    font-size: 12.5px;
+    border-radius: 5px;
+}
+
+:root.theme--compact .psy-patient-detail__subtab-icon {
+    font-size: 13px;
+}
+
+:root.theme--compact .psy-patient-detail__subtab-body {
+    padding-top: 4px;
+}
+
+:root.theme--compact .psy-patient-detail__subtab-content {
+    gap: 8px;
+}
+
+/* === PATIENT DETAIL: RIGHT COL (cards + field-table) ====================== */
+
+:root.theme--compact .psy-patient-detail__tab-content {
+    gap: 8px;
+}
+
+:root.theme--compact .psy-patient-detail__cards {
+    gap: 8px;
+}
+
+:root.theme--compact .psy-patient-detail__card {
+    padding: 8px 12px;
+    border-radius: 8px;
+}
+
+:root.theme--compact .psy-patient-detail__card-title {
+    margin: 0 0 6px 0;
+    font-size: 13px;
+    padding-bottom: 4px;
+}
+
+:root.theme--compact .psy-patient-detail__card-subtitle {
+    margin: 8px 0 4px 0;
+    font-size: 12px;
+    padding-bottom: 2px;
+}
+
+:root.theme--compact .psy-patient-detail__field-table {
+    row-gap: 2px;
+}
+
+:root.theme--compact .psy-patient-detail__field-table--two-col {
+    column-gap: 14px;
+}
+
+:root.theme--compact .psy-patient-detail__field-row {
+    padding: 2px 0;
+    grid-template-columns: 100px 1fr;
+    column-gap: 8px;
+}
+
+:root.theme--compact .psy-patient-detail__field-label {
+    font-size: 11.5px;
+}
+
+:root.theme--compact .psy-patient-detail__field-value {
+    font-size: 12.5px;
+}
+
+:root.theme--compact .psy-patient-detail__field-value.strong {
+    font-size: 13px;
+}
+
+:root.theme--compact .psy-patient-detail__field-value.mono {
+    font-size: 12px;
+}
+
+:root.theme--compact .psy-patient-detail__hint {
+    font-size: 11px;
+    padding: 2px 0;
+}
+
+:root.theme--compact .psy-patient-detail__docs-header {
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+}
+
+/* === PDF INPUTS (edytowalne pola w karcie pacjenta) ======================= */
+
+:root.theme--compact .psy-pdf__input {
+    padding: 4px 8px;
+    font-size: 12.5px;
+    min-height: 26px;
+}
+
+:root.theme--compact .psy-pdf__input--textarea {
+    min-height: 50px;
+}
+
+:root.theme--compact .psy-pdf__input--checkbox {
+    width: 14px;
+    height: 14px;
+}
+
+:root.theme--compact .psy-pdf__error {
+    font-size: 11px;
+}
+
+/* === VISIT FORM (view-visit-form.js) — sekcje akordeonu ================== */
+
+:root.theme--compact .psy-vf__modebar {
+    padding: 4px 10px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    gap: 8px;
+}
+
+:root.theme--compact .psy-vf__sections {
+    gap: 5px;
+}
+
+:root.theme--compact .psy-vf__summary {
+    padding: 6px 12px;
+    gap: 8px;
+    min-height: 32px;
+}
+
+:root.theme--compact .psy-vf__summary-icon {
+    font-size: 15px;
+}
+
+:root.theme--compact .psy-vf__summary-title {
+    font-size: 13px;
+}
+
+:root.theme--compact .psy-vf__summary-preview {
+    font-size: 11.5px;
+    margin-left: 6px;
+}
+
+/* === COMMON: BUTTONS ====================================================== */
+
+:root.theme--compact .btn {
+    padding: 5px 10px;
+    font-size: 13px;
+    min-height: 28px;
+}
+
+:root.theme--compact .btn--sm {
+    padding: 3px 8px;
+    font-size: 11.5px;
+    min-height: 22px;
+}
+
+:root.theme--compact .btn--lg {
+    padding: 7px 14px;
+    font-size: 13.5px;
+}
+
+/* === COMMON: HEADINGS ===================================================== */
+
+:root.theme--compact h1 { font-size: 17px; }
+:root.theme--compact h2 { font-size: 15px; }
+:root.theme--compact h3 { font-size: 13.5px; }
+:root.theme--compact h4 { font-size: 12.5px; }
+
+/* === MODAL ================================================================ */
+
+:root.theme--compact .psy-modal__header {
+    padding: 8px 14px;
+    gap: 8px;
+}
+
+:root.theme--compact .psy-modal__title {
+    font-size: 14.5px;
+}
+
+:root.theme--compact .psy-modal__close {
+    width: 26px;
+    height: 26px;
+    font-size: 18px;
+}
+
+:root.theme--compact .psy-modal__body {
+    padding: 12px 14px;
+}
+
+:root.theme--compact .psy-modal__footer {
+    padding: 8px 14px;
+    gap: 6px;
+}
+
+/* === FORM ROWS (psy-form-row, psy-field) — używane w niektórych modalach == */
+
+:root.theme--compact .psy-form-row {
+    gap: 6px 10px;
+    margin-bottom: 6px;
+}
+
+:root.theme--compact .psy-form-section {
+    margin-bottom: 10px;
+}
+
+:root.theme--compact .psy-form-section__title {
+    margin-bottom: 6px;
+    font-size: 11.5px;
+    padding-bottom: 3px;
+}
+
+:root.theme--compact .psy-field {
+    gap: 2px;
+}
+
+:root.theme--compact .psy-field__label {
+    font-size: 11.5px;
+}
+
+:root.theme--compact .psy-field__input {
+    padding: 4px 8px;
+    font-size: 12.5px;
+}
+
+:root.theme--compact .psy-field__input--textarea {
+    min-height: 50px;
+}
+
+:root.theme--compact .psy-field__help,
+:root.theme--compact .psy-field__error {
+    font-size: 11px;
+}
+
+/* === VISIT PREVIEW (view-visit-detail / podgląd wizyty) =================== */
+
+:root.theme--compact .psy-visit-preview__row {
+    gap: 8px;
+    margin-bottom: 5px;
+}
+
+:root.theme--compact .psy-visit-preview__label {
+    min-width: 80px;
+    font-size: 11.5px;
+}
+
+:root.theme--compact .psy-visit-preview__value {
+    font-size: 12.5px;
+}
+
+:root.theme--compact .psy-visit-preview__note {
+    padding: 8px;
+    margin-top: 4px;
+}
+
+:root.theme--compact .psy-visit-detail {
+    padding: 10px 14px;
+}
+
+/* === EMPTY STATE ========================================================== */
+
+:root.theme--compact .psy-new-empty {
+    padding: 20px 14px;
+}
+
+:root.theme--compact .psy-new-empty__icon {
+    font-size: 32px;
+    margin-bottom: 6px;
+}
+
+:root.theme--compact .psy-new-empty__title {
+    font-size: 15px;
+    margin-bottom: 4px;
+}
+
+:root.theme--compact .psy-new-empty__description {
+    font-size: 12.5px;
+}
+
+/* === BODY base ============================================================ */
+
+:root.theme--compact body.psy-app-body {
+    font-size: 13px;
+    line-height: 1.45;
+}

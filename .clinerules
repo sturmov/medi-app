@@ -171,6 +171,24 @@ Pełna analiza w `docs/REQUIREMENTS_2026-05-11.md` (zdjęcia `docs/z1.jpg`..`z7.
   - Przycisk testowy `⬇ Pobierz XLSX` w nagłówku karty pacjenta (`view-patient-detail.js`) — do usunięcia w paczce K3 gdy autozapis przejmie zadanie.
 - **Kolejne paczki:** K2 — `_local-folder-store.js` (File System Access API); K3 — integracja Store + autozapis 800ms + migracja localStorage→XLSX; K4 — realne Dokumenty.
 
+## 22) Ustalenia PO 2026-05-13 (PR-J13 — tryb kompaktowy domyślnie ON)
+- **Klientka:** „w aplikacji jest za dużo przerw i wtedy tracimy dużo miejsca" / „wygląda za mocno jak nackane" — prosi o gęściejszy layout, więcej treści na ekranie 1366×768.
+- **Decyzja PO**: globalna paczka compact-new (Opcja A) — zero zmian w widokach `.js`, tylko CSS override przez selektor `:root.theme--compact`. Rollback = usunięcie 1 klasy z `<html>`.
+- **Nowy plik:** `css/compact-new.css` — kompletny zestaw override-ów dla wszystkich klas używanych w `app-new.css`:
+  - **Shell**: `.psy-new-shell` (grid `220px 1fr` / `40px 1fr`)
+  - **Topbar**: `.psy-new-topbar` (padding 14px, gap 8-10px), brand-placeholder (140×26), btn-icon (28×26), patient-tag (padding 3×10, font 13/11.5)
+  - **Sidebar**: `.psy-new-sidebar__item` (padding 5×12, margin 1×6, font 13px), CTA „+ NOWA WIZYTA" (padding 7×12, font 12)
+  - **Main/View**: padding 10×14, view header margin 8/6, h1 17px, body padding 10px radius 8
+  - **Patient detail**: avatar 110px (z 180px), initials 36px (z 56px), tabs padding 5×10 font 12.5, subtabs padding 5×12 font 12.5, cards padding 8×12 gap 8px, field-row padding 2px label 100px
+  - **PDF inputs**: padding 4×8, min-height 26px, font 12.5
+  - **Visit form**: summary padding 6×12 min-height 32, title 13px, preview 11.5
+  - **Common**: `.btn` (28px), `.btn--sm` (22px), h1-h4 (17/15/13.5/12.5px)
+  - **Modal**: header padding 8×14 title 14.5px, body 12×14, footer 8×14
+- **Aktywacja**: `index.html` linia 2 → `<html lang="pl" class="theme--compact">` + `<link rel="stylesheet" href="css/compact-new.css">` po `app-new.css`.
+- **Skala**: ~30% redukcja paddingów + ~10-15% redukcja fontów. Czcionki **nie schodzą poniżej 11px** (czytelność). Klikalne elementy **min-height ≥ 22px** (`btn--sm`) → ≥ 26px (`btn`).
+- **NIE modyfikujemy** `app-new.css` ani plików `js/views/*.js` — tylko `compact-new.css` + 2 linie w `index.html`. Gdyby klientka chciała wrócić do „comfortable": usuwamy `theme--compact` z `<html>`.
+- **Tryb domyślnie ON** (klientka prosiła, apka jeszcze nie produkcyjna — testujemy na żywym widoku). W przyszłości można dodać toggle w Ustawieniach (Faza 6), na razie YAGNI.
+
 ## 21) Procedura kontynuacji między sesjami (NEXT_STEPS.md)
 - **Na końcu każdej paczki / sesji** developer aktualizuje `docs/NEXT_STEPS.md` — krótką notatkę kontekstową która pozwala wystartować nowy czat lub `/smol` bez utraty kontekstu.
 - **Pierwszy plik do odczytu w nowym czacie** to `docs/NEXT_STEPS.md` (przed `.clinerules`, `IMPLEMENTATION_PLAN.md` i resztą).

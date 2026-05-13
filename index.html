@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="pl">
+<html lang="pl" class="theme--compact">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +8,10 @@
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/compat.css">
     <link rel="stylesheet" href="css/app-new.css">
+    <!-- PR-J13 (2026-05-13) — tryb kompaktowy: override-y dla nowej apki.
+         Aktywne przez klasę `theme--compact` na <html>. Rollback: usunięcie
+         tej klasy → apka wraca do „comfortable" widoku. -->
+    <link rel="stylesheet" href="css/compact-new.css">
 </head>
 <body class="psy-app-body">
 

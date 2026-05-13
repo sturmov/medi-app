@@ -4,7 +4,21 @@
 > Pierwszy plik do odczytania w nowym czacie / po `/smol` / przy ograniczonym kontekście.
 > Reguła w `.clinerules` § 21.
 
-## Ostatnia sesja: 2026-05-11 (Faza 5 — Hardening)
+## Ostatnia sesja: 2026-05-13 (PR-J13 — tryb kompaktowy)
+
+**Ukończone:**
+- **PR-J13 — tryb kompaktowy domyślnie ON** (`.clinerules § 22`)
+  - Klientka: „za dużo przerw, tracimy dużo miejsca / wygląda za mocno jak nackane"
+  - **Nowy plik:** `css/compact-new.css` (~450 linii override-ów dla wszystkich klas `.psy-new-*`, `.psy-patient-detail__*`, `.psy-pdf__*`, `.psy-vf__*`, `.btn`, `.psy-modal__*`, h1-h4)
+  - **Aktywacja**: `<html class="theme--compact">` + `<link href="css/compact-new.css">` w `index.html`
+  - **Zero zmian** w widokach `.js` ani w `app-new.css` — czysty CSS override
+  - **Rollback**: usunięcie klasy z `<html>` (1 linia)
+  - **Skala**: ~30% redukcja paddingów + ~10-15% redukcja fontów. Min font 11px, min-height kontrolek 22px (btn--sm) / 26px (btn).
+  - **Weryfikacja**: apka odpalona na `http://localhost:8123`, widok „Dane identyfikacyjne" + lista pacjentów wyrenderowane bez błędów, layout zwarty.
+
+---
+
+## Sesja: 2026-05-11 (Faza 5 — Hardening)
 
 **Ukończone w tej sesji:**
 - **F5.1 — Toasty produkcyjne** (`psy-toast-container.js`, `psy-toast.js`)
@@ -238,6 +252,7 @@ node -e "const f=require('./js/views/_form-helpers.js'); console.log(f.validateP
 | § 19   | Kolor nagłówka karty pacjenta wg wieku |
 | § 20   | Format XLSX = przyszły Google Sheet (8 zakładek, czytelne dla człowieka) |
 | § 21   | Procedura aktualizacji `NEXT_STEPS.md` na końcu każdej paczki |
+| § 22   | Tryb kompaktowy (PR-J13) — domyślnie ON przez `<html class="theme--compact">` + `css/compact-new.css` |
 
 ---
 
