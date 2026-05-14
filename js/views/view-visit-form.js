@@ -40,6 +40,7 @@ import { schemaForMode } from './_visit-form-schema.js';
 import { visitTypeById } from './_fake-data.js';
 import { searchIcd10, findIcd10ByCode } from './_icd10-dict.js';
 import { openConfirm } from './_modal.js';
+import { createFormToolbar } from './_form-toolbar.js';
 
 /* --------------------------------------------------------------------------
    Mini-helper `el()` — vanilla DOM (ten sam styl co app-new.js).
@@ -850,14 +851,72 @@ export function renderVisitForm(opts = {}) {
         ])
     ]);
 
-    /* ------------------ Form body -------------------- */
-    const body = el('div', { class: 'psy-vf__sections' });
-    for (const section of schema) {
-        body.appendChild(renderSection(section, initialRaw, { typeObj }));
+    /* ------------------ Form body (toolbar) ----------
+     * PR-J14 (2026-05-14): zamiast collapsible sections — pasek wszystkich
+     * pól po lewej + aktywne pole po prawej. Dot indicator 🟢/⚪ wskazuje
+     * wypełnienie. Wszystkie pola spłaszczone do jednej listy z grupowaniem
+     * po sekcjach (etap przejściowy — klientka dostarczy hierarchię 1/2).
+     */
+    const groups = schema.map((section) => {
+        const fields = (section.subfields || [])
+            .filter((f) => !(f.input && f.input.type === 'header'))
+            .map((f) => ({ ...f }));
+        // Komentarz sekcji jako wirtualne pole (dawny slot 5 — textarea).
+        if (section.sectionComment) {
+            fields.push({
+                id: '__comment',
+                label: 'Komentarz sekcji',
+                input: { type: 'textarea' },
+                notes: false
+            });
+        }
+        return { id: section.id, title: section.title, fields };
+    });
+
+    function _fieldRenderer(field, raw) {
+        return renderInputForField(field._groupId, field, raw);
     }
 
+    function _fieldIsFilled(field, raw) {
+        const key = field._groupId + '.' + field.id;
+        if (!raw) return false;
+        const v = raw[key];
+        if (v == null) return false;
+        if (typeof v === 'string') return v.trim() !== '';
+        if (Array.isArray(v)) return v.length > 0;
+        if (typeof v === 'boolean') return v;
+        if (typeof v === 'number') return v !== 0;
+        return !!v;
+    }
+
+    function _fieldNotesValue(field, raw) {
+        const key = field._groupId + '.' + field.id + '.__notes';
+        return (raw && raw[key]) || '';
+    }
+
+    function _showFieldNotes(field) {
+        if (!field) return false;
+        if (field.notes === false) return false;
+        const t = field.input && field.input.type;
+        // Pomijamy notes dla typów, które mają własne UI lub są syntetycznymi
+        // polami komentarzy (slot 4 byłby duplikatem).
+        if (t === 'textarea' || t === 'header' ||
+            t === 'link-view' || t === 'uzywki-special') return false;
+        if (field.id === '__comment') return false;
+        return true;
+    }
+
+    const toolbar = createFormToolbar({
+        groups,
+        values: initialRaw,
+        fieldRenderer: _fieldRenderer,
+        fieldNotesValue: _fieldNotesValue,
+        fieldIsFilled: _fieldIsFilled,
+        showFieldNotes: _showFieldNotes
+    });
+
     root.appendChild(modeBar);
-    root.appendChild(body);
+    root.appendChild(toolbar);
 
     /* ------------------ Autozapis -------------------- */
     let _autosaveTimer = null;
@@ -882,15 +941,15 @@ export function renderVisitForm(opts = {}) {
     function autosaveNow() {
         const id = _visitId || (ensureVisitExists() && _visitId);
         if (!id) return;
-        const raw = readRawFormData(body);
+        const raw = readRawFormData(toolbar);
         const summary = buildSummary(raw);
         const date = raw['visitData.data'] || (visit && visit.date) || undefined;
         const patch = { data: { _raw: raw } };
         if (summary) patch.summary = summary;
         if (date) patch.date = date;
         Store.updateVisit(id, patch);
-        // Zaktualizuj preview-line w summary sekcji „Dane wizyty"
-        updateVisitDataPreview(body, typeObj);
+        // Re-paint kropek wypełnienia na pasku (bez re-renderu treści, focus OK).
+        if (typeof toolbar.refreshDots === 'function') toolbar.refreshDots(raw);
     }
 
     function scheduleAutosave() {
@@ -898,25 +957,19 @@ export function renderVisitForm(opts = {}) {
         _autosaveTimer = setTimeout(autosaveNow, 400);
     }
 
-    body.addEventListener('input', scheduleAutosave);
-    body.addEventListener('change', scheduleAutosave);
+    toolbar.addEventListener('input', scheduleAutosave);
+    toolbar.addEventListener('change', scheduleAutosave);
 
     /* ------------------ Auto-grow textarea (PR-J) -----
-     * Notatki/opisy w wizycie muszą skalować się do zawartości, żeby cały
-     * tekst był widoczny bez ręcznego ciągnięcia rogiem. Wyjątki: 1-linijkowy
-     * komentarz w summary (autoGrow:false). */
+     * W nowym modelu treść po prawej re-renderuje się przy zmianie aktywnego
+     * pola, więc grow-ujemy po initial mount + po każdej zmianie focusu. */
     function _growAllAutoTextareas(scope) {
-        (scope || body).querySelectorAll('.psy-vf__textarea--autogrow')
+        (scope || toolbar).querySelectorAll('.psy-vf__textarea--autogrow')
             .forEach(_autoGrowTextarea);
     }
-
-    // (a) Initial grow po wstrzyknięciu w DOM (root jest mountowany przez
-    //     AppController._renderView; rAF wystarczy, bo getComputedStyle
-    //     zwraca prawidłowe rozmiary po pierwszym layoutcie).
     requestAnimationFrame(() => _growAllAutoTextareas());
 
-    // (b) Live grow podczas pisania — bez czekania na autosave (400 ms).
-    body.addEventListener('input', (ev) => {
+    toolbar.addEventListener('input', (ev) => {
         const t = ev.target;
         if (t && t.tagName === 'TEXTAREA' &&
             t.classList && t.classList.contains('psy-vf__textarea--autogrow')) {
@@ -924,13 +977,11 @@ export function renderVisitForm(opts = {}) {
         }
     });
 
-    // (c) Re-grow po rozwinięciu collapsible — gdy <details> jest closed,
-    //     scrollHeight=0, więc trzeba przeliczyć po otwarciu.
-    //     `toggle` NIE bubbles, dlatego listener na każdym <details>.
-    root.querySelectorAll('details').forEach((d) => {
-        d.addEventListener('toggle', () => {
-            if (d.open) _growAllAutoTextareas(d);
-        });
+    // Re-grow po przełączeniu aktywnego pola (klik w pasku po lewej) —
+    // nowe textarea zostają zmountowane, scrollHeight przed layoutem = 0.
+    toolbar.addEventListener('click', (ev) => {
+        if (!ev.target.closest('.psy-form-toolbar__field')) return;
+        requestAnimationFrame(() => _growAllAutoTextareas());
     });
 
     return root;

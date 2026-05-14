@@ -4,7 +4,35 @@
 > Pierwszy plik do odczytania w nowym czacie / po `/smol` / przy ograniczonym kontekście.
 > Reguła w `.clinerules` § 21.
 
-## Ostatnia sesja: 2026-05-13 (PR-J13 — tryb kompaktowy)
+## Ostatnia sesja: 2026-05-14 (PR-J14 — pasek narzędzi + pole treści)
+
+**Ukończone (Etap A — POC na formularzu wizyty):**
+- **PR-J14a — generyczny widget `psy-form-toolbar`** (`.clinerules § 23`)
+  - Klientka (5 obrazków, ZADANIE 2): nowy model formularzy — inspiracja: szwedzki system medyczny (drzewo „PASEK NARZĘDZI" po lewej + okno „POLE TREŚCI ZALEŻNE OD OPCJI W PASKU NARZĘDZI" po prawej).
+  - **Nowe pliki:**
+    - `js/views/_form-toolbar.js` (~270 linii) — `createFormToolbar({groups, values, fieldRenderer, fieldNotesValue, fieldIsFilled, showFieldNotes, onSelect, activeFieldUid}) → HTMLElement`. Root wystawia `.refreshDots(newValues)` do wywołania po autozapisie.
+    - `css/form-toolbar.css` (~280 linii) — style komponentu `.psy-form-toolbar*` + override-y `.psy-new-shell--form-mode` (zwężony sidebar do 56 px + tooltipy CSS-only).
+  - **Refaktor `view-visit-form.js`** — wymieniona TYLKO sekcja „Form body" (collapsible `<details>` → `createFormToolbar`). Wszystkie renderery pól (`renderInputForField`, `renderUzywkiSpecial`, `renderTagIcd10`, `renderLinkView`, `renderTextarea`, …) zostają nietknięte. Komentarze sekcji (`sectionComment`) i puste sekcje (`problemZdrowotny`, `medyczne`) dostają wirtualne pole `__comment` (textarea).
+  - **`_visit-form-schema.js`** — usunięte 16 linii `icon: '...'` (klientka: „te ikony przy polach trzeba usunąć bo się tam ostały").
+  - **`_menu.js`** — dodane pole `short` per pozycja (HW, Leki, Testy, Zal, Plan, Dane, Diag, Param, Dok, `+`).
+  - **`app-new.js`** — `_renderSidebar()` dodaje `data-short`/`data-label`/`title` na `<li>`. `_renderView()` toggle'uje `.psy-new-shell--form-mode` na shellu po renderze (heurystyka: obecność `.psy-form-toolbar` w mainEl).
+  - **`index.html`** — `<link rel="stylesheet" href="css/form-toolbar.css">` po `compact-new.css`.
+- **Decyzje UX PO** (z planu): A=3 (kropka kolorowa 🟢/⚪), B=A1 (pierwsze pole auto-aktywne), C=B1 (sidebar auto-collapse w form-mode), D=C1 (jednolity wzorzec dla wszystkich formularzy).
+- **Hierarchia ważne/mniej ważne** (zadanie 1 z 5 obrazków) — odłożona do dostarczenia listy przez klientkę (Etap C).
+- **Sygnaliki ostrzeżeń medycznych** (alergie, obrazek 5) — odłożone, „UWAGA nie priorytet".
+
+**Weryfikacja:**
+- `node --check` na wszystkich 5 zmodyfikowanych plikach JS — OK ✓
+- `http-server :8123` żyje, apka się ładuje bez błędów konsoli (folder gate → tryb dev → lista pacjentów renderują się czysto)
+- Pełny test formularza wizyty wymaga viewport >900 px (browser_action puppeteer ma 900×600, akcje listy pacjentów wypadają poza) — **PO sprawdza na prodzie po push**
+
+**Co dalej:**
+- **Etap B (kolejna paczka, po akceptacji klientki):** aplikuj wzorzec `createFormToolbar` na pozostałe formularze (`view-patient-detail.js`, `view-med-form.js`, `view-diagnosis-form.js`, `view-recommendation-form.js`, `view-parameters.js`, `view-treatment-plan.js`).
+- **Etap C (po dostarczeniu listy przez klientkę):** dodanie `importance: 1|2` w schemacie, CSS dla bold/dosunięte-do-lewej vs light/wcięte.
+
+---
+
+## Sesja: 2026-05-13 (PR-J13 — tryb kompaktowy)
 
 **Ukończone:**
 - **PR-J13 — tryb kompaktowy domyślnie ON** (`.clinerules § 22`)
@@ -253,6 +281,7 @@ node -e "const f=require('./js/views/_form-helpers.js'); console.log(f.validateP
 | § 20   | Format XLSX = przyszły Google Sheet (8 zakładek, czytelne dla człowieka) |
 | § 21   | Procedura aktualizacji `NEXT_STEPS.md` na końcu każdej paczki |
 | § 22   | Tryb kompaktowy (PR-J13) — domyślnie ON przez `<html class="theme--compact">` + `css/compact-new.css` |
+| § 23   | **PR-J14 — pasek narzędzi + pole treści** (formularze: lista pól po lewej z 🟢/⚪, aktywne pole po prawej; sidebar zwężony do skrótów w form-mode; ikony przy polach usunięte) |
 
 ---
 

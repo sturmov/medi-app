@@ -1426,6 +1426,12 @@ const AppController = {
                     + (isSubmenu ? ' psy-new-sidebar__item--has-submenu' : '')
                     + (expanded ? ' psy-new-sidebar__item--expanded' : ''),
                 'data-menu-id': item.id,
+                // PR-J14: krótka etykieta + pełna etykieta w trybie compact-sidebar
+                // (form-mode). CSS w `form-toolbar.css` używa `attr(data-short)`
+                // i `attr(data-label)` (tooltip).
+                'data-short': item.short || item.label.slice(0, 4),
+                'data-label': item.label,
+                title: item.label,
                 onclick: () => this._onMenuClick(item)
             }, labelChildren);
 
@@ -1530,6 +1536,13 @@ const AppController = {
             console.error('[renderView]', e);
             this.mainEl.appendChild(emptyState('⚠', 'Błąd renderowania', String(e && e.message || e), []));
         }
+
+        // PR-J14: tryb form-mode shellu (sidebar zwężony do 56 px ze skrótami
+        // literowymi). Heurystyka: aktywujemy gdy widok zawiera `.psy-form-toolbar`
+        // (komponent pasek-narzędzi). Dzięki temu Etap B (pacjent/lek/diagnoza)
+        // dostanie zachowanie automatycznie — bez extra konfiguracji per route.
+        const isFormMode = !!this.mainEl.querySelector('.psy-form-toolbar');
+        this.shellEl.classList.toggle('psy-new-shell--form-mode', isFormMode);
     },
 
     _updateSidebarActive() {

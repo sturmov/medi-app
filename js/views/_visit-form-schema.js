@@ -9,7 +9,6 @@
 // Właściwości rozdziału:
 //   id             - stabilny klucz (używany w Store)
 //   title          - etykieta belki
-//   icon           - emoji
 //   onlyIn         - 'first' | 'followup' | undefined (obydwa)
 //   defaultOpen    - true/false — czy rozwinięty na start
 //   sectionComment - czy slot (5) ma być widoczny
@@ -38,9 +37,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'visitData',
-        title: 'Dane wizyty',
-        icon: '🗓',
-        sticky: true,
+        title: 'Dane wizyty',        sticky: true,
         sectionComment: false,
         subfields: [
             { id: 'data',    label: 'Data wizyty',            required: true, input: { type: 'date' }, notes: false },
@@ -56,9 +53,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'wywiad',
-        title: 'Wywiad — aktualne objawy',
-        icon: '📋',
-        onlyIn: 'first',
+        title: 'Wywiad — aktualne objawy',        onlyIn: 'first',
         defaultOpen: true,
         sectionComment: true,
         subfields: [
@@ -76,9 +71,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'problemZdrowotny',
-        title: 'Aktualny problem zdrowotny',
-        icon: '🩺',
-        defaultOpen: true,
+        title: 'Aktualny problem zdrowotny',        defaultOpen: true,
         sectionComment: true,
         subfields: []
     },
@@ -88,9 +81,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'kontekst',
-        title: 'Tło / kontekst funkcjonowania',
-        icon: '🏠',
-        sectionComment: true,
+        title: 'Tło / kontekst funkcjonowania',        sectionComment: true,
         subfields: [
             { id: 'rodzina',     label: 'Sytuacja rodzinna',      input: { type: 'multi-select', options: VISIT_DICT.SYTUACJA_RODZINNA } },
             { id: 'szkolaPraca', label: 'Szkoła / Praca',         input: { type: 'radio', options: VISIT_DICT.SZKOLA_PRACA } },
@@ -106,9 +97,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'somatyczne',
-        title: 'Funkcjonowanie somatyczne',
-        icon: '❤',
-        sectionComment: true,
+        title: 'Funkcjonowanie somatyczne',        sectionComment: true,
         subfields: [
             { id: 'apetyt',    label: 'Apetyt / jedzenie',   input: { type: 'radio', options: VISIT_DICT.APETYT } },
             { id: 'sen',       label: 'Sen',                 input: { type: 'radio', options: VISIT_DICT.SEN } },
@@ -122,9 +111,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'medyczne',
-        title: 'Aktualne problemy medyczne',
-        icon: '🏥',
-        onlyIn: 'first',
+        title: 'Aktualne problemy medyczne',        onlyIn: 'first',
         sectionComment: true,
         subfields: []
     },
@@ -134,9 +121,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'leczenie',
-        title: 'Historia leczenia',
-        icon: '💊',
-        sectionComment: true,
+        title: 'Historia leczenia',        sectionComment: true,
         subfields: [
             { id: 'morfologia', label: 'Morfologia', onlyIn: 'first', input: { type: 'radio', options: VISIT_DICT.BADANIE_STATUS } },
             { id: 'ekg',        label: 'EKG',        onlyIn: 'first', input: { type: 'radio', options: VISIT_DICT.BADANIE_STATUS } }
@@ -148,9 +133,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'farmakoterapia',
-        title: 'Ogólna farmakoterapia (i suplementy)',
-        icon: '💉',
-        sectionComment: true,
+        title: 'Ogólna farmakoterapia (i suplementy)',        sectionComment: true,
         subfields: [
             { id: 'leki', label: 'Leki psychotropowe', input: { type: 'link-view', ref: '#/meds' } }
         ]
@@ -161,9 +144,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'uzywki',
-        title: 'Używki',
-        icon: '🚬',
-        sectionComment: true,
+        title: 'Używki',        sectionComment: true,
         subfields: [
             { id: 'substancje', label: 'Substancje', fullWidth: true, input: { type: 'uzywki-special' }, notes: false }
         ]
@@ -174,9 +155,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'parametry',
-        title: 'Parametry somatyczne',
-        icon: '📏',
-        sectionComment: false,
+        title: 'Parametry somatyczne',        sectionComment: false,
         subfields: [
             { id: 'wzrost',    label: 'Wzrost',             input: { type: 'number', unit: 'cm' }, notes: false },
             { id: 'masa',      label: 'Masa ciała',         input: { type: 'number', unit: 'kg' }, notes: false },
@@ -191,9 +170,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'status',
-        title: 'Status psychiczny',
-        icon: '🧠',
-        defaultOpen: true,
+        title: 'Status psychiczny',        defaultOpen: true,
         sectionComment: true,
         subfields: [
             // Tryb mały (widoczny zawsze)
@@ -228,9 +205,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'ryzykoS',
-        title: 'Ocena ryzyka S (szczegółowa)',
-        icon: '🚨',
-        onlyIn: 'first',
+        title: 'Ocena ryzyka S (szczegółowa)',        onlyIn: 'first',
         sectionComment: true,
         subfields: [
             { id: 'depresja',     label: 'Depresja / beznadzieja',      input: { type: 'select', options: VISIT_DICT.RYZYKO_DEPRESJA } },
@@ -259,9 +234,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'testy',
-        title: 'Testy przesiewowe',
-        icon: '🧪',
-        onlyIn: 'first',
+        title: 'Testy przesiewowe',        onlyIn: 'first',
         sectionComment: true,
         subfields: [
             { id: 'testyLink', label: 'Wyniki testów', input: { type: 'link-view', ref: '#/tests' }, notes: false }
@@ -273,9 +246,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'ocenaKliniczna',
-        title: 'Ocena kliniczna',
-        icon: '🎯',
-        defaultOpen: true,
+        title: 'Ocena kliniczna',        defaultOpen: true,
         sectionComment: true,
         subfields: [
             { id: 'hipoteza',        label: 'Hipoteza diagnostyczna', input: { type: 'tag-input-icd10' } },
@@ -290,9 +261,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'rozpoznanie',
-        title: 'Rozpoznanie (ICD-10)',
-        icon: '📖',
-        sectionComment: true,
+        title: 'Rozpoznanie (ICD-10)',        sectionComment: true,
         subfields: [
             { id: 'diagnozy', label: 'Rozpoznania', input: { type: 'link-view', ref: '#/diagnoses' }, notes: false }
         ]
@@ -303,9 +272,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'oddzialywania',
-        title: 'Podjęte oddziaływania podczas wizyty',
-        icon: '➡',
-        defaultOpen: true,
+        title: 'Podjęte oddziaływania podczas wizyty',        defaultOpen: true,
         sectionComment: true,
         subfields: [
             { id: 'rekomendacje',     label: 'Rekomendacje', onlyIn: 'first', input: { type: 'multi-select', options: VISIT_DICT.REKOMENDACJE_TYP } },

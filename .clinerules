@@ -189,6 +189,40 @@ Pełna analiza w `docs/REQUIREMENTS_2026-05-11.md` (zdjęcia `docs/z1.jpg`..`z7.
 - **NIE modyfikujemy** `app-new.css` ani plików `js/views/*.js` — tylko `compact-new.css` + 2 linie w `index.html`. Gdyby klientka chciała wrócić do „comfortable": usuwamy `theme--compact` z `<html>`.
 - **Tryb domyślnie ON** (klientka prosiła, apka jeszcze nie produkcyjna — testujemy na żywym widoku). W przyszłości można dodać toggle w Ustawieniach (Faza 6), na razie YAGNI.
 
+## 23) Ustalenia PO 2026-05-14 (PR-J14 — pasek narzędzi + pole treści)
+Klientka (5 obrazków, ZADANIE 2): jasno prosi o nowy model formularzy — inspiracja: szwedzki system medyczny (drzewo „PASEK NARZĘDZI" po lewej + okno „POLE TREŚCI ZALEŻNE OD OPCJI W PASKU NARZĘDZI" po prawej).
+
+- **Nowy wzorzec UI dla WSZYSTKICH formularzy** (decyzja PO D=C1): 2-kolumnowy layout:
+  - **LEWA**: pasek narzędzi z listą WSZYSTKICH pól formularza, pogrupowanych wg sekcji (płaska struktura po spłaszczeniu — bo „skoro są tylko 2 sekcje, można je zlikwidować i będzie płasko" — PO). Każde pole ma kropkę-indicator wypełnienia: **🟢 zielona (wypełnione) / ⚪ pusta z obramowaniem (puste)** (decyzja A=3).
+  - **PRAWA**: aktywne pole z labelem + input + opcjonalny slot na notes. **Tylko JEDNO pole widoczne** na raz, jak tab-content (decyzja A1). Pierwsze pole pierwszej grupy jest automatycznie aktywne po wejściu.
+- **Główny sidebar zwężony w trybie formularza** (decyzja C=B1, klientka „menu musi nadal być"): klasa `.psy-new-shell--form-mode` na `<html>` shellu (aktywowana automatycznie post-render gdy widok zawiera `.psy-form-toolbar`). Sidebar redukuje się z 220 → 56 px, etykiety zastępowane krótkimi tekstowymi skrótami (`HW`, `Leki`, `Testy`, `Zal`, `Plan`, `Dane`, `Diag`, `Param`, `Dok`, `+` dla CTA). **Bez emoji** (spójność z § 18). Pełna etykieta w `data-label` (tooltip CSS-only on hover).
+- **Usunięte ikony przy polach** (klientka 1: „te ikony przy polach też trzeba usunąć bo się tam ostały"): pole `icon` zniknęło ze WSZYSTKICH 16 sekcji w `_visit-form-schema.js`. Doc-comment zaktualizowany.
+- **Hierarchia ważne/mniej ważne (zadanie 1)** — odłożona do dostarczenia listy przez klientkę. Na razie wszystkie pola jednoznacznie wizualnie; grupowanie wg sekcji (nagłówki uppercase `.psy-form-toolbar__group-title`) traktujemy jako pierwsze przybliżenie.
+- **Sygnaliki ostrzeżeń medycznych** (obrazek 5 — tabela alergii) — **odłożone, „UWAGA nie priorytet"**.
+
+### Pliki paczki PR-J14:
+- **NOWY:** `js/views/_form-toolbar.js` (~270 linii) — generyczny widget. API: `createFormToolbar({groups, values, fieldRenderer, fieldNotesValue, fieldIsFilled, showFieldNotes, onSelect, activeFieldUid}) → HTMLElement`. Root wystawia metodę `.refreshDots(newValues?)` do wywołania po autozapisie (bez re-renderu treści).
+- **NOWY:** `css/form-toolbar.css` (~280 linii) — style komponentu `.psy-form-toolbar*` + override-y `.psy-new-shell--form-mode` (zwężony sidebar + tooltipy). Grid 260/1fr, max-height calc(100vh - 220px) na obu kolumnach, scrollowalne osobno.
+- **Refaktor:** `js/views/view-visit-form.js` — wszystkie renderery pól (`renderInputForField`, `renderUzywkiSpecial`, `renderTagIcd10`, `renderLinkView`, …) **zostają nietknięte**. Wymieniona tylko sekcja „Form body": z pętli `<details>` collapsible'i → `createFormToolbar()`. Komentarze sekcji (`sectionComment`) i puste sekcje (`problemZdrowotny`, `medyczne`) dostają wirtualne pole `__comment` (textarea). Autozapis przepięty z `body` na `toolbar` (Event delegation). Stare funkcje `renderSection`, `renderSubfieldRow`, `buildVisitDataPreview`, `updateVisitDataPreview` zostają jako legacy dead-code (usunięcie w kolejnej paczce).
+- **Modyfikacja:** `js/views/_visit-form-schema.js` — usunięte 16 linii `icon: '...'`. Doc-comment zaktualizowany.
+- **Modyfikacja:** `js/views/_menu.js` — dodane pole `short` per pozycja menu (HW/Leki/Testy/Zal/Plan/Dane/Diag/Param/Dok/+).
+- **Modyfikacja:** `js/app-new.js` — `_renderSidebar()` dodaje atrybuty `data-short` + `data-label` + `title` na `<li>`. `_renderView()` po wyrenderowaniu toggle'uje `.psy-new-shell--form-mode` na shellu zależnie od obecności `.psy-form-toolbar` w `mainEl`.
+- **Modyfikacja:** `index.html` — `<link rel="stylesheet" href="css/form-toolbar.css">` po `compact-new.css`.
+
+### Zachowane (kontrakt):
+- Autozapis (400 ms debounce, `Store.updateVisit`) — działa bez zmian
+- Lazy create (`Store.addVisit` przy pierwszej zmianie) — działa bez zmian
+- `data-live="true"` na rootu widoku — pomija pasywny re-render
+- Renderery pól tag-input-icd10, uzywki-special, link-view — działają bez modyfikacji
+
+### Etap B (kolejny PR, po akceptacji klientki):
+- `view-patient-detail.js`, `view-med-form.js`, `view-diagnosis-form.js`, `view-recommendation-form.js` — przebudowa na ten sam wzorzec `createFormToolbar`
+- Plus widoki `view-parameters.js`, `view-treatment-plan.js`
+
+### Etap C (po dostarczeniu listy przez klientkę):
+- Dodanie `importance: 1|2` per pole w schematach
+- CSS: pola ważne = bold + dosunięte do lewej, mniej ważne = light + wcięte (~16-20 px w prawo)
+
 ## 21) Procedura kontynuacji między sesjami (NEXT_STEPS.md)
 - **Na końcu każdej paczki / sesji** developer aktualizuje `docs/NEXT_STEPS.md` — krótką notatkę kontekstową która pozwala wystartować nowy czat lub `/smol` bez utraty kontekstu.
 - **Pierwszy plik do odczytu w nowym czacie** to `docs/NEXT_STEPS.md` (przed `.clinerules`, `IMPLEMENTATION_PLAN.md` i resztą).
