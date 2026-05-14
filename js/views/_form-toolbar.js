@@ -83,7 +83,7 @@ function uidOf(groupId, fieldId) {
 export function createFormToolbar(opts) {
     const {
         groups = [],
-        values = {},
+        values: initialValues = {},
         fieldRenderer,
         fieldNotesValue = () => '',
         fieldIsFilled = isFilledDefault,
@@ -95,6 +95,17 @@ export function createFormToolbar(opts) {
         onSelect = null,
         renderEmpty = null
     } = opts || {};
+
+    // PR-J14d (2026-05-14, KRYTYCZNY): `values` musi być MUTOWALNĄ referencją
+    // wewnętrzną, żeby `refreshDots(newValues)` mogło ją zaktualizować dla
+    // przyszłych `_renderContent(uid)`. Bez tego — kropki+preview pokazują
+    // świeże dane, ale gdy user klika nowe pole (lub wraca do starego),
+    // `fieldRenderer(field, values)` widzi STARE wartości (initialValues),
+    // więc input renderuje się pusty / sprzed edycji. Klientka raport:
+    // „po zmianie pola to co zostało wpisane od razu znika - choć zielona
+    // kropka zostaje".
+    let values = initialValues;
+
 
     // Płaska lista pól (do wyszukiwania, do refresh-dot). Pomija pola typu
     // 'header' (to są tylko wizualne separatory w starym schemacie).
@@ -261,9 +272,17 @@ export function createFormToolbar(opts) {
 
     // Public API: re-oblicza dot-indicators + preview po autozapisie (bez
     // re-renderu treści — focus i scroll w polu po prawej zostają nietknięte).
+    //
+    // PR-J14d (2026-05-14): KRYTYCZNE — gdy `newValues` jest podany, MUSIMY
+    // zaktualizować wewnętrzną referencję `values` (closure). Inaczej kolejne
+    // wywołania `_renderContent(uid)` (po kliknięciu w inne pole) będą używać
+    // STAREGO obiektu `initialValues`, co spowoduje renderowanie pól pustych
+    // / sprzed edycji — pomimo że Store i kropki na pasku mają świeże dane.
     root.refreshDots = function (newValues) {
-        const vals = newValues || values;
+        if (newValues) values = newValues;
+        const vals = values;
         for (const f of flat) {
+
             const item = itemEls.get(f._uid);
             if (!item) continue;
             const filled = !!fieldIsFilled(f, vals);

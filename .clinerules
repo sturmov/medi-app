@@ -224,7 +224,20 @@ Klientka (5 obrazków, ZADANIE 2): jasno prosi o nowy model formularzy — inspi
 - Dodanie `importance: 1|2` per pole w schematach
 - CSS: pola ważne = bold + dosunięte do lewej, mniej ważne = light + wcięte (~16-20 px w prawo)
 
+## 24) Ustalenia PO 2026-05-14 cd. 4 (PR-J14d — krytyczny bug: wartość znika po zmianie pola)
+- **Klientka raport (krytyczny):** „nic się nie zapisuje — po zmianie pola to co zostało wpisane od razu znika - choć zielona kropka zostaje". Łańcuch trzeciego z rzędu bugu w merge/closure logic toolbar+autozapis (po PR-J14b/c).
+- **Root cause:** `_form-toolbar.js` trzymał `values` jako closure z destrukturyzacji `const`. Metoda `.refreshDots(newValues)` używała `newValues` tylko lokalnie do iteracji kropek + preview, ale NIE aktualizowała wewnętrznej referencji. Skutek: gdy user kliknął inne pole (lub wrócił do edytowanego), `_renderContent(uid)` wywoływał `fieldRenderer(field, values)` ze **STAREGO** obiektu `initialValues` (sprzed wszystkich autozapisów) — input renderował się pusty lub z wartością sprzed edycji. Kropki na pasku już wskazywały „wypełnione" (bo `refreshDots` używało świeżego `vals = newValues`), więc widać było rozbieżność: 🟢 ale pole puste.
+- **Fix:** w `js/views/_form-toolbar.js`:
+  - Destrukturyzacja: `values: initialValues = {}` (rename do init)
+  - Stan wewnętrzny: `let values = initialValues` (MUTOWALNA referencja)
+  - `refreshDots(newValues)`: jeśli `newValues` podany — `values = newValues` przed iteracją kropek
+- **Konsekwencja:** kolejne wywołania `_renderContent(uid)` (po kliknięciu pola na pasku) używają zawsze świeżego `values`, więc input pokazuje aktualną wartość z Store.
+- **Cache-bust w `index.html`** bumped z `?v=202605150024` → `?v=202605150040` (wszystkie CSS + app-new.js).
+- **NIE zmienia** kontraktu API — `view-visit-form.js` i przyszłe konsumenty toolbar'a nie wymagają modyfikacji.
+- **Wnioski na przyszłość:** wzorzec „init param + mutable internal ref" musi być standardem dla każdego stanu który ma być aktualizowany przez public API komponentu. Komentarz w kodzie zaznacza to wyraźnie.
+
 ## 21) Procedura kontynuacji między sesjami (NEXT_STEPS.md)
+
 - **Na końcu każdej paczki / sesji** developer aktualizuje `docs/NEXT_STEPS.md` — krótką notatkę kontekstową która pozwala wystartować nowy czat lub `/smol` bez utraty kontekstu.
 - **Pierwszy plik do odczytu w nowym czacie** to `docs/NEXT_STEPS.md` (przed `.clinerules`, `IMPLEMENTATION_PLAN.md` i resztą).
 - Struktura `NEXT_STEPS.md`:
