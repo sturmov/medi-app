@@ -88,6 +88,10 @@ export function createFormToolbar(opts) {
         fieldNotesValue = () => '',
         fieldIsFilled = isFilledDefault,
         showFieldNotes = (f) => f && f.notes !== false,
+        // PR-J14b: opcjonalny callback zwracający string preview wartości pola
+        // (wyświetlany na pasku po lewej obok labela, mniejszą czcionką).
+        // Gdy zwraca '' lub gdy brak callback'u — druga linia jest ukryta.
+        fieldPreview = null,
         onSelect = null,
         renderEmpty = null
     } = opts || {};
@@ -134,8 +138,24 @@ export function createFormToolbar(opts) {
         const ul = el('ul', { class: 'psy-form-toolbar__group' });
         for (const f of visibleFields) {
             const uid = uidOf(g.id, f.id);
-            const filled = !!fieldIsFilled({ ...f, _groupId: g.id }, values);
+            const fieldWithGroup = { ...f, _groupId: g.id, _groupTitle: g.title };
+            const filled = !!fieldIsFilled(fieldWithGroup, values);
             const isActive = uid === activeUid;
+            const previewText = fieldPreview ? (fieldPreview(fieldWithGroup, values) || '') : '';
+
+            // PR-J14b: dwulinijkowy element paska — pierwsza linia: kropka + label,
+            // druga linia (opcjonalna): preview wartości, mniejszą czcionką.
+            const labelLine = el('div', { class: 'psy-form-toolbar__field-line1' }, [
+                el('span', { class: 'psy-form-toolbar__field-dot', 'aria-hidden': 'true' }),
+                el('span', { class: 'psy-form-toolbar__field-label' }, [
+                    f.label + (f.required ? ' *' : '')
+                ])
+            ]);
+            const previewEl = el('div', {
+                class: 'psy-form-toolbar__field-preview',
+                style: { display: previewText ? '' : 'none' }
+            }, [previewText]);
+
             const item = el('li', {
                 class: 'psy-form-toolbar__field'
                     + (isActive ? ' psy-form-toolbar__field--active' : '')
@@ -151,12 +171,7 @@ export function createFormToolbar(opts) {
                         _setActive(uid);
                     }
                 }
-            }, [
-                el('span', { class: 'psy-form-toolbar__field-dot', 'aria-hidden': 'true' }),
-                el('span', { class: 'psy-form-toolbar__field-label' }, [
-                    f.label + (f.required ? ' *' : '')
-                ])
-            ]);
+            }, [labelLine, previewEl]);
             ul.appendChild(item);
             itemEls.set(uid, item);
         }
@@ -244,8 +259,8 @@ export function createFormToolbar(opts) {
         if (typeof onSelect === 'function') onSelect(uid);
     }
 
-    // Public API: re-oblicza dot-indicators po autozapisie (bez re-renderu
-    // treści — focus i scroll w polu po prawej zostają nietknięte).
+    // Public API: re-oblicza dot-indicators + preview po autozapisie (bez
+    // re-renderu treści — focus i scroll w polu po prawej zostają nietknięte).
     root.refreshDots = function (newValues) {
         const vals = newValues || values;
         for (const f of flat) {
@@ -253,6 +268,15 @@ export function createFormToolbar(opts) {
             if (!item) continue;
             const filled = !!fieldIsFilled(f, vals);
             item.classList.toggle('psy-form-toolbar__field--filled', filled);
+            // PR-J14b: refresh preview-text (druga linia) per pole
+            if (fieldPreview) {
+                const prevEl = item.querySelector('.psy-form-toolbar__field-preview');
+                if (prevEl) {
+                    const txt = fieldPreview(f, vals) || '';
+                    prevEl.textContent = txt;
+                    prevEl.style.display = txt ? '' : 'none';
+                }
+            }
         }
     };
 

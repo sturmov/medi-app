@@ -750,11 +750,23 @@ export function renderVisitForm(opts = {}) {
     }
 
     const schema = schemaForMode(mode);
-    const initialRaw = (visit && visit.data && visit.data._raw) || {};
+    const initialRaw = Object.assign({}, (visit && visit.data && visit.data._raw) || {});
 
     // Tytuł / podtytuł
     const typeObj = visitTypeById(_typeId);
     const isNew   = !visit;
+
+    // PR-J14b (2026-05-14, klientka): nowa wizyta = data domyślnie dzisiejsza.
+    // User może zmienić ręcznie w polu — to tylko pre-fill. Wstawiamy do
+    // initialRaw, żeby renderer pola pokazał dzisiejszą datę od razu i żeby
+    // autozapis przy pierwszej innej zmianie zachował tę datę w Store.
+    if (isNew && !initialRaw['visitData.data']) {
+        const _today = new Date();
+        const _y = _today.getFullYear();
+        const _m = String(_today.getMonth() + 1).padStart(2, '0');
+        const _d = String(_today.getDate()).padStart(2, '0');
+        initialRaw['visitData.data'] = `${_y}-${_m}-${_d}`;
+    }
     if (isNew) {
         title = '+ Nowa wizyta' + (typeObj ? ' · ' + typeObj.label : '');
     } else {
@@ -906,13 +918,41 @@ export function renderVisitForm(opts = {}) {
         return true;
     }
 
+    // PR-J14b (2026-05-14, klientka): preview wartości pola obok labela
+    // na pasku po lewej, mniejszą czcionką. Sprawia że bez klika widać
+    // co już jest wpisane (np. „Data wizyty / 2026-05-14").
+    function _fieldPreview(field, raw) {
+        if (!raw || !field) return '';
+        const t = field.input && field.input.type;
+        // Pola bez sensownego preview (special-UI, headery, link-out).
+        if (t === 'header' || t === 'link-view' || t === 'uzywki-special') {
+            return '';
+        }
+        const key = field._groupId + '.' + field.id;
+        const v = raw[key];
+        if (v == null) return '';
+        if (Array.isArray(v)) {
+            if (!v.length) return '';
+            if (v.length <= 3) return v.join(', ');
+            return v.slice(0, 3).join(', ') + ` … (+${v.length - 3})`;
+        }
+        if (typeof v === 'boolean') return v ? 'tak' : 'nie';
+        const s = String(v).trim();
+        if (!s) return '';
+        // Skróć długie textarea — pasek ma ograniczoną szerokość, ellipsis
+        // doda się w CSS, ale dodatkowo hard-cap żeby DOM nie wybuchł.
+        if (s.length > 80) return s.slice(0, 77) + '…';
+        return s;
+    }
+
     const toolbar = createFormToolbar({
         groups,
         values: initialRaw,
         fieldRenderer: _fieldRenderer,
         fieldNotesValue: _fieldNotesValue,
         fieldIsFilled: _fieldIsFilled,
-        showFieldNotes: _showFieldNotes
+        showFieldNotes: _showFieldNotes,
+        fieldPreview: _fieldPreview
     });
 
     root.appendChild(modeBar);
@@ -941,14 +981,24 @@ export function renderVisitForm(opts = {}) {
     function autosaveNow() {
         const id = _visitId || (ensureVisitExists() && _visitId);
         if (!id) return;
-        const raw = readRawFormData(toolbar);
+        // KRYTYCZNE (PR-J14b 2026-05-14): toolbar renderuje TYLKO aktywne pole,
+        // więc `readRawFormData(toolbar)` daje tylko świeże wartości WIDOCZNYCH
+        // pól. Bez merge'a z istniejącym stanem Store, wartości pól nieobecnych
+        // w bieżącym DOM zostałyby SKASOWANE (Store.updateVisit nadpisuje
+        // `data._raw` w całości). Klientka raport: „jak wypełniam następne to
+        // zaznacza się zielona kropka w nowym, a w poprzednim robi się biała".
+        const fresh = readRawFormData(toolbar);
+        const cur = Store.getVisitById(id);
+        const existing = (cur && cur.data && cur.data._raw) || initialRaw || {};
+        const raw = { ...existing, ...fresh };
+
         const summary = buildSummary(raw);
         const date = raw['visitData.data'] || (visit && visit.date) || undefined;
         const patch = { data: { _raw: raw } };
         if (summary) patch.summary = summary;
         if (date) patch.date = date;
         Store.updateVisit(id, patch);
-        // Re-paint kropek wypełnienia na pasku (bez re-renderu treści, focus OK).
+        // Re-paint kropek + preview na pasku (bez re-renderu treści, focus OK).
         if (typeof toolbar.refreshDots === 'function') toolbar.refreshDots(raw);
     }
 
