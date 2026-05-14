@@ -987,10 +987,17 @@ export function renderVisitForm(opts = {}) {
         // w bieżącym DOM zostałyby SKASOWANE (Store.updateVisit nadpisuje
         // `data._raw` w całości). Klientka raport: „jak wypełniam następne to
         // zaznacza się zielona kropka w nowym, a w poprzednim robi się biała".
+        //
+        // PR-J14c (2026-05-14, klientka 2): pre-fille (np. domyślna data
+        // dzisiejsza) muszą być w merge na PIERWSZYM miejscu — inaczej `||`
+        // w starym kodzie wracał do `{}` (bo `{}` jest truthy w JS) i pre-fill
+        // ginął przy pierwszej zmianie GDZIEKOLWIEK. Łańcuch:
+        //   initialRaw (pre-fille) → existing (Store) → fresh (DOM)
+        // gwarantuje że nic nie zniknie.
         const fresh = readRawFormData(toolbar);
         const cur = Store.getVisitById(id);
-        const existing = (cur && cur.data && cur.data._raw) || initialRaw || {};
-        const raw = { ...existing, ...fresh };
+        const existing = (cur && cur.data && cur.data._raw) || {};
+        const raw = { ...initialRaw, ...existing, ...fresh };
 
         const summary = buildSummary(raw);
         const date = raw['visitData.data'] || (visit && visit.date) || undefined;

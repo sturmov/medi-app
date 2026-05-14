@@ -15,6 +15,12 @@
 // jesteśmy w formularzu). Pełna etykieta `label` widoczna jako tooltip
 // (atrybut `data-label` w renderowanym `<li>`).
 //
+// PR-J14c (2026-05-14): dodane pole `icon` (emoji) — wyświetlane w trybie
+// wąskim form-mode ZAMIAST tekstu `short` (klientka: „menu zmniejszone ma
+// być ikonami a nie tekstem - tekst na rozszerzonej wersji"). Sekcja 18
+// `.clinerules` (bez emoji w menu) dotyczy TYLKO trybu pełnego — w form-mode
+// ikony są dozwolone bo skróty tekstowe (HW/Leki/Param) są mało czytelne.
+//
 // Wszystkie pozycje są KONTEKSTOWE per wybrany pacjent. Dopóki pacjent nie jest
 // wybrany, pozycje pozostają widoczne, ale kliknięcie przypomina o konieczności
 // wyboru (via toast), a treść głównego obszaru pokazuje listę pacjentów.
@@ -26,29 +32,30 @@ export const APP_MENU = [
         id: 'visit-new',
         label: '+ Nowa wizyta',
         short: '+',                // w trybie compact: ikona „+"
+        icon: '➕',                 // w form-mode (PR-J14c): ikona zamiast tekstu
         route: '#/visit/new',      // klik główny = stary widok kafelkowy (back-compat)
         order: 1,
         cta: true,                 // styl CTA (niebieski)
         submenu: true              // _renderSidebar() rozwija/zwija listę typów
     },
     // 2) Historia wizyt
-    { id: 'history',         label: 'Historia wizyt',        short: 'HW',    route: '#/history',         order: 2 },
+    { id: 'history',         label: 'Historia wizyt',        short: 'HW',    icon: '📅', route: '#/history',         order: 2 },
     // 3) Leki
-    { id: 'meds',            label: 'Leki',                  short: 'Leki',  route: '#/meds',            order: 3 },
+    { id: 'meds',            label: 'Leki',                  short: 'Leki',  icon: '💊', route: '#/meds',            order: 3 },
     // 4) Testy
-    { id: 'tests',           label: 'Testy',                 short: 'Testy', route: '#/tests',           order: 4 },
+    { id: 'tests',           label: 'Testy',                 short: 'Testy', icon: '🧪', route: '#/tests',           order: 4 },
     // 5) Zalecenia
-    { id: 'recommendations', label: 'Zalecenia',             short: 'Zal',   route: '#/recommendations', order: 5 },
+    { id: 'recommendations', label: 'Zalecenia',             short: 'Zal',   icon: '📌', route: '#/recommendations', order: 5 },
     // 6) Plan leczenia (NOWE)
-    { id: 'treatment-plan',  label: 'Plan leczenia',         short: 'Plan',  route: '#/treatment-plan',  order: 6 },
+    { id: 'treatment-plan',  label: 'Plan leczenia',         short: 'Plan',  icon: '🎯', route: '#/treatment-plan',  order: 6 },
     // 7) Dane identyfikacyjne (rename z „Pacjent")
-    { id: 'patient-data',    label: 'Dane identyfikacyjne',  short: 'Dane',  route: '#/patient-data',    order: 7 },
+    { id: 'patient-data',    label: 'Dane identyfikacyjne',  short: 'Dane',  icon: '📇', route: '#/patient-data',    order: 7 },
     // 8) Diagnozy
-    { id: 'diagnoses',       label: 'Diagnozy',              short: 'Diag',  route: '#/diagnoses',       order: 8 },
+    { id: 'diagnoses',       label: 'Diagnozy',              short: 'Diag',  icon: '🏥', route: '#/diagnoses',       order: 8 },
     // 9) Parametry (NOWE)
-    { id: 'parameters',      label: 'Parametry',             short: 'Param', route: '#/parameters',      order: 9 },
+    { id: 'parameters',      label: 'Parametry',             short: 'Param', icon: '📊', route: '#/parameters',      order: 9 },
     // 10) Dokumenty (NOWE)
-    { id: 'documents',       label: 'Dokumenty',             short: 'Dok',   route: '#/documents',       order: 10 }
+    { id: 'documents',       label: 'Dokumenty',             short: 'Dok',   icon: '📁', route: '#/documents',       order: 10 }
 ];
 
 // Domyślny hash po starcie aplikacji (gdy nie ma żadnego routa)

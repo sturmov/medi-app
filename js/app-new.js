@@ -1427,9 +1427,11 @@ const AppController = {
                     + (expanded ? ' psy-new-sidebar__item--expanded' : ''),
                 'data-menu-id': item.id,
                 // PR-J14: krótka etykieta + pełna etykieta w trybie compact-sidebar
-                // (form-mode). CSS w `form-toolbar.css` używa `attr(data-short)`
-                // i `attr(data-label)` (tooltip).
+                // (form-mode). CSS w `form-toolbar.css` używa `attr(data-icon)` jako
+                // główny wskaźnik (PR-J14c, klientka 2026-05-14: ikony zamiast tekstu),
+                // z fallbackiem `data-short` gdy ikony brak. `data-label` = tooltip.
                 'data-short': item.short || item.label.slice(0, 4),
+                'data-icon': item.icon || '',
                 'data-label': item.label,
                 title: item.label,
                 onclick: () => this._onMenuClick(item)

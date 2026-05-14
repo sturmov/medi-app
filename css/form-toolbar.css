@@ -273,22 +273,25 @@
     display: none;
 }
 
-/* Wyświetlamy data-short jako skrót — bez emoji, zgodnie z .clinerules §18. */
+/* PR-J14c (klientka 2026-05-14): w trybie wąskim form-mode pokazujemy
+   IKONY (emoji) zamiast skrótów tekstowych — skróty `HW`/`Leki`/`Param`
+   są mało czytelne, ikony rozpoznajemy szybciej. Pełne etykiety w trybie
+   normalnym (220px) zostają jako tekst (zgodnie z .clinerules §18). */
 .psy-new-shell--form-mode .psy-new-sidebar__item {
     justify-content: center;
     padding: 6px 4px !important;
     text-align: center;
-    font-size: 11px !important;
-    font-weight: 600;
-    letter-spacing: 0.04em;
+    font-size: 18px !important;     /* większa czcionka — emoji są kompaktowe */
+    line-height: 1;
     color: #4B5563;
     position: relative;
 }
 
 .psy-new-shell--form-mode .psy-new-sidebar__item::before {
-    content: attr(data-short);
+    content: attr(data-icon);
     display: block;
-    text-transform: uppercase;
+    /* fallback: gdy data-icon pusty (legacy), renderuj jako pusty string —
+       w przyszłości można dodać `attr(data-short)` jako drugie miejsce. */
 }
 
 .psy-new-shell--form-mode .psy-new-sidebar__item--cta {
@@ -296,8 +299,8 @@
 }
 
 .psy-new-shell--form-mode .psy-new-sidebar__item--cta::before {
-    content: '+';
-    font-size: 16px;
+    content: attr(data-icon);       /* '➕' z _menu.js dla pozycji visit-new */
+    font-size: 20px;
     font-weight: 700;
 }
 
