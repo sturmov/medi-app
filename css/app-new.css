@@ -3205,3 +3205,14 @@ body.psy-folder-gate-open {
 
 
 
+
+
+/* ============================================================================
+   PR-J16c (klientka 2026-05-16) — wszystkie textarea w apce auto-grow,
+   bez wewnetrznego scrolla. „Kazdy Enter sie liczy".
+   JS handler w js/views/_autogrow.js (installAutogrow on start).
+   ============================================================================ */
+textarea {
+    overflow-y: hidden !important;
+    resize: none !important;
+}

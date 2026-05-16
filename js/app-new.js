@@ -46,6 +46,8 @@ import { renderDocuments } from './views/view-documents.js';
 import { listAvailableTests } from './views/_tests-catalog.js';
 
 import { showFolderGate, hideFolderGate, shouldShowGate } from './views/view-folder-gate.js';
+import { installAutogrow } from './views/_autogrow.js';
+
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -1801,11 +1803,17 @@ function bootstrap() {
     if (_initDone) return;
     _initDone = true;
     try {
+        // PR-J16c (2026-05-16): globalny auto-grow dla wszystkich <textarea>.
+        // Klientka: „scroll textarea nie wchodzi w grę. każdy enter się liczy".
+        // Musi być zainstalowany PRZED init() — observer łapie też textareas
+        // tworzone w pierwszym renderze widoku.
+        installAutogrow();
         AppController.init();
     } catch (e) {
         console.error('[AppController.init]', e);
     }
 }
+
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', bootstrap);
 } else {
