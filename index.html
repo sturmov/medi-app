@@ -1,24 +1,24 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="pl" class="theme--compact">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PsychoApp — Dokumentacja Psychologiczna</title>
+    <title>PsychoApp â€” Dokumentacja Psychologiczna</title>
     <!-- PR-J14c (2026-05-14): cache-busting `?v=YYYYMMDDhhmm` na wszystkich
-         CSS i JS — żeby kolejne deploye nie wymagały hard reloadu klientki.
-         Bumpuj wersję przy każdym deploy (data + godzina = unikalność). -->
-    <link rel="stylesheet" href="css/tokens.css?v=202605161145">
-    <link rel="stylesheet" href="css/style.css?v=202605161145">
-    <link rel="stylesheet" href="css/compat.css?v=202605161145">
-    <link rel="stylesheet" href="css/app-new.css?v=202605161145">
-    <!-- PR-J13 (2026-05-13) — tryb kompaktowy: override-y dla nowej apki.
-         Aktywne przez klasę `theme--compact` na <html>. Rollback: usunięcie
-         tej klasy → apka wraca do „comfortable" widoku. -->
-    <link rel="stylesheet" href="css/compact-new.css?v=202605161145">
-    <!-- PR-J14 (2026-05-14) — nowy wzorzec formularzy „pasek narzędzi + treść".
-         Style komponentu `_form-toolbar.js` + override-y zwężonego sidebara
+         CSS i JS â€” Å¼eby kolejne deploye nie wymagaÅ‚y hard reloadu klientki.
+         Bumpuj wersjÄ™ przy kaÅ¼dym deploy (data + godzina = unikalnoÅ›Ä‡). -->
+    <link rel="stylesheet" href="css/tokens.css?v=202605161230">
+    <link rel="stylesheet" href="css/style.css?v=202605161230">
+    <link rel="stylesheet" href="css/compat.css?v=202605161230">
+    <link rel="stylesheet" href="css/app-new.css?v=202605161230">
+    <!-- PR-J13 (2026-05-13) â€” tryb kompaktowy: override-y dla nowej apki.
+         Aktywne przez klasÄ™ `theme--compact` na <html>. Rollback: usuniÄ™cie
+         tej klasy â†’ apka wraca do â€žcomfortable" widoku. -->
+    <link rel="stylesheet" href="css/compact-new.css?v=202605161230">
+    <!-- PR-J14 (2026-05-14) â€” nowy wzorzec formularzy â€žpasek narzÄ™dzi + treÅ›Ä‡".
+         Style komponentu `_form-toolbar.js` + override-y zwÄ™Å¼onego sidebara
          w trybie `.psy-new-shell--form-mode`. -->
-    <link rel="stylesheet" href="css/form-toolbar.css?v=202605161145">
+    <link rel="stylesheet" href="css/form-toolbar.css?v=202605161230">
 
 
 
@@ -34,8 +34,8 @@
                 type="button"
                 class="psy-new-topbar__menu-toggle"
                 id="psy-new-menu-toggle"
-                aria-label="Przełącz menu"
-            >☰</button>
+                aria-label="PrzeÅ‚Ä…cz menu"
+            >â˜°</button>
             <div class="psy-new-brand psy-new-brand--placeholder" aria-label="Logo lub nazwa aplikacji">Logo lub nazwa aplikacji</div>
 
         </div>
@@ -49,55 +49,55 @@
                 type="button"
                 class="btn btn--secondary btn--sm psy-new-topbar__btn"
                 id="btn-connect-folder"
-                title="Połącz folder pacjentów (lokalny)"
-            >📁 Folder pacjentów</button>
+                title="PoÅ‚Ä…cz folder pacjentÃ³w (lokalny)"
+            >ðŸ“ Folder pacjentÃ³w</button>
 
             <button
                 type="button"
                 class="btn btn--secondary btn--sm psy-new-topbar__btn"
                 id="btn-connect-drive"
-                title="Połącz Google Drive"
-            >☁️ Google Drive</button>
+                title="PoÅ‚Ä…cz Google Drive"
+            >â˜ï¸ Google Drive</button>
 
-            <div class="psy-new-topbar__save" id="save-indicator">💾 Autozapis</div>
+            <div class="psy-new-topbar__save" id="save-indicator">ðŸ’¾ Autozapis</div>
 
             <button
                 type="button"
                 class="btn btn--secondary btn--sm psy-new-topbar__btn psy-new-topbar__btn--icon"
                 id="btn-settings"
                 title="Ustawienia"
-            >⚙️</button>
+            >âš™ï¸</button>
         </div>
     </header>
 
     <!-- ===== SIDEBAR (6 pozycji wg rysunku Magdy) ===== -->
     <aside class="psy-new-sidebar" id="psy-new-sidebar">
-        <!-- wypełniane przez AppController._renderSidebar() -->
+        <!-- wypeÅ‚niane przez AppController._renderSidebar() -->
     </aside>
 
     <!-- ===== MAIN CONTENT ===== -->
     <main class="psy-new-main" id="psy-new-main">
-        <!-- wypełniane przez AppController._renderView() -->
+        <!-- wypeÅ‚niane przez AppController._renderView() -->
     </main>
 
 </div>
 
-<!-- Globalny kontener toastów -->
+<!-- Globalny kontener toastÃ³w -->
 <psy-toast-container id="psy-app-toasts" position="top-right"></psy-toast-container>
 
 <noscript>
     <div style="padding:40px;text-align:center;font-family:sans-serif;">
         <h1>PsychoApp</h1>
-        <p>Ta aplikacja wymaga włączonego JavaScript.</p>
+        <p>Ta aplikacja wymaga wÅ‚Ä…czonego JavaScript.</p>
     </div>
 </noscript>
 
-<!-- xlsx-js-style: fork SheetJS z pełnym wsparciem styli (merged cells, kolory, headery).
-     Załadowany jako klasyczny <script>, eksponuje globalny `XLSX` używany przez
-     `js/views/_xlsx-codec.js` (paczka K1 — natychmiastowy zapis lokalny). -->
+<!-- xlsx-js-style: fork SheetJS z peÅ‚nym wsparciem styli (merged cells, kolory, headery).
+     ZaÅ‚adowany jako klasyczny <script>, eksponuje globalny `XLSX` uÅ¼ywany przez
+     `js/views/_xlsx-codec.js` (paczka K1 â€” natychmiastowy zapis lokalny). -->
 <script src="lib/xlsx-js-style.min.js"></script>
 
-<script type="module" src="js/app-new.js?v=202605161145"></script>
+<script type="module" src="js/app-new.js?v=202605161230"></script>
 
 
 

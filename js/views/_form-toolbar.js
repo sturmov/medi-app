@@ -1,58 +1,48 @@
 // ============================================================================
 // _form-toolbar.js — generyczny widget "pasek narzędzi + treść".
 //
-// Tryby (PR-J16 2026-05-16):
+// Tryby:
 //
 //   • mode: 'tab' (default, back-compat z PR-J14):
 //     Prawa kolumna = JEDNO aktywne pole na raz (tab-content style).
-//     Klik pola w pasku → wymiana całej zawartości prawej kolumny.
 //
-//   • mode: 'journal' (nowy wzorzec — klientka 15/05/2026):
-//     Prawa kolumna = AKUMULUJĄCY DZIENNIK akapitów wypełnionych pól, jak
-//     notatka medyczna. Klik pola w pasku → akapit „wsuwa się" w odpowiednim
-//     miejscu (kolejność = schemat). Klik X przy akapicie → ukrywa go
-//     (wartość zostaje w Store, można przywrócić klikiem z paska).
+//   • mode: 'journal' (PR-J16, klientka 15/05/2026):
+//     Prawa kolumna = AKUMULUJĄCY DZIENNIK akapitów jak notatka medyczna.
+//     Klik pola w pasku → akapit „wsuwa się" w odpowiednim miejscu.
+//     Klik X → ukrywa akapit (wartość zostaje). Klik header akapitu → toggle
+//     edit/read tego konkretnego akapitu (każdy niezależnie).
 //
-//     Stan widoczności per pole (3 niezależne wymiary):
-//       1. `hiddenSet` (persisted via `onHiddenFieldsChange`) — pola które user
-//          jawnie ukrył klikając X. Override dla wypełnionych. Persistowane
-//          jako `visit.data._hiddenFields` w Store.
-//       2. `visibleSet` (in-memory only, nie persistowane) — pola które user
-//          jawnie wybrał z paska (puste, ale chce je widzieć). Po reload
-//          przeglądarki znikają (klientka 16/05: „na blur wszystko zostaje,
-//          dopiero przy odświeżeniu strony puste sekcje znikają").
-//       3. wartość w `_raw` — wypełnione domyślnie widoczne, puste domyślnie
-//          ukryte. Logika: `!hidden && (visible || !empty)`.
+// PR-J16a (2026-05-16) — poprawki klientki po pierwszym teście na prod:
+//   1. Fix scroll: container ma stałą wysokość, kolumny scrollują niezależnie
+//      (`max-height: 100%` zamiast `calc(100vh - 220px)`).
+//   2. Sekcje w pasku po lewej są COLLAPSIBLE (chevron + klik nagłówka =
+//      toggle). Domyślnie wszystkie otwarte. Stan in-memory (nie persistowane).
+//   3. Opcjonalny callback `groupPreview(group, values) → string` — small text
+//      pod nagłówkiem sekcji (gdy zwinięta). Klientka: tylko `visitData` na
+//      razie pokazuje początek pola „Powód zgłoszenia".
+//   4. Edit/Read toggle PER AKAPIT (zamiast „tylko 1 edit-mode na raz"):
+//      `editingSet = Set<uid>` — wiele akapitów może być rozwiniętych. Klik
+//      całego nagłówka akapitu (label + miejsce, poza X) → toggle.
 //
-//     Inline edit (klientka Q2: „od razu inline edit"):
-//       - Akapit w read-mode → klik body → toggle do edit-mode + focus.
-//       - W edit-mode: standardowy `fieldRenderer(field, values)` (input).
-//       - Klik innego akapitu lub klik X → tamten do read, ten do edit.
-//       - Tylko JEDEN akapit może być w edit-mode na raz.
+// Stan widoczności pola w mode='journal' (3 niezależne wymiary):
+//   • `hiddenSet` (persisted) — user kliknął X (override dla wypełnionych)
+//   • `visibleSet` (in-memory) — user kliknął puste pole z paska
+//   • wartość w `_raw` — wypełnione = visible default, puste = hidden default
+//   Logika: `!hidden && (visible || !empty)`.
 //
 // API:
 //   createFormToolbar({
-//     groups: [{ id, title, fields: [field, …] }],
-//     values: {},                                       // flat-map wartości (`_raw`)
-//     fieldRenderer:        (field, values) → DOMNode, // wymagane (edit-mode input)
-//     fieldNotesValue:      (field, values) → string,  // opcjonalne (notes pre-fill)
-//     fieldIsFilled:        (field, values) → boolean, // opcjonalne (heurystyka)
-//     showFieldNotes:       (field) → boolean,         // opcjonalne
-//     fieldPreview:         (field, values) → string,  // opcjonalne (preview pod labelem)
-//     onSelect:             (fieldUid) → void,         // opcjonalne
-//     activeFieldUid:       string,                    // opcjonalne (tab-mode init)
-//
-//     // PR-J16 dla mode='journal':
-//     mode:                 'tab' | 'journal',         // default 'tab'
-//     hiddenFields:         Array<string>,             // initial persisted hidden
-//     onHiddenFieldsChange: (newArray) → void,         // save callback
-//     readRenderer:         (field, values) → DOMNode, // opcjonalny — fallback do edit
+//     groups, values,
+//     fieldRenderer, fieldNotesValue, fieldIsFilled, showFieldNotes,
+//     fieldPreview, onSelect, activeFieldUid,
+//     mode, hiddenFields, onHiddenFieldsChange, readRenderer,
+//     groupPreview   // PR-J16a: (group, values) → string | null
 //   }) → HTMLElement
 //
 // Public API:
-//   root.refreshDots(newValues?, newHiddenFields?)  — refresh paska + dziennika
-//   root.setActive(uid)                              — programowa aktywacja
-//   root.getHiddenFields()                           — bieżący snapshot Array
+//   root.refreshDots(newValues?, newHiddenFields?)
+//   root.setActive(uid)
+//   root.getHiddenFields()
 // ============================================================================
 
 function el(tag, props = {}, children = []) {
@@ -83,10 +73,6 @@ function el(tag, props = {}, children = []) {
     return node;
 }
 
-/**
- * Domyślna heurystyka „pole jest wypełnione" — gdy wywołujący nie poda
- * własnej `fieldIsFilled`. Sprawdza wartość pod kluczem `groupId.fieldId`.
- */
 function isFilledDefault(field, values) {
     if (!values) return false;
     const key = (field._groupId ? field._groupId + '.' : '') + field.id;
@@ -99,16 +85,13 @@ function isFilledDefault(field, values) {
     return !!v;
 }
 
-/** Buduje unikalny identyfikator pola w obrębie całego paska (grupa + pole). */
 function uidOf(groupId, fieldId) {
     return (groupId || '_') + '::' + fieldId;
 }
 
-/** Czy pole jest „pomijalne" w dzienniku (link-view = nawigacja, nie wartość). */
 function isJournalSkippable(field) {
     if (!field || !field.input) return false;
-    const t = field.input.type;
-    return t === 'link-view';
+    return field.input.type === 'link-view';
 }
 
 export function createFormToolbar(opts) {
@@ -122,23 +105,25 @@ export function createFormToolbar(opts) {
         fieldPreview = null,
         onSelect = null,
         renderEmpty = null,
-        // PR-J16 — tryb journal
         mode = 'tab',
         hiddenFields = [],
         onHiddenFieldsChange = null,
-        readRenderer = null
+        readRenderer = null,
+        // PR-J16a — preview tekstu pod nagłówkiem sekcji w pasku (gdy zwinięta)
+        groupPreview = null
     } = opts || {};
 
-    // PR-J14d: `values` MUTOWALNA referencja — `refreshDots(newValues)` ją aktualizuje
     let values = initialValues;
 
-    // PR-J16 stan widoczności (mode='journal' only)
-    const hiddenSet = new Set(hiddenFields || []);    // persisted (X-em)
-    const visibleSet = new Set();                     // in-memory only (klik z paska)
-    let activeEditUid = null;                         // uid akapitu w edit-mode (max 1)
+    // PR-J16 stan widoczności (mode='journal')
+    const hiddenSet = new Set(hiddenFields || []);
+    const visibleSet = new Set();
+    // PR-J16a: zamiast `activeEditUid` (max 1) — Set per akapit (wiele edit naraz)
+    const editingSet = new Set();
+    // PR-J16a: sekcje zwinięte (in-memory only, nie persistowane)
+    const collapsedSections = new Set();
 
-    // Płaska lista pól (do wyszukiwania, do refresh-dot, do dziennika).
-    // Pomija pola typu 'header' (czysto wizualne separatory w schemacie).
+    // Płaska lista pól (pomija header'y schematu — czysto wizualne).
     const flat = [];
     for (const g of groups) {
         for (const f of (g.fields || [])) {
@@ -166,7 +151,7 @@ export function createFormToolbar(opts) {
     }
 
     // ----------------------------------------------------------------------
-    // Tab-mode state (legacy, używane gdy mode='tab')
+    // Tab-mode state (legacy)
     // ----------------------------------------------------------------------
     let activeUid = opts.activeFieldUid || flat[0]._uid;
 
@@ -174,65 +159,117 @@ export function createFormToolbar(opts) {
     const itemEls = new Map();
 
     // ----------------------------------------------------------------------
-    // Lewa kolumna — pasek narzędzi (BEZ ZMIAN po PR-J16, niezależnie od mode)
+    // Lewa kolumna — pasek narzędzi (PR-J16a: collapsible sekcje)
     // ----------------------------------------------------------------------
     const nav = el('div', { class: 'psy-form-toolbar__nav', role: 'tablist' });
-    for (const g of groups) {
-        const visibleFieldsInGroup = (g.fields || []).filter(
-            (f) => !(f.input && f.input.type === 'header')
-        );
-        if (!visibleFieldsInGroup.length) continue;
 
-        nav.appendChild(el('div', { class: 'psy-form-toolbar__group-title' }, [g.title || '']));
+    function _renderNav() {
+        nav.innerHTML = '';
+        itemEls.clear();
 
-        const ul = el('ul', { class: 'psy-form-toolbar__group' });
-        for (const f of visibleFieldsInGroup) {
-            const uid = uidOf(g.id, f.id);
-            const fieldWithGroup = { ...f, _groupId: g.id, _groupTitle: g.title };
-            const filled = !!fieldIsFilled(fieldWithGroup, values);
-            const isActive = (mode === 'tab') && (uid === activeUid);
-            const previewText = fieldPreview ? (fieldPreview(fieldWithGroup, values) || '') : '';
+        for (const g of groups) {
+            const visibleFieldsInGroup = (g.fields || []).filter(
+                (f) => !(f.input && f.input.type === 'header')
+            );
+            if (!visibleFieldsInGroup.length) continue;
 
-            const labelLine = el('div', { class: 'psy-form-toolbar__field-line1' }, [
-                el('span', { class: 'psy-form-toolbar__field-dot', 'aria-hidden': 'true' }),
-                el('span', { class: 'psy-form-toolbar__field-label' }, [
-                    f.label + (f.required ? ' *' : '')
-                ])
-            ]);
-            const previewEl = el('div', {
-                class: 'psy-form-toolbar__field-preview',
-                style: { display: previewText ? '' : 'none' }
-            }, [previewText]);
+            const isCollapsed = collapsedSections.has(g.id);
+            const previewText = (typeof groupPreview === 'function' && isCollapsed)
+                ? (groupPreview(g, values) || '')
+                : '';
 
-            const item = el('li', {
-                class: 'psy-form-toolbar__field'
-                    + (isActive ? ' psy-form-toolbar__field--active' : '')
-                    + (filled ? ' psy-form-toolbar__field--filled' : ''),
-                role: 'tab',
+            // Nagłówek sekcji — klikalny (toggle collapse)
+            const title = el('div', {
+                class: 'psy-form-toolbar__group-title'
+                    + (isCollapsed ? ' psy-form-toolbar__group-title--collapsed' : ''),
+                role: 'button',
                 tabindex: '0',
-                'aria-selected': isActive ? 'true' : 'false',
-                dataset: { fieldUid: uid },
-                onclick: () => _onNavClick(uid),
+                'aria-expanded': isCollapsed ? 'false' : 'true',
+                onclick: () => _toggleSection(g.id),
                 onkeydown: (ev) => {
                     if (ev.key === 'Enter' || ev.key === ' ') {
                         ev.preventDefault();
-                        _onNavClick(uid);
+                        _toggleSection(g.id);
                     }
                 }
-            }, [labelLine, previewEl]);
-            ul.appendChild(item);
-            itemEls.set(uid, item);
+            }, [
+                el('span', {
+                    class: 'psy-form-toolbar__group-chevron',
+                    'aria-hidden': 'true'
+                }, [isCollapsed ? '▸' : '▾']),
+                el('span', { class: 'psy-form-toolbar__group-name' }, [g.title || ''])
+            ]);
+
+            // Preview pod nagłówkiem (tylko gdy zwinięta i jest callback)
+            if (previewText) {
+                title.appendChild(el('div', {
+                    class: 'psy-form-toolbar__group-preview'
+                }, [previewText]));
+            }
+            nav.appendChild(title);
+
+            if (isCollapsed) continue;   // nie renderujemy listy pól
+
+            const ul = el('ul', { class: 'psy-form-toolbar__group' });
+            for (const f of visibleFieldsInGroup) {
+                const uid = uidOf(g.id, f.id);
+                const fieldWithGroup = { ...f, _groupId: g.id, _groupTitle: g.title };
+                const filled = !!fieldIsFilled(fieldWithGroup, values);
+                const isActive = (mode === 'tab') && (uid === activeUid);
+                const previewText2 = fieldPreview
+                    ? (fieldPreview(fieldWithGroup, values) || '')
+                    : '';
+
+                const labelLine = el('div', { class: 'psy-form-toolbar__field-line1' }, [
+                    el('span', { class: 'psy-form-toolbar__field-dot', 'aria-hidden': 'true' }),
+                    el('span', { class: 'psy-form-toolbar__field-label' }, [
+                        f.label + (f.required ? ' *' : '')
+                    ])
+                ]);
+                const previewEl = el('div', {
+                    class: 'psy-form-toolbar__field-preview',
+                    style: { display: previewText2 ? '' : 'none' }
+                }, [previewText2]);
+
+                const item = el('li', {
+                    class: 'psy-form-toolbar__field'
+                        + (isActive ? ' psy-form-toolbar__field--active' : '')
+                        + (filled ? ' psy-form-toolbar__field--filled' : ''),
+                    role: 'tab',
+                    tabindex: '0',
+                    'aria-selected': isActive ? 'true' : 'false',
+                    dataset: { fieldUid: uid },
+                    onclick: () => _onNavClick(uid),
+                    onkeydown: (ev) => {
+                        if (ev.key === 'Enter' || ev.key === ' ') {
+                            ev.preventDefault();
+                            _onNavClick(uid);
+                        }
+                    }
+                }, [labelLine, previewEl]);
+                ul.appendChild(item);
+                itemEls.set(uid, item);
+            }
+            nav.appendChild(ul);
         }
-        nav.appendChild(ul);
     }
 
+    function _toggleSection(groupId) {
+        if (collapsedSections.has(groupId)) collapsedSections.delete(groupId);
+        else collapsedSections.add(groupId);
+        _renderNav();
+    }
+
+    // Initial nav render
+    _renderNav();
+
     // ----------------------------------------------------------------------
-    // Prawa kolumna — zależna od trybu
+    // Prawa kolumna
     // ----------------------------------------------------------------------
     const content = el('div', { class: 'psy-form-toolbar__content' });
 
     /* =====================================================================
-       TAB-MODE (legacy, back-compat)
+       TAB-MODE (legacy)
        ===================================================================== */
     function _renderContentTab(uid) {
         content.innerHTML = '';
@@ -308,10 +345,9 @@ export function createFormToolbar(opts) {
     }
 
     /* =====================================================================
-       JOURNAL-MODE (PR-J16)
+       JOURNAL-MODE (PR-J16 + PR-J16a)
        ===================================================================== */
 
-    /** Czy pole powinno być widoczne w dzienniku (uwzględnia 3 wymiary). */
     function _isVisibleInJournal(field) {
         if (isJournalSkippable(field)) return false;
         const uid = field._uid;
@@ -320,17 +356,30 @@ export function createFormToolbar(opts) {
         return !!fieldIsFilled(field, values);
     }
 
-    /** Renderuje jeden akapit w danym trybie ('read' / 'edit'). */
-    function _renderEntry(field, entryMode) {
+    function _renderEntry(field) {
         const uid = field._uid;
+        // PR-J16a: każdy akapit ma własny stan edit, niezależny
+        const entryMode = editingSet.has(uid) ? 'edit' : 'read';
         const article = el('article', {
             class: 'psy-form-toolbar__entry'
-                + (entryMode === 'edit' ? ' psy-form-toolbar__entry--edit' : ' psy-form-toolbar__entry--read'),
+                + (entryMode === 'edit'
+                    ? ' psy-form-toolbar__entry--edit'
+                    : ' psy-form-toolbar__entry--read'),
             dataset: { fieldUid: uid }
         });
 
-        // Header: label + X (close)
-        const header = el('header', { class: 'psy-form-toolbar__entry-header' }, [
+        // Header: cały pasek klikalny (PR-J16a) — toggle edit/read. X osobno.
+        const header = el('header', {
+            class: 'psy-form-toolbar__entry-header',
+            role: 'button',
+            tabindex: '0',
+            title: entryMode === 'edit' ? 'Kliknij, aby schować' : 'Kliknij, aby edytować',
+            dataset: { action: 'toggle' }
+        }, [
+            el('span', {
+                class: 'psy-form-toolbar__entry-chevron',
+                'aria-hidden': 'true'
+            }, [entryMode === 'edit' ? '▾' : '▸']),
             el('span', { class: 'psy-form-toolbar__entry-label' }, [
                 field.label + (field.required ? ' *' : '')
             ]),
@@ -344,7 +393,6 @@ export function createFormToolbar(opts) {
         ]);
         article.appendChild(header);
 
-        // Body — read lub edit
         let body;
         if (entryMode === 'edit') {
             const inputNode = fieldRenderer ? fieldRenderer(field, values) : null;
@@ -352,12 +400,11 @@ export function createFormToolbar(opts) {
                 class: 'psy-form-toolbar__entry-body psy-form-toolbar__entry-body--edit'
             }, [inputNode || el('div', { class: 'psy-new-hint' }, ['(brak renderera)'])]);
 
-            // Auto-focus pierwszego inputable w edit-mode po wstawieniu w DOM
+            // Auto-focus + auto-grow textarea
             setTimeout(() => {
                 const focusable = body.querySelector('input:not([type="hidden"]), textarea, select');
                 if (focusable) {
                     try { focusable.focus(); } catch (_) {}
-                    // Auto-grow textarea jeśli ma klasę
                     if (focusable.classList && focusable.classList.contains('psy-vf__textarea--autogrow')) {
                         focusable.style.height = 'auto';
                         focusable.style.height = (focusable.scrollHeight + 2) + 'px';
@@ -365,7 +412,6 @@ export function createFormToolbar(opts) {
                 }
             }, 0);
 
-            // Notes (uwagi) — pod inputem
             if (showFieldNotes(field)) {
                 const noteName = (field._groupId ? field._groupId + '.' : '') + field.id + '.__notes';
                 const noteVal = fieldNotesValue(field, values) || '';
@@ -388,7 +434,6 @@ export function createFormToolbar(opts) {
                 readNode = readRenderer(field, values);
             }
             if (!readNode) {
-                // Fallback — pokaż wartość raw jako tekst
                 const key = field._groupId + '.' + field.id;
                 const v = values[key];
                 let txt = '';
@@ -401,12 +446,9 @@ export function createFormToolbar(opts) {
                 ]);
             }
             body = el('div', {
-                class: 'psy-form-toolbar__entry-body psy-form-toolbar__entry-body--read',
-                title: 'Kliknij, aby edytować',
-                dataset: { action: 'edit' }
+                class: 'psy-form-toolbar__entry-body psy-form-toolbar__entry-body--read'
             }, [readNode]);
 
-            // Notes — read-only paragraph (jeśli niepusty)
             if (showFieldNotes(field)) {
                 const noteVal = fieldNotesValue(field, values) || '';
                 if (noteVal.trim()) {
@@ -423,7 +465,6 @@ export function createFormToolbar(opts) {
         return article;
     }
 
-    /** Pełen re-render dziennika (prawa kolumna). */
     function _renderJournal() {
         content.innerHTML = '';
         const journal = el('div', { class: 'psy-form-toolbar__journal' });
@@ -441,8 +482,7 @@ export function createFormToolbar(opts) {
             }, [g.title || '']));
 
             for (const f of visibleFieldsInGroup) {
-                const entryMode = (f._uid === activeEditUid) ? 'edit' : 'read';
-                journal.appendChild(_renderEntry(f, entryMode));
+                journal.appendChild(_renderEntry(f));
                 anyVisible = true;
             }
         }
@@ -462,48 +502,37 @@ export function createFormToolbar(opts) {
         content.appendChild(journal);
     }
 
-    /** Toggle pojedynczego akapitu między read / edit bez pełnego re-renderu. */
-    function _toggleEntryEdit(uid) {
-        // Jeśli inny akapit jest w edit-mode → przełącz tamten do read
-        if (activeEditUid && activeEditUid !== uid) {
-            const prevField = flat.find((f) => f._uid === activeEditUid);
-            const prevArticle = content.querySelector(`article[data-field-uid="${activeEditUid}"]`);
-            if (prevField && prevArticle && prevArticle.parentNode) {
-                const newArticle = _renderEntry(prevField, 'read');
-                prevArticle.parentNode.replaceChild(newArticle, prevArticle);
-            }
-        }
-        // Przełącz aktualny akapit do edit
-        const field = flat.find((f) => f._uid === uid);
+    /** PR-J16a: toggle pojedynczego akapitu — bez ruszania innych. */
+    function _toggleEntry(uid) {
+        if (editingSet.has(uid)) editingSet.delete(uid);
+        else editingSet.add(uid);
+
         const article = content.querySelector(`article[data-field-uid="${uid}"]`);
-        if (!field || !article || !article.parentNode) {
-            // Akapit nie istnieje (np. po unhide trzeba pełny re-render)
-            activeEditUid = uid;
+        if (!article || !article.parentNode) {
             _renderJournal();
             return;
         }
-        activeEditUid = uid;
-        const newArticle = _renderEntry(field, 'edit');
+        const field = flat.find((f) => f._uid === uid);
+        if (!field) return;
+        const newArticle = _renderEntry(field);
         article.parentNode.replaceChild(newArticle, article);
     }
 
-    /** Klik X przy akapicie — ukryj pole. */
     function _hideEntry(uid) {
         hiddenSet.add(uid);
         visibleSet.delete(uid);
-        if (activeEditUid === uid) activeEditUid = null;
+        editingSet.delete(uid);
         if (typeof onHiddenFieldsChange === 'function') {
             onHiddenFieldsChange(Array.from(hiddenSet));
         }
         _renderJournal();
     }
 
-    /** Klik pola w pasku (lewa kolumna) — dodaj/aktywuj akapit w dzienniku. */
+    /** Klik pola w pasku w trybie journal — dodaje akapit + otwiera edit. */
     function _onNavClickJournal(uid) {
         const field = flat.find((f) => f._uid === uid);
         if (!field) return;
 
-        // Jeśli to link-view — nawigacja od razu, nie dodajemy do dziennika
         if (isJournalSkippable(field)) {
             if (field.input && field.input.ref) {
                 window.location.hash = field.input.ref;
@@ -511,30 +540,29 @@ export function createFormToolbar(opts) {
             return;
         }
 
-        let changed = false;
+        let needsRender = false;
         if (hiddenSet.has(uid)) {
-            // Reset hidden flag → wartość niepusta wraca jako default visible
             hiddenSet.delete(uid);
             if (typeof onHiddenFieldsChange === 'function') {
                 onHiddenFieldsChange(Array.from(hiddenSet));
             }
-            changed = true;
+            needsRender = true;
         }
         if (!fieldIsFilled(field, values) && !visibleSet.has(uid)) {
-            // Puste pole — wymuś widoczne (in-memory)
             visibleSet.add(uid);
-            changed = true;
+            needsRender = true;
         }
 
-        if (changed) {
-            activeEditUid = uid;
+        // Otwórz akapit w edit-mode (PR-J16a — każdy niezależnie)
+        editingSet.add(uid);
+
+        if (needsRender) {
             _renderJournal();
         } else {
-            // Już widoczne — tylko toggle edit-mode + scroll
-            _toggleEntryEdit(uid);
+            // Akapit już widoczny — tylko toggle ten konkretny do edit
+            _toggleEntryToEdit(uid);
         }
 
-        // Scroll do akapitu
         setTimeout(() => {
             const article = content.querySelector(`article[data-field-uid="${uid}"]`);
             if (article) {
@@ -546,32 +574,62 @@ export function createFormToolbar(opts) {
         if (typeof onSelect === 'function') onSelect(uid);
     }
 
-    // Event delegation w prawej kolumnie (klik X, klik body-read)
+    /** Wymuszone przejście do edit (nie toggle) — używane przy kliku z paska. */
+    function _toggleEntryToEdit(uid) {
+        if (editingSet.has(uid)) {
+            // już w edit — tylko re-render żeby focus zapełnił
+            const article = content.querySelector(`article[data-field-uid="${uid}"]`);
+            if (article && article.parentNode) {
+                const field = flat.find((f) => f._uid === uid);
+                if (field) {
+                    article.parentNode.replaceChild(_renderEntry(field), article);
+                }
+            }
+            return;
+        }
+        editingSet.add(uid);
+        const article = content.querySelector(`article[data-field-uid="${uid}"]`);
+        if (!article || !article.parentNode) {
+            _renderJournal();
+            return;
+        }
+        const field = flat.find((f) => f._uid === uid);
+        if (!field) return;
+        article.parentNode.replaceChild(_renderEntry(field), article);
+    }
+
+    // Event delegation w prawej kolumnie (klik X, klik header akapitu)
     if (mode === 'journal') {
         content.addEventListener('click', (ev) => {
             const target = ev.target;
             if (!target) return;
+            // Klik X — ukryj akapit
             const closeBtn = target.closest('[data-action="close"]');
             if (closeBtn) {
+                ev.stopPropagation();
                 const article = closeBtn.closest('article[data-field-uid]');
-                if (article) {
-                    ev.stopPropagation();
-                    _hideEntry(article.dataset.fieldUid);
-                }
+                if (article) _hideEntry(article.dataset.fieldUid);
                 return;
             }
-            // Klik na read-body → toggle do edit
-            const readBody = target.closest('.psy-form-toolbar__entry-body--read');
-            if (readBody) {
-                const article = readBody.closest('article[data-field-uid]');
-                if (article) {
-                    _toggleEntryEdit(article.dataset.fieldUid);
-                }
+            // Klik header akapitu (poza X) — toggle edit/read
+            const header = target.closest('.psy-form-toolbar__entry-header');
+            if (header) {
+                const article = header.closest('article[data-field-uid]');
+                if (article) _toggleEntry(article.dataset.fieldUid);
+            }
+        });
+        // Klawiatura: Enter/Space na headerze
+        content.addEventListener('keydown', (ev) => {
+            if (ev.key !== 'Enter' && ev.key !== ' ') return;
+            const header = ev.target.closest('.psy-form-toolbar__entry-header');
+            if (header && !ev.target.closest('[data-action="close"]')) {
+                ev.preventDefault();
+                const article = header.closest('article[data-field-uid]');
+                if (article) _toggleEntry(article.dataset.fieldUid);
             }
         });
     }
 
-    /** Wspólny dispatcher klika pola w pasku — różny w zależności od mode. */
     function _onNavClick(uid) {
         if (mode === 'journal') _onNavClickJournal(uid);
         else _setActiveTab(uid);
@@ -580,13 +638,6 @@ export function createFormToolbar(opts) {
     /* =====================================================================
        Public API
        ===================================================================== */
-
-    // Refresh kropek na pasku + (w journal-mode) refresh dziennika.
-    // PR-J14d: gdy `newValues` jest podany — aktualizuj wewnętrzną referencję.
-    // PR-J16: w trybie 'journal' robimy też pełen re-render dziennika
-    //         (bo nowo wypełnione pola mogą się pojawić jako visible-default).
-    //         WYJĄTEK: jeśli `activeEditUid` istnieje, pomijamy re-render
-    //         tego akapitu — żeby nie zabić focusu/kursora w aktywnym input.
     root.refreshDots = function (newValues, newHiddenFields) {
         if (newValues) values = newValues;
         if (newHiddenFields) {
@@ -594,7 +645,7 @@ export function createFormToolbar(opts) {
             for (const uid of newHiddenFields) hiddenSet.add(uid);
         }
 
-        // Refresh kropki + preview na pasku
+        // Refresh kropki + preview + group-preview (gdy sekcja zwinięta)
         const vals = values;
         for (const f of flat) {
             const item = itemEls.get(f._uid);
@@ -610,19 +661,24 @@ export function createFormToolbar(opts) {
                 }
             }
         }
-
-        // W trybie journal NIE robimy pełnego re-renderu po autozapisie —
-        // wartość już jest w input.value (user pisze). Re-render tylko gdy
-        // explicit change (klik X / klik pola w pasku). Tylko refresh notes
-        // i ewentualnie odświeżenie read-mode (gdy ktoś z zewnątrz zmienił).
+        // PR-J16a: refresh group-preview tekst w zwiniętych sekcjach
+        if (typeof groupPreview === 'function') {
+            for (const g of groups) {
+                if (!collapsedSections.has(g.id)) continue;
+                const titleEl = nav.querySelector(
+                    `.psy-form-toolbar__group-title[role="button"]`
+                );
+                // Niestety brak data-section-id na nagłówku — re-renderuję nav.
+                // (Mała operacja, nie wpływa na focus bo nav nie ma focus.)
+                _renderNav();
+                break;
+            }
+        }
     };
 
     root.setActive = (uid) => _onNavClick(uid);
     root.getHiddenFields = () => Array.from(hiddenSet);
 
-    /* =====================================================================
-       Initial assembly
-       ===================================================================== */
     root.appendChild(nav);
     root.appendChild(content);
 

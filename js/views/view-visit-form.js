@@ -1000,6 +1000,22 @@ export function renderVisitForm(opts = {}) {
         return div;
     }
 
+    // PR-J16a (2026-05-16) — preview tekstu pod nagłówkiem sekcji w pasku,
+    // gdy sekcja jest zwinięta. Klientka: „małe podsumowanie mniejsza czcionka
+    // w sekcji — zrobmy na razie tylko dane wizyty, jako podsumowanie wstawmy
+    // początek Powód zgłoszenia". Inne sekcje na razie bez preview.
+    function _groupPreview(group, raw) {
+        if (!group || !raw) return '';
+        if (group.id === 'visitData') {
+            const powod = raw['visitData.powod'];
+            if (powod && typeof powod === 'string' && powod.trim()) {
+                const s = powod.trim();
+                return s.length > 60 ? s.slice(0, 57) + '…' : s;
+            }
+        }
+        return '';
+    }
+
     // PR-J16: hiddenFields per wizyta (klik X w akapicie — persisted).
     const initialHidden = (visit && visit.data && Array.isArray(visit.data._hiddenFields))
         ? visit.data._hiddenFields.slice()
@@ -1024,8 +1040,11 @@ export function renderVisitForm(opts = {}) {
             const data = (cur && cur.data) || { _raw: {} };
             Store.updateVisit(id, { data: { ...data, _hiddenFields: newArray } });
         },
-        readRenderer: _fieldReadRenderer
+        readRenderer: _fieldReadRenderer,
+        // PR-J16a — preview pod nagłówkiem sekcji (gdy zwinięta)
+        groupPreview: _groupPreview
     });
+
 
 
     root.appendChild(modeBar);
