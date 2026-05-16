@@ -9,12 +9,14 @@
    ============================================================================ */
 
 /* PR-J16a (2026-05-16): container ma STAŁĄ wysokość (calc viewport).
-   Bez tego `.psy-form-toolbar__nav` z `max-height: 100%` nie miałby parent
-   z wysokością i scroll po lewej nie działał — pola znikały pod kontenerem.
-   Klientka raport: „brakuje scrolla po lewej stronie, pola znikają w dół". */
+   PR-J16b (2026-05-16): + `grid-template-rows: 1fr` + `min-height: 0` na
+   grid items — klasyczna sztuczka CSS Grid pozwalająca scroll wewnątrz.
+   Bez `min-height: 0` grid item ma `min-height: auto` co pozwala content
+   wybić wysokość rodzica → scroll nie działa. */
 .psy-form-toolbar {
     display: grid;
     grid-template-columns: 260px 1fr;
+    grid-template-rows: 1fr;
     gap: 12px;
     height: calc(100vh - 200px);
     min-height: 480px;
@@ -29,9 +31,11 @@
     border-right: 1px solid #E5E7EB;
     background: #F9FAFB;
     overflow-y: auto;
-    max-height: 100%;       /* uses parent height (calc viewport) */
+    min-height: 0;          /* PR-J16b: pozwala grid item scroll w środku */
+    max-height: 100%;
     padding: 6px 0 12px;
 }
+
 
 /* Nagłówek sekcji — klikalny (PR-J16a: toggle collapse). */
 .psy-form-toolbar__group-title {
@@ -207,13 +211,15 @@
 }
 
 /* ---------- PRAWA: pole aktywne (content) ---------- */
-/* PR-J16a: max-height: 100% korzysta z parent (.psy-form-toolbar) który ma
-   `height: calc(100vh - 200px)`. Tab-mode i journal-mode oba scrollują. */
+/* PR-J16b (2026-05-16): `min-height: 0` to klucz dla scrolla w grid item.
+   `overflow-y: auto` scrolluje content (tab-mode i journal-mode oba). */
 .psy-form-toolbar__content {
     padding: 14px 18px 18px;
     overflow-y: auto;
+    min-height: 0;
     max-height: 100%;
 }
+
 
 
 .psy-form-toolbar__panel-breadcrumb {
@@ -401,17 +407,18 @@
    ============================================================================ */
 
 /* Container dziennika (zastępuje content w trybie journal).
-   PR-J16a: max-height 100% (parent .psy-form-toolbar ma fixed height). */
+   PR-J16b: scroll delegowany do `.psy-form-toolbar__content` (parent grid item
+   z `min-height: 0`). Journal sam jest `height: auto`, padding-bottom spacer
+   + gap 14px (z 10) żeby akapity oddychały i box-shadow nie kolidował z header
+   następnego akapitu. */
 .psy-form-toolbar__journal {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 12px 14px;
-    overflow-y: auto;
-    height: 100%;
-    max-height: 100%;
+    gap: 14px;
+    padding: 12px 14px 28px;
     box-sizing: border-box;
 }
+
 
 
 /* Nagłówki sekcji w dzienniku */
@@ -469,19 +476,24 @@
 }
 
 /* Header akapitu (chevron + label + X) — PR-J16a: cały header klikalny =
-   toggle edit/read tego akapitu (X osobno przez stopPropagation). */
+   toggle edit/read tego akapitu (X osobno przez stopPropagation).
+   PR-J16b: padding 9px góra/dół + min-height 36px — żeby label NIE BYŁ
+   ucięty z góry (klientka raport „labelka chowa się do połowy"). */
 .psy-form-toolbar__entry-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 6px 10px;
+    padding: 9px 12px;
+    min-height: 36px;
     background: #F9FAFB;
     border-bottom: 1px solid #F1F5F9;
     cursor: pointer;
     user-select: none;
     transition: background 0.12s;
+    box-sizing: border-box;
 }
+
 .psy-form-toolbar__entry-header:hover {
     background: #F1F5F9;
 }
@@ -597,10 +609,14 @@
     letter-spacing: 0;
 }
 
-/* Body — edit-mode (input/select/textarea) */
+/* Body — edit-mode (input/select/textarea).
+   PR-J16b: padding-bottom 14px (z 10) — textarea z `min-height: 48px` lub
+   auto-grow nachodziła na dolną krawędź ramki akapitu (klientka raport
+   „dół pola wychodzi poza ramke pola — słaby margin"). */
 .psy-form-toolbar__entry-body--edit {
-    padding: 10px 12px;
+    padding: 10px 12px 14px;
 }
+
 
 /* Notes (uwagi) w edit-mode */
 .psy-form-toolbar__entry-notes {
