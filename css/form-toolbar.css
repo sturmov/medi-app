@@ -330,3 +330,209 @@
     pointer-events: none;
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
+
+/* ============================================================================
+   PR-J16 (2026-05-16) — growing journal (klientka 15/05).
+   Prawa kolumna w trybie `mode: 'journal'` = akumulujący dziennik akapitów
+   wypełnionych pól (jak notatka medyczna w szwedzkim systemie).
+   Każdy akapit = `<article>` z nagłówkiem (label + X) i body (read/edit mode).
+   ============================================================================ */
+
+/* Container dziennika (zastępuje content w trybie journal) */
+.psy-form-toolbar__journal {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 14px;
+    overflow-y: auto;
+    max-height: calc(100vh - 220px);
+}
+
+/* Nagłówki sekcji w dzienniku */
+.psy-form-toolbar__journal-section-title {
+    margin: 8px 0 2px 0;
+    padding: 4px 0;
+    font-size: 11px;
+    font-weight: 700;
+    color: #6B7280;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border-bottom: 1px solid #E5E7EB;
+}
+.psy-form-toolbar__journal-section-title:first-child {
+    margin-top: 0;
+}
+
+/* Pusty stan dziennika */
+.psy-form-toolbar__journal-empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: #94A3B8;
+}
+.psy-form-toolbar__journal-empty-icon {
+    font-size: 40px;
+    line-height: 1;
+    margin-bottom: 10px;
+}
+.psy-form-toolbar__journal-empty-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #475569;
+    margin-bottom: 6px;
+}
+.psy-form-toolbar__journal-empty-hint {
+    font-size: 12.5px;
+    color: #94A3B8;
+    line-height: 1.5;
+}
+
+/* Pojedynczy akapit (article) */
+.psy-form-toolbar__entry {
+    background: #FFFFFF;
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+    overflow: hidden;
+    transition: border-color 0.12s, box-shadow 0.12s;
+}
+.psy-form-toolbar__entry:hover {
+    border-color: #CBD5E1;
+}
+.psy-form-toolbar__entry--edit {
+    border-color: #93C5FD;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08);
+}
+
+/* Header akapitu (label + X) */
+.psy-form-toolbar__entry-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 10px;
+    background: #F9FAFB;
+    border-bottom: 1px solid #F1F5F9;
+}
+.psy-form-toolbar__entry--edit .psy-form-toolbar__entry-header {
+    background: #EFF6FF;
+    border-bottom-color: #BFDBFE;
+}
+
+.psy-form-toolbar__entry-label {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #0F172A;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.psy-form-toolbar__entry--edit .psy-form-toolbar__entry-label {
+    color: #1E40AF;
+}
+
+/* Przycisk X — ukryj akapit (wartość zostaje w Store) */
+.psy-form-toolbar__entry-close {
+    background: transparent;
+    border: 0;
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    font-size: 13px;
+    line-height: 1;
+    color: #94A3B8;
+    cursor: pointer;
+    flex-shrink: 0;
+    padding: 0;
+    transition: background 0.12s, color 0.12s;
+}
+.psy-form-toolbar__entry-close:hover {
+    background: #FEE2E2;
+    color: #B91C1C;
+}
+
+/* Body — read-mode (paragraph) */
+.psy-form-toolbar__entry-body--read {
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: background 0.12s;
+    min-height: 30px;
+}
+.psy-form-toolbar__entry-body--read:hover {
+    background: #F8FAFC;
+}
+
+.psy-form-toolbar__entry-text {
+    font-size: 13px;
+    line-height: 1.55;
+    color: #0F172A;
+    word-break: break-word;
+}
+
+.psy-form-toolbar__entry-empty {
+    font-size: 12.5px;
+    color: #94A3B8;
+    font-style: italic;
+}
+
+/* Tagi w read-mode (checkbox-group / multi-select) */
+.psy-form-toolbar__entry-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+.psy-form-toolbar__entry-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    background: #E0E7FF;
+    color: #1E293B;
+    border: 1px solid #C7D2FE;
+    border-radius: 999px;
+    font-size: 11.5px;
+    line-height: 1.4;
+}
+
+/* Notes (uwagi) w read-mode */
+.psy-form-toolbar__entry-notes-read {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px dashed #F1F5F9;
+    font-size: 11.5px;
+    color: #64748B;
+    line-height: 1.5;
+}
+.psy-form-toolbar__entry-notes-read .psy-form-toolbar__notes-label {
+    font-weight: 600;
+    color: #475569;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+/* Body — edit-mode (input/select/textarea) */
+.psy-form-toolbar__entry-body--edit {
+    padding: 10px 12px;
+}
+
+/* Notes (uwagi) w edit-mode */
+.psy-form-toolbar__entry-notes {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed #E5E7EB;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+.psy-form-toolbar__entry-notes .psy-form-toolbar__notes-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748B;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+/* Tryb journal — content nie ma własnych margin/padding (journal je ma) */
+.psy-form-toolbar--journal .psy-form-toolbar__content {
+    padding: 0;
+}
+
+

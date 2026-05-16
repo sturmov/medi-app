@@ -945,6 +945,66 @@ export function renderVisitForm(opts = {}) {
         return s;
     }
 
+    // PR-J16 (2026-05-16) — read-renderer dla growing journal.
+    // Render pola w trybie read-mode: tekst, lista tagów lub specjalny widok.
+    // Dla 3 special-types (tag-input-icd10, uzywki-special, link-view) zwracamy
+    // null → toolbar fallback do edit-mode wszędzie (input zawsze widoczny).
+    function _fieldReadRenderer(field, raw) {
+        if (!field) return null;
+        const t = field.input && field.input.type;
+        // Special types — fallback do edit-mode (toolbar pokaże input)
+        if (t === 'tag-input-icd10' || t === 'uzywki-special' || t === 'link-view') {
+            return null;
+        }
+        const key = field._groupId + '.' + field.id;
+        const v = raw && raw[key];
+
+        // Pusta wartość — placeholder
+        const isEmptyVal = v == null ||
+            (typeof v === 'string' && !v.trim()) ||
+            (Array.isArray(v) && !v.length);
+        if (isEmptyVal) {
+            const div = document.createElement('div');
+            div.className = 'psy-form-toolbar__entry-empty';
+            div.textContent = '(puste — kliknij, aby uzupełnić)';
+            return div;
+        }
+
+        // checkbox-group / multi-select — lista tagów
+        if (t === 'checkbox-group' || t === 'multi-select') {
+            const arr = Array.isArray(v) ? v : (typeof v === 'string' ? v.split(',').map(s => s.trim()).filter(Boolean) : []);
+            const wrap = document.createElement('div');
+            wrap.className = 'psy-form-toolbar__entry-tags';
+            for (const item of arr) {
+                const tag = document.createElement('span');
+                tag.className = 'psy-form-toolbar__entry-tag';
+                tag.textContent = item;
+                wrap.appendChild(tag);
+            }
+            return wrap;
+        }
+
+        // boolean / checkbox single
+        if (typeof v === 'boolean') {
+            const div = document.createElement('div');
+            div.className = 'psy-form-toolbar__entry-text';
+            div.textContent = v ? '✓ Tak' : '✗ Nie';
+            return div;
+        }
+
+        // textarea / text / select / radio / date / number — paragraph
+        const div = document.createElement('div');
+        div.className = 'psy-form-toolbar__entry-text';
+        div.style.whiteSpace = 'pre-wrap';
+        div.textContent = String(v);
+        return div;
+    }
+
+    // PR-J16: hiddenFields per wizyta (klik X w akapicie — persisted).
+    const initialHidden = (visit && visit.data && Array.isArray(visit.data._hiddenFields))
+        ? visit.data._hiddenFields.slice()
+        : [];
+
     const toolbar = createFormToolbar({
         groups,
         values: initialRaw,
@@ -952,8 +1012,21 @@ export function renderVisitForm(opts = {}) {
         fieldNotesValue: _fieldNotesValue,
         fieldIsFilled: _fieldIsFilled,
         showFieldNotes: _showFieldNotes,
-        fieldPreview: _fieldPreview
+        fieldPreview: _fieldPreview,
+        // PR-J16 — tryb growing journal
+        mode: 'journal',
+        hiddenFields: initialHidden,
+        onHiddenFieldsChange: (newArray) => {
+            // Persyst do Store natychmiast (bez debounce — to user action)
+            const id = _visitId || (ensureVisitExists() && _visitId);
+            if (!id) return;
+            const cur = Store.getVisitById(id);
+            const data = (cur && cur.data) || { _raw: {} };
+            Store.updateVisit(id, { data: { ...data, _hiddenFields: newArray } });
+        },
+        readRenderer: _fieldReadRenderer
     });
+
 
     root.appendChild(modeBar);
     root.appendChild(toolbar);
