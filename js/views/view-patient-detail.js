@@ -253,28 +253,40 @@ export function renderPatientDetail(opts = {}) {
             : ' psy-new-view__header--minor')
         : '';
 
+    // PR-J15 (2026-05-16): nagłówek karty pacjenta UPROSZCZONY.
+    // Klientka raport: „tam na górze jest tytuł, USUŃ" — duże <h1> z imieniem
+    // + subtitle z PESEL/wiekiem duplikowały dane ze sticky paska pacjenta
+    // w topbarze (PR-J2). Zostaje tylko cienki breadcrumb (kontekst nawigacji)
+    // + strip akcji (← Wróć | ⬇ Pobierz | 📦 Archiwizuj). Dla nowego pacjenta
+    // (lazy create, brak imienia) dodajemy minimalny nagłówek „+ Nowy pacjent".
+    const headerLeft = el('div', { style: { minWidth: '0' } }, [breadcrumb]);
+    if (isNew) {
+        headerLeft.appendChild(el('div', {
+            class: 'psy-new-view__subtitle',
+            style: { marginTop: '4px' }
+        }, [
+            '+ Nowy pacjent · ',
+            el('span', { class: 'psy-new-hint' }, ['Kod nadany po pierwszej zmianie · 💾 autozapis aktywny'])
+        ]));
+    }
+    if (!isNew && initial.archived) {
+        headerLeft.appendChild(el('div', { style: { marginTop: '4px' } }, [
+            el('span', { class: 'psy-new-badge psy-new-badge--neutral' }, ['archiwum'])
+        ]));
+    }
+
     root.appendChild(el('div', {
         class: 'psy-new-view__header psy-patient-detail__header' + _ageClass,
         title: _hasAge
             ? (_ageNum >= 18 ? 'Pacjent pełnoletni' : 'Pacjent nieletni')
             : undefined
     }, [
-        el('div', {}, [
-            breadcrumb,
-            el('h1', { class: 'psy-new-view__title psy-patient-detail__title' }, titleParts),
-            el('div', { class: 'psy-new-view__subtitle' }, [
-                isNew
-                    ? 'Kod nadany po pierwszej zmianie · '
-                    : ('Kod: ' + initial.id +
-                        (initial.pesel ? ' · PESEL ' + initial.pesel : '') +
-                        (_ageStr ? ' · ' + _ageStr + ' lat' : '') + ' · '),
-                el('span', { class: 'psy-new-hint' }, ['💾 autozapis aktywny'])
-            ])
-        ]),
+        headerLeft,
         el('div', { class: 'psy-new-view__actions' }, [
             backBtn, downloadXlsxBtn, archiveBtn
         ].filter(Boolean))
     ]));
+
 
     /* === Body: single column (PR-J10) === */
     const main = el('section', { class: 'psy-patient-detail__main psy-patient-detail__main--full' });
@@ -342,13 +354,29 @@ export function renderPatientDetail(opts = {}) {
             obywatelstwo: (data.obywatelstwo || '').trim(),
             lekarz: (data.lekarz || '').trim(),
             placowka: (data.placowka || '').trim(),
+            // PR-J15 (2026-05-16): pole `grupa` USUNIĘTE z UI — klientka „?".
+            // Zachowujemy w payload dla wstecznej kompatybilności (jeśli ktoś
+            // ma w localStorage), ale nie czytamy z formularza (input nie
+            // istnieje → data.grupa === undefined → fallback do '').
             grupa: (data.grupa || '').trim(),
             uwagi: (data.uwagi || '').trim(),
             minor: minorOn,
             telefon: (data.telefon || '').trim(),
             email: (data.email || '').trim(),
+            // PR-J15 (2026-05-16): adres rozbity na 3 osobne pola.
+            // Legacy `adres` (string) zostaje w payload jako fallback dla
+            // starych eksportów/migracji, ale priorytet mają nowe pola.
             adres: (data.adres || '').trim(),
+            ulica: (data.ulica || '').trim(),
+            kodPocztowy: (data.kodPocztowy || '').trim(),
+            miasto: (data.miasto || '').trim(),
+            // Adres korespondencyjny (gdy `korespRozny=true`)
+            korespRozny: !!data.korespRozny,
+            korespUlica: (data.korespUlica || '').trim(),
+            korespKodPocztowy: (data.korespKodPocztowy || '').trim(),
+            korespMiasto: (data.korespMiasto || '').trim(),
             matkaImie: data.matkaImie || '',
+
             matkaTelefon: data.matkaTelefon || '',
             matkaEmail: data.matkaEmail || '',
             ojciecImie: data.ojciecImie || '',
@@ -752,20 +780,30 @@ function renderPatientCard(patient) {
         label: 'Obywatelstwo', name: 'obywatelstwo', value: patient.obywatelstwo || '',
         placeholder: 'np. polskie'
     }));
+    // PR-J15 (2026-05-16): Lekarz prowadzący + Placówka → readonly auto-fill.
+    // Klientka raport: „tutaj automatycznie musi być — dane z profilu
+    // prowadzącego dokumentację" / „najlepiej też automatycznie". W kolejnej
+    // fazie pełna integracja z profilem usera (Settings). Na razie placeholder
+    // informujący o automatyzacji + ikona 🔒.
     tbl.appendChild(editableRow({
-        label: 'Lekarz prowadzący', name: 'lekarz', value: patient.lekarz || ''
+        label: '🔒 Lekarz prowadzący', name: 'lekarz', value: patient.lekarz || '',
+        readonly: true,
+        placeholder: '(auto z profilu prowadzącego — Faza X)'
     }));
     tbl.appendChild(editableRow({
-        label: 'Placówka', name: 'placowka', value: patient.placowka || ''
+        label: '🔒 Placówka', name: 'placowka', value: patient.placowka || '',
+        readonly: true,
+        placeholder: '(auto z profilu prowadzącego — Faza X)'
     }));
-    tbl.appendChild(editableRow({
-        label: 'Grupa', name: 'grupa', value: patient.grupa || ''
-    }));
+    // PR-J15 (2026-05-16): pole „Grupa" USUNIĘTE — klientka nie wie czemu
+    // służyło. `patient.grupa` zostaje jako legacy w localStorage (nie kasujemy
+    // wartości), po prostu nie renderujemy w UI.
     tbl.appendChild(editableRow({
         label: 'Karta pacjenta', name: 'kodPacjenta',
         value: patient.id || '(nadany po 1. zmianie)',
         readonly: true, mono: true
     }));
+
     tbl.appendChild(editableRow({
         label: 'Uwagi', name: 'uwagi', value: patient.uwagi || '',
         type: 'textarea', rows: 3
@@ -773,6 +811,26 @@ function renderPatientCard(patient) {
 
     card.appendChild(tbl);
     return card;
+}
+
+// PR-J15 (2026-05-16): jednorazowy parser legacy `patient.adres` (string)
+// → 3 osobne pola { ulica, kodPocztowy, miasto }. Heurystyka:
+//   "ul. Długa 12, 00-001 Warszawa"   → ulica="ul. Długa 12", kod="00-001", miasto="Warszawa"
+//   "ul. Długa 12, Warszawa"          → ulica="ul. Długa 12", miasto="Warszawa"
+//   inny format                       → cały string → ulica, reszta puste
+function _parseLegacyAdres(legacy) {
+    if (!legacy || typeof legacy !== 'string') return { ulica: '', kodPocztowy: '', miasto: '' };
+    const parts = legacy.split(',').map((s) => s.trim()).filter(Boolean);
+    if (parts.length === 0) return { ulica: '', kodPocztowy: '', miasto: '' };
+    if (parts.length === 1) return { ulica: parts[0], kodPocztowy: '', miasto: '' };
+    if (parts.length === 2) {
+        // "ul. ..., [kod] miasto" lub "ul. ..., miasto"
+        const m = parts[1].match(/^(\d{2}-\d{3})\s+(.+)$/);
+        if (m) return { ulica: parts[0], kodPocztowy: m[1], miasto: m[2] };
+        return { ulica: parts[0], kodPocztowy: '', miasto: parts[1] };
+    }
+    // 3+ części — "ul. ..., kod, miasto"
+    return { ulica: parts[0], kodPocztowy: parts[1], miasto: parts.slice(2).join(', ') };
 }
 
 function renderContactCard(patient) {
@@ -791,26 +849,88 @@ function renderContactCard(patient) {
     }));
     card.appendChild(kontakt);
 
+    // PR-J15 (2026-05-16): Adres rozbity na 3 osobne pola.
+    // Klientka raport: „chyba zrób oddzielnie do wypełnienia · × kod · × miasto
+    // · × ul. → wyżej masz przykład ze szwedzkiego". Migracja legacy:
+    // jeśli istnieje stare pole `patient.adres` (string) i brak nowych pól →
+    // parsujemy do { ulica, kodPocztowy, miasto } przy renderze.
+    const _legacyParsed = _parseLegacyAdres(patient.adres);
+    const _ulica       = patient.ulica       || _legacyParsed.ulica;
+    const _kodPocztowy = patient.kodPocztowy || _legacyParsed.kodPocztowy;
+    const _miasto      = patient.miasto      || _legacyParsed.miasto;
+
     // Adres zamieszkania
     card.appendChild(el('h3', { class: 'psy-patient-detail__card-subtitle' }, ['Adres zamieszkania']));
     const adres = el('div', { class: 'psy-patient-detail__field-table' });
     adres.appendChild(editableRow({
-        label: 'Adres', name: 'adres', value: patient.adres || '',
-        type: 'textarea', rows: 2,
-        placeholder: 'ul. ..., kod pocztowy, miasto'
+        label: 'Ulica', name: 'ulica', value: _ulica,
+        placeholder: 'np. ul. Długa 12 m. 3'
+    }));
+    adres.appendChild(editableRow({
+        label: 'Kod pocztowy', name: 'kodPocztowy', value: _kodPocztowy,
+        mono: true, placeholder: '00-000',
+        inputAttrs: { maxlength: '6', pattern: '\\d{2}-\\d{3}' }
+    }));
+    adres.appendChild(editableRow({
+        label: 'Miasto', name: 'miasto', value: _miasto,
+        placeholder: 'np. Warszawa'
     }));
     card.appendChild(adres);
 
-    // Adres korespondencyjny
+    // PR-J15 (2026-05-16): Adres korespondencyjny — analogicznie 3 pola.
+    // Domyślnie ukryte za checkboxem „Inny niż adres zamieszkania" — gdy
+    // odznaczone, pola są zwijane (display:none przez klasę --koresp-hidden).
     card.appendChild(el('h3', { class: 'psy-patient-detail__card-subtitle' }, ['Adres korespondencyjny']));
-    const koresp = el('div', { class: 'psy-patient-detail__field-table' });
-    koresp.appendChild(el('div', { class: 'psy-patient-detail__hint' }, [
-        'inny niż adres zamieszkania ☐ (TODO: pole opcjonalne — Faza 5)'
-    ]));
-    card.appendChild(koresp);
+
+    const _korespRozny = !!patient.korespRozny;
+    const korespToggle = el('div', { class: 'psy-patient-detail__field-row psy-patient-detail__field-row--editable' }, [
+        el('label', {
+            class: 'psy-patient-detail__field-label',
+            for: 'psy-pf-korespRozny'
+        }, ['Inny niż adres zamieszkania:']),
+        el('div', { class: 'psy-patient-detail__field-value psy-patient-detail__field-value--editable' }, [
+            el('input', {
+                type: 'checkbox',
+                name: 'korespRozny',
+                id: 'psy-pf-korespRozny',
+                class: 'psy-pdf__input--checkbox',
+                checked: _korespRozny
+            })
+        ])
+    ]);
+    const korespBox = el('div', {
+        class: 'psy-patient-detail__field-table',
+        style: { display: _korespRozny ? '' : 'none' },
+        dataset: { korespBox: 'true' }
+    });
+    korespBox.appendChild(editableRow({
+        label: 'Ulica (koresp.)', name: 'korespUlica', value: patient.korespUlica || '',
+        placeholder: 'np. ul. Krótka 5'
+    }));
+    korespBox.appendChild(editableRow({
+        label: 'Kod pocztowy (koresp.)', name: 'korespKodPocztowy', value: patient.korespKodPocztowy || '',
+        mono: true, placeholder: '00-000',
+        inputAttrs: { maxlength: '6', pattern: '\\d{2}-\\d{3}' }
+    }));
+    korespBox.appendChild(editableRow({
+        label: 'Miasto (koresp.)', name: 'korespMiasto', value: patient.korespMiasto || '',
+        placeholder: 'np. Kraków'
+    }));
+
+    const korespWrap = el('div', { class: 'psy-patient-detail__field-table' });
+    korespWrap.appendChild(korespToggle);
+    korespWrap.appendChild(korespBox);
+
+    // Toggle visibility on checkbox change
+    korespToggle.querySelector('input[type="checkbox"]').addEventListener('change', (ev) => {
+        korespBox.style.display = ev.target.checked ? '' : 'none';
+    });
+
+    card.appendChild(korespWrap);
 
     return card;
 }
+
 
 function renderRelationsCard(patient) {
     const card = el('div', {

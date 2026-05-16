@@ -7,18 +7,19 @@
     <!-- PR-J14c (2026-05-14): cache-busting `?v=YYYYMMDDhhmm` na wszystkich
          CSS i JS — żeby kolejne deploye nie wymagały hard reloadu klientki.
          Bumpuj wersję przy każdym deploy (data + godzina = unikalność). -->
-    <link rel="stylesheet" href="css/tokens.css?v=202605150040">
-    <link rel="stylesheet" href="css/style.css?v=202605150040">
-    <link rel="stylesheet" href="css/compat.css?v=202605150040">
-    <link rel="stylesheet" href="css/app-new.css?v=202605150040">
+    <link rel="stylesheet" href="css/tokens.css?v=202605161115">
+    <link rel="stylesheet" href="css/style.css?v=202605161115">
+    <link rel="stylesheet" href="css/compat.css?v=202605161115">
+    <link rel="stylesheet" href="css/app-new.css?v=202605161115">
     <!-- PR-J13 (2026-05-13) — tryb kompaktowy: override-y dla nowej apki.
          Aktywne przez klasę `theme--compact` na <html>. Rollback: usunięcie
          tej klasy → apka wraca do „comfortable" widoku. -->
-    <link rel="stylesheet" href="css/compact-new.css?v=202605150040">
+    <link rel="stylesheet" href="css/compact-new.css?v=202605161115">
     <!-- PR-J14 (2026-05-14) — nowy wzorzec formularzy „pasek narzędzi + treść".
          Style komponentu `_form-toolbar.js` + override-y zwężonego sidebara
          w trybie `.psy-new-shell--form-mode`. -->
-    <link rel="stylesheet" href="css/form-toolbar.css?v=202605150040">
+    <link rel="stylesheet" href="css/form-toolbar.css?v=202605161115">
+
 
 </head>
 <body class="psy-app-body">
@@ -95,7 +96,8 @@
      `js/views/_xlsx-codec.js` (paczka K1 — natychmiastowy zapis lokalny). -->
 <script src="lib/xlsx-js-style.min.js"></script>
 
-<script type="module" src="js/app-new.js?v=202605150040"></script>
+<script type="module" src="js/app-new.js?v=202605161115"></script>
+
 
 
 </body>

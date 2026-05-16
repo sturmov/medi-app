@@ -2998,18 +2998,22 @@ body.psy-folder-gate-open {
     transform: scale(0.96);
 }
 
-/* Adaptacja: ukryj mniej istotne fragmenty przy wąskim oknie */
-@media (max-width: 1280px) {
+/* Adaptacja: ukryj mniej istotne fragmenty na BARDZO wąskich oknach (mobile).
+   PR-J15 (2026-05-16): klientka raport „dodaj jeszcze mail" — na 1366×768
+   email znikał pod media-query @1280px (viewport ~1280 przez DevTools).
+   Progi obniżone tak, żeby na laptopach (>= 1024px) zawsze widać i tel i mail. */
+@media (max-width: 900px) {
     .psy-new-patient-tag__field--mail {
         display: none;
     }
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 760px) {
     .psy-new-patient-tag__field--tel {
         display: none;
     }
 }
+
 
 
 /* ---- Popover wyszukiwarki pacjenta (PR-J2) ------------------------------- */
