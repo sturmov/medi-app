@@ -122,8 +122,150 @@ function _sexIcon(plec) {
     return { glyph: '⚧', cls: 'other' };
 }
 
+/**
+ * PR-J16 (2026-05-30) — pełny format wieku z miesiącami: "X lat Y mies."
+ * (lub "0 lat 8 mies." dla niemowląt). Klientka prosi o widoczne miesiące,
+ * szczególnie istotne przy małych dzieciach. Zwraca `null` gdy brak danych
+ * (brak `dataUrodzenia` ORAZ brak `wiek`).
+ *
+ * Dla legacy `patient.wiek` (string typu "37" lub "37 lat") — zwracamy jako-jak.
+ */
+function _formatPatientAgeFull(patient) {
+    if (!patient) return null;
+    if (patient.dataUrodzenia) {
+        const d = new Date(patient.dataUrodzenia);
+        if (!isNaN(d.getTime())) {
+            const now = new Date();
+            let years = now.getFullYear() - d.getFullYear();
+            let months = now.getMonth() - d.getMonth();
+            if (now.getDate() < d.getDate()) months -= 1;
+            if (months < 0) {
+                years -= 1;
+                months += 12;
+            }
+            if (years < 0) return null;
+            return years + ' lat ' + months + ' mies.';
+        }
+    }
+    if (patient.wiek) {
+        const w = String(patient.wiek).trim();
+        // Już sformatowany ("37 lat 4 mies.") — zwróć as-is.
+        if (/lat|mies/.test(w)) return w;
+        // Sama liczba — dodaj " lat".
+        if (/^\d+$/.test(w)) return w + ' lat';
+        return w;
+    }
+    return null;
+}
+
+/**
+ * PR-J16 (2026-05-30) — read-only popover z detalami pacjenta, pojawia się
+ * przy hoverze na sticky pasek pacjenta. Klientka: „jak najedziesz na top
+ * panel pacjenta to wyskakuje panel read only z detalami pacjenta".
+ *
+ * Zakres pól (Wariant A wybrany przez PO): komplet karty „Pacjent"
+ * (imię, II imię, nazwisko, PESEL, płeć, data urodzenia, wiek, obywatelstwo,
+ * lekarz, placówka) + Kontakt (telefon, e-mail) + Adres zamieszkania
+ * (ulica, kod, miasto — z fallbackiem do legacy `patient.adres`).
+ *
+ * Mechanizm pokazywania: CSS-only `.psy-new-patient-tag-wrap:hover` — popover
+ * sam pokazuje się/chowa. Brak event-listenerów = brak race-condition z lupą
+ * lub click-outside.
+ */
+function _buildPatientPreviewPopover(p) {
+    if (!p) return null;
+
+    function row(label, value) {
+        const isEmpty = value == null || value === '' || value === '—';
+        return el('div', { class: 'psy-new-patient-tag__preview-row' }, [
+            el('span', { class: 'psy-new-patient-tag__preview-label' }, [label]),
+            el('span', {
+                class: 'psy-new-patient-tag__preview-value'
+                    + (isEmpty ? ' psy-new-patient-tag__preview-value--empty' : '')
+            }, [isEmpty ? '—' : String(value)])
+        ]);
+    }
+
+    function section(title, rows) {
+        const visibleRows = rows.filter(Boolean);
+        if (!visibleRows.length) return null;
+        return el('div', { class: 'psy-new-patient-tag__preview-section' }, [
+            el('div', { class: 'psy-new-patient-tag__preview-section-title' }, [title]),
+            el('div', { class: 'psy-new-patient-tag__preview-grid' }, visibleRows)
+        ]);
+    }
+
+    const ageFull = _formatPatientAgeFull(p);
+
+    // Adres — priorytet nowe pola (ulica/kodPocztowy/miasto), fallback do legacy `adres`.
+    const addressLine = (() => {
+        const parts = [];
+        if (p.ulica) parts.push(p.ulica);
+        const cityLine = [p.kodPocztowy, p.miasto].filter(Boolean).join(' ');
+        if (cityLine) parts.push(cityLine);
+        if (parts.length) return parts.join(', ');
+        return p.adres || '';
+    })();
+
+    const popover = el('div', {
+        class: 'psy-new-patient-tag__preview',
+        role: 'tooltip',
+        'aria-label': 'Szczegóły pacjenta (podgląd)'
+    }, [
+        // Nagłówek z imieniem i nazwiskiem + kod pacjenta
+        el('div', { class: 'psy-new-patient-tag__preview-header' }, [
+            el('span', { class: 'psy-new-patient-tag__preview-name' }, [
+                ((p.imie || '') + ' ' + (p.drugieImie ? '(' + p.drugieImie + ') ' : '') +
+                 (p.nazwisko || '')).trim() || '— bez nazwiska —'
+            ]),
+            p.id
+                ? el('span', { class: 'psy-new-patient-tag__preview-code' }, ['kod: ' + p.id])
+                : null
+        ].filter(Boolean)),
+
+        // Sekcja: Pacjent
+        section('Pacjent', [
+            row('Imię',           p.imie),
+            row('Drugie imię',    p.drugieImie),
+            row('Nazwisko',       p.nazwisko),
+            row('PESEL',          p.pesel),
+            row('Płeć',           p.plec),
+            row('Data urodzenia', p.dataUrodzenia),
+            row('Wiek',           ageFull),
+            row('Obywatelstwo',   p.obywatelstwo),
+            row('Lekarz prowadzący', p.lekarz),
+            row('Placówka',       p.placowka)
+        ]),
+
+        // Sekcja: Kontakt
+        section('Kontakt', [
+            row('Telefon', p.telefon),
+            row('E-mail',  p.email)
+        ]),
+
+        // Sekcja: Adres zamieszkania
+        section('Adres zamieszkania', [
+            row('Ulica',        p.ulica),
+            row('Kod pocztowy', p.kodPocztowy),
+            row('Miasto',       p.miasto),
+            // Fallback z legacy `adres` — pokazujemy tylko gdy brak nowych pól
+            (!p.ulica && !p.kodPocztowy && !p.miasto && p.adres)
+                ? row('Adres (legacy)', p.adres)
+                : null
+        ]),
+
+        // Stopka — hint nawigacyjny
+        el('div', { class: 'psy-new-patient-tag__preview-footer' }, [
+            '💡 Pełna karta: klik w nazwę pacjenta lub menu „Dane identyfikacyjne".'
+        ])
+    ].filter(Boolean));
+
+    return popover;
+}
+
 
 function toast(variant, title, message) {
+
     if (window.PsyToast) {
         window.PsyToast.notify({ variant, title, message }, 'psy-app-toasts');
     }
@@ -1574,18 +1716,25 @@ const AppController = {
         // wiek · telefon · mail · badge auto „Pełnoletni" / „Nieletni" · 🔍 lupa.
         // Lupa otwiera popover z search'em pacjenta — klik wyniku natychmiast
         // przełącza pacjenta + redirect do detali.
+        //
+        // PR-J16 (2026-05-30):
+        //   - Wiek z miesiącami ("X lat Y mies.") — klientka prosi o widoczne
+        //     miesiące (istotne przy dzieciach).
+        //   - Hover popover z read-only detalami — opakowanie .psy-new-patient-tag-wrap
+        //     zawiera tag + ukryty popover; CSS pokazuje go na hover wrappera.
 
         const ageNum = _computePatientAgeYears(p);
+        const ageFull = _formatPatientAgeFull(p);   // "X lat Y mies."
         const adult = ageNum >= 18;
         const minorBadge = ageNum != null
             ? (adult
                 ? el('span', {
                     class: 'psy-new-patient-tag__badge psy-new-patient-tag__badge--adult',
-                    title: 'Wiek: ' + ageNum + ' lat (pełnoletni)'
+                    title: 'Wiek: ' + (ageFull || ageNum + ' lat') + ' (pełnoletni)'
                 }, ['✓ Pełnoletni'])
                 : el('span', {
                     class: 'psy-new-patient-tag__badge psy-new-patient-tag__badge--minor',
-                    title: 'Wiek: ' + ageNum + ' lat (nieletni)'
+                    title: 'Wiek: ' + (ageFull || ageNum + ' lat') + ' (nieletni)'
                 }, ['⚠ Nieletni']))
             : null;
 
@@ -1627,9 +1776,12 @@ const AppController = {
                 title: 'Otwórz dane identyfikacyjne'
             }, [nameParts]),
 
-            // Wiek
-            ageNum != null
-                ? el('span', { class: 'psy-new-patient-tag__field' }, [ageNum + ' lat'])
+            // Wiek (PR-J16: format "X lat Y mies." z miesiącami)
+            ageFull
+                ? el('span', {
+                    class: 'psy-new-patient-tag__field',
+                    title: 'Wiek pacjenta (lata i miesiące)'
+                }, [ageFull])
                 : null,
 
             // Telefon
@@ -1673,8 +1825,19 @@ const AppController = {
             }, ['Zmień'])
         ].filter(Boolean));
 
-        this.patientHostEl.appendChild(tag);
+        // PR-J16 (2026-05-30): wrapper z hover-popover (read-only podgląd).
+        // Klientka: „jak najedziesz na top panel pacjenta to wyskakuje panel
+        // read only z detalami pacjenta". Implementacja CSS-only — wrapper
+        // .psy-new-patient-tag-wrap pokazuje popover na :hover (transition
+        // delay 250 ms żeby nie błyskało przy przelotach).
+        const wrap = el('div', { class: 'psy-new-patient-tag-wrap' }, [
+            tag,
+            _buildPatientPreviewPopover(p)
+        ]);
+
+        this.patientHostEl.appendChild(wrap);
     },
+
 
     /** PR-J2: popover z wyszukiwarką pacjenta (lupa). */
     _togglePatientSearchPopover() {

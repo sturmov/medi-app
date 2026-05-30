@@ -3015,8 +3015,165 @@ body.psy-folder-gate-open {
 }
 
 
+/* ============================================================================
+   PR-J16 (2026-05-30) — Hover popover z detalami pacjenta (read-only)
+   --------------------------------------------------------------------------
+   Klientka: „jak najedziesz na top panel pacjenta to wyskakuje panel read only
+   z detalami pacjenta". Implementacja CSS-only (bez JS) — opakowanie
+   .psy-new-patient-tag-wrap pokazuje popover na :hover z delay 250 ms.
+   ============================================================================ */
+
+.psy-new-patient-tag-wrap {
+    position: relative;
+    /* Wrapper musi mieć dokładnie szerokość taga, żeby :hover triggerował
+       tylko po najechaniu na pasek (nie na cały topbar). */
+    display: inline-block;
+    /* Margin-bottom -1px żeby popover nie miał szczeliny do najechania */
+}
+
+.psy-new-patient-tag__preview {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 1400;          /* poniżej search-popover (1500), powyżej shellu */
+    width: 520px;
+    max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+    background: #FFFFFF;
+    border: 1px solid #D1D5DB;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+    padding: 12px 14px;
+    color: #111827;
+    font-size: 12.5px;
+    line-height: 1.45;
+    /* Ukryty domyślnie + plynne pokazywanie po delay */
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(-4px);
+    transition:
+        opacity 0.18s ease-out,
+        visibility 0s linear 0.25s,        /* delay-hide żeby najpierw fade-out */
+        transform 0.18s ease-out;
+}
+
+/* Pokaż popover na hover wrappera (CSS-only, brak JS, brak race-condition) */
+.psy-new-patient-tag-wrap:hover .psy-new-patient-tag__preview {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+    /* Hover delay 250 ms — żeby popover nie błyskał przy przejeździe myszy */
+    transition:
+        opacity 0.18s ease-out 0.25s,
+        visibility 0s linear 0.25s,
+        transform 0.18s ease-out 0.25s;
+}
+
+.psy-new-patient-tag__preview-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid #E5E7EB;
+}
+
+.psy-new-patient-tag__preview-name {
+    font-size: 14.5px;
+    font-weight: 700;
+    color: #0F172A;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.psy-new-patient-tag__preview-code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: #6B7280;
+    background: #F3F4F6;
+    padding: 2px 8px;
+    border-radius: 6px;
+    white-space: nowrap;
+}
+
+.psy-new-patient-tag__preview-section {
+    margin-bottom: 10px;
+}
+
+.psy-new-patient-tag__preview-section:last-of-type {
+    margin-bottom: 6px;
+}
+
+.psy-new-patient-tag__preview-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #6B7280;
+    margin-bottom: 4px;
+    padding-bottom: 2px;
+    border-bottom: 1px dashed #E5E7EB;
+}
+
+.psy-new-patient-tag__preview-grid {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 2px 12px;
+    align-items: baseline;
+}
+
+.psy-new-patient-tag__preview-row {
+    display: contents;   /* przekazujemy potomki bezpośrednio do gridu */
+}
+
+.psy-new-patient-tag__preview-label {
+    font-size: 11.5px;
+    color: #6B7280;
+    text-align: right;
+    padding-right: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.psy-new-patient-tag__preview-value {
+    font-size: 12.5px;
+    color: #111827;
+    word-break: break-word;
+}
+
+.psy-new-patient-tag__preview-value--empty {
+    color: #9CA3AF;
+    font-style: italic;
+}
+
+.psy-new-patient-tag__preview-footer {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #E5E7EB;
+    font-size: 11px;
+    color: #6B7280;
+    text-align: center;
+}
+
+/* Na bardzo wąskich ekranach (mobile) — szerokość popovera = viewport - margin.
+   Pozycjonowanie left:0 zostaje (rośnie w prawo aż tyle ile się zmieści). */
+@media (max-width: 600px) {
+    .psy-new-patient-tag__preview {
+        width: calc(100vw - 24px);
+    }
+    .psy-new-patient-tag__preview-grid {
+        grid-template-columns: 110px 1fr;
+    }
+}
+
 
 /* ---- Popover wyszukiwarki pacjenta (PR-J2) ------------------------------- */
+
 
 .psy-new-search-popover {
     width: 360px;

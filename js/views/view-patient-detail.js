@@ -59,25 +59,47 @@ function el(tag, props = {}, children = []) {
     return node;
 }
 
+// PR-J16 (2026-05-30): wiek z miesiącami — format "X lat Y mies." /
+// "0 lat 8 mies." dla niemowląt. Klientka: chce widzieć dokładny wiek
+// (szczególnie dla nieletnich pacjentów). Lata liczymy normalnie, ale
+// gdy dzień miesiąca dziś < dzień miesiąca urodzenia → odejmij 1 miesiąc.
+function formatAgeFromDate(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const now = new Date();
+    let years = now.getFullYear() - d.getFullYear();
+    let months = now.getMonth() - d.getMonth();
+    if (now.getDate() < d.getDate()) months -= 1;
+    if (months < 0) {
+        years -= 1;
+        months += 12;
+    }
+    if (years < 0) return '';
+    return years + ' lat ' + months + ' mies.';
+}
+
 function ageOf(patient) {
     if (!patient) return '';
-    if (patient.wiek) return String(patient.wiek);
     if (patient.dataUrodzenia) {
-        const d = new Date(patient.dataUrodzenia);
-        if (!isNaN(d.getTime())) {
-            const age = Math.floor((Date.now() - d.getTime()) / (365.25 * 24 * 3600 * 1000));
-            return String(age);
-        }
+        const formatted = formatAgeFromDate(patient.dataUrodzenia);
+        if (formatted) return formatted;
+    }
+    // Fallback: legacy `wiek` jako sama liczba lat (bez miesięcy).
+    if (patient.wiek) {
+        const n = String(patient.wiek).trim();
+        // Jeśli już jest sformatowany ("37 lat 4 mies.") — zwróć as-is.
+        if (/lat|mies/.test(n)) return n;
+        // W przeciwnym razie: dodaj " lat" (np. "37" → "37 lat").
+        return /^\d+$/.test(n) ? (n + ' lat') : n;
     }
     return '';
 }
 
 function ageFromDate(iso) {
-    if (!iso) return '';
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return '';
-    return String(Math.floor((Date.now() - d.getTime()) / (365.25 * 24 * 3600 * 1000)));
+    return formatAgeFromDate(iso);
 }
+
 
 function toast(variant, title, message) {
     if (window.PsyToast) {
@@ -343,8 +365,11 @@ export function renderPatientDetail(opts = {}) {
         }
 
         const payload = {
-            tytul: data.tytul || '',
+            // PR-J16 (2026-05-30): `tytul` USUNIĘTY z payload — pole nie istnieje
+            // w UI, więc `data.tytul === undefined` → nadpisałby legacy wartość
+            // pustym stringiem. Zachowujemy oryginalną wartość w Store nietkniętą.
             imie: String(data.imie || '').trim(),
+
             nazwisko: String(data.nazwisko || '').trim(),
             drugieImie: (data.drugieImie || '').trim(),
             pesel: (data.pesel || '').trim(),
@@ -733,13 +758,13 @@ function renderPatientCard(patient) {
 
     const tbl = el('div', { class: 'psy-patient-detail__field-table' });
 
-    tbl.appendChild(editableRow({
-        label: 'Tytuł', name: 'tytul', value: patient.tytul || '',
-        placeholder: 'np. dr, mgr…'
-    }));
+    // PR-J16 (2026-05-30): pole „Tytuł" USUNIĘTE z UI.
+    // Klientka raport: „1. usunac tytul". Wartość `patient.tytul` zostaje
+    // jako legacy w localStorage (nie kasujemy), po prostu nie renderujemy.
     tbl.appendChild(editableRow({
         label: 'Imię', name: 'imie', value: patient.imie || ''
     }));
+
     tbl.appendChild(editableRow({
         label: 'Drugie imię', name: 'drugieImie', value: patient.drugieImie || '',
         placeholder: '(opcjonalnie)'
