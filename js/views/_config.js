@@ -1,0 +1,61 @@
+// ============================================================================
+// _config.js — ustawienia integracji (Google).
+//
+// Identyfikator klienta OAuth jest JAWNY z natury (widać go w każdym adresie
+// logowania Google) — to nie jest sekret. Sekretu klienta (`client_secret`)
+// aplikacja nie potrzebuje i NIGDY nie może go zawierać: logowanie odbywa się
+// w przeglądarce terapeuty, a token dostępu żyje tylko w pamięci karty.
+// ============================================================================
+
+const LS_CLIENT_ID = 'psy-new:googleClientId';
+
+/** Domyślny klient OAuth (projekt Google Cloud właściciela aplikacji). */
+export const DEFAULT_GOOGLE_CLIENT_ID =
+    '1063412397649-vkie8h726ckit3hcdbhk8ce8bfc8dor5.apps.googleusercontent.com';
+
+/**
+ * Zakres `drive.file`: aplikacja widzi WYŁĄCZNIE pliki, które sama utworzyła
+ * (folder pacjentów, arkusze, załączniki) — nie ma wglądu w resztę Dysku.
+ */
+export const GOOGLE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+
+/** Nazwa folderu głównego zakładanego na Dysku przy pierwszym połączeniu. */
+export const DRIVE_ROOT_FOLDER_NAME = 'pacjenci';
+
+export function getGoogleClientId() {
+    try {
+        const custom = window.localStorage.getItem(LS_CLIENT_ID);
+        if (custom && custom.trim()) return custom.trim();
+    } catch (_) { /* */ }
+    return DEFAULT_GOOGLE_CLIENT_ID;
+}
+
+export function setGoogleClientId(value) {
+    try {
+        const v = String(value || '').trim();
+        if (v && v !== DEFAULT_GOOGLE_CLIENT_ID) window.localStorage.setItem(LS_CLIENT_ID, v);
+        else window.localStorage.removeItem(LS_CLIENT_ID);
+    } catch (_) { /* */ }
+}
+
+/**
+ * Adresy API Google. Test automatyczny (tools/smoke-test.mjs) podstawia tu
+ * lokalną atrapę przez `window.__PSY_TEST_GDRIVE__ = { base, token }`.
+ */
+export function googleEndpoints() {
+    const test = (typeof window !== 'undefined' && window.__PSY_TEST_GDRIVE__) || null;
+    if (test && test.base) {
+        return {
+            drive: test.base + '/drive/v3',
+            upload: test.base + '/upload/drive/v3',
+            sheets: test.base + '/v4/spreadsheets',
+            testToken: test.token || 'test-token'
+        };
+    }
+    return {
+        drive: 'https://www.googleapis.com/drive/v3',
+        upload: 'https://www.googleapis.com/upload/drive/v3',
+        sheets: 'https://sheets.googleapis.com/v4/spreadsheets',
+        testToken: null
+    };
+}

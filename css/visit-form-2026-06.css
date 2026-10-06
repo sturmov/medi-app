@@ -295,8 +295,42 @@
     margin: 6px 0 1px 0 !important;
 }
 
-/* ---------- UKRYJ X w akapitach (klientka nie wspomina, mniej zaśmieconego UI) */
+/* ---------- AKAPIT W TRYBIE ODCZYTU ----------------------------------------- */
 
-.psy-form-toolbar__entry-close {
-    display: none !important;
+/* Cały akapit „do odczytu" jest klikalny (klik = edycja). */
+.psy-form-toolbar__entry--read {
+    cursor: pointer;
+}
+.psy-form-toolbar__entry--read:focus-visible {
+    outline: 2px solid #93C5FD;
+    outline-offset: 1px;
+}
+
+/* Sekcja „w jednym oknie" (Dane wizyty, Parametry) w trybie odczytu:
+   etykieta : wartość, tylko wypełnione pola. */
+.psy-vf__read-grid {
+    display: grid;
+    grid-template-columns: minmax(120px, max-content) 1fr;
+    gap: 2px 12px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+.psy-vf__read-grid-label {
+    color: #64748B;
+    font-size: 12px;
+}
+.psy-vf__read-grid-value {
+    color: #0F172A;
+    word-break: break-word;
+}
+
+/* Pole jednostki przy leku spoza słownika */
+.psy-vf__inline-meds__dose .psy-vf__inline-meds__dose-input[type="text"] {
+    text-align: left;
+}
+
+/* Historia wizyt: wartości wielowierszowe (lista leków, rozpoznań, dłuższy opis) */
+.psy-history-paragraph__field-value,
+.psy-history-paragraph__section-comment {
+    white-space: pre-wrap;
 }

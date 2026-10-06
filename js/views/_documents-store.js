@@ -21,8 +21,8 @@
 //   getDocumentBlobURL(rootHandle, folderName, fileName)   → string (blob URL)
 //   downloadDocument(rootHandle, folderName, fileName)   → void (triggers download)
 //
-// Czyste funkcje — bez Store. Widok `view-documents.js` wywołuje je używając
-// `Store.getRootFolderHandle()` + bieżącego `currentPatient._folderName`.
+// Czyste funkcje — bez Store. Używa ich magazyn lokalny (`_storage-local.js`);
+// widok „Dokumenty" korzysta też z pomocników nazw / ikon / rozmiaru z tego pliku.
 // ============================================================================
 
 import {

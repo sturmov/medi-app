@@ -1,1072 +1,56 @@
 // ============================================================================
-// view-visit-form.js — widok-strona formularza wizyty.
+// view-visit-form.js — formularz wizyty (pasek pól + dziennik akapitów).
 //
-// CECHY (Faza 4 + ustalenia PO 2026-05-01):
+// STAN FORMULARZA (jedno źródło prawdy, w pamięci):
+//   raw   — płaska mapa wartości pól (`sekcja.pole`), patrz `_visit-describe.js`
+//   data  — { meds: [...], diagnoses: [...] } (leki i rozpoznania TEJ wizyty)
 //
-//  • Renderuje schemat z `_visit-form-schema.js` w 5-slotowym wzorcu akordeonu
-//    (VISIT_FORM_SPEC.md §2.0). Slot 1: belka, 2: sub-label, 3: pole główne,
-//    4: uwagi, 5: komentarz rozdziału.
+//   Każde zdarzenie `input`/`change` NATYCHMIAST przenosi wartości z kontrolek
+//   edytowanego akapitu do `raw`. Zapis do Store jest opóźniony (400 ms), ale
+//   ekran zawsze rysuje się z `raw`, więc przełączenie pola / kliknięcie obok
+//   nie może zgubić wpisu. Wyjście z widoku i zamknięcie karty wymuszają zapis.
 //
-//  • AUTOZAPIS: każda zmiana (input/change) z debouncem ~400 ms zapisuje
-//    flat-mapę wartości do `visit.data._raw`. Brak przycisku „Zapisz".
+// LAZY CREATE: `#/visit/form/new/:typeId` nie tworzy rekordu. Wizyta powstaje
+//   przy pierwszej zmianie, a adres zmienia się na `#/visit/form/:visitId`.
 //
-//  • LAZY CREATE: wejście w `#/visit/form/new[/:typeId]` NIE tworzy rekordu.
-//    Pierwsza zmiana w którymkolwiek polu woła `Store.addVisit({...})`
-//    i bez nawigacji aktualizuje hash na `#/visit/form/:visitId` przez
-//    `history.replaceState`. Dzięki temu lista nie jest zaśmiecana pustymi
-//    szkicami.
-//
-//  • STATUS WIZYTY (PO 2026-05-01): `Robocza`/`Zamknięta` zostały usunięte
-//    z UI. Pole `closed` w danych zostaje (legacy). Formularz nigdy nie jest
-//    read-only. Każdą wizytę można skasować przyciskiem 🗑 w nagłówku.
-//
-//  • SEKCJE COLLAPSIBLE (PO 2026-05-01): wszystkie sekcje, włącznie z
-//    pierwszą („Dane wizyty"), są collapsible default-closed. Sekcja
-//    „Dane wizyty" gdy collapsed pokazuje preview-line w summary
-//    (data · godzina · typ · czas · osoby) zamiast samej etykiety.
-//
-//  • LIVE-VIEW: root ma `data-live="true"` — `AppController._renderView()`
-//    pomija ten widok przy pasywnych re-renderach Store (autozapis nie
-//    przerenderuje formularza i nie zabija focusu/scroll).
-//
-// HASH:
-//   #/visit/form/new            – nowa, lazy
-//   #/visit/form/new/:typeId    – nowa, lazy + ustawiony typ
-//   #/visit/form/:visitId       – edycja istniejącej
+// TRYB: „1sze spotkanie" = pełny wywiad, pozostałe typy = formularz skrócony
+//   (wynika wyłącznie z typu wizyty).
 // ============================================================================
 
 import { Store } from './_store.js';
 import { schemaForMode } from './_visit-form-schema.js';
 import { visitTypeById } from './_fake-data.js';
+import { VISIT_DICT } from './_visit-dict.js';
 import { searchIcd10, findIcd10ByCode } from './_icd10-dict.js';
-import { searchMeds, findMedByBrand } from './_meds-dict.js';
+import { searchMeds } from './_meds-dict.js';
 import { openConfirm } from './_modal.js';
 import { createFormToolbar } from './_form-toolbar.js';
+import { el } from './_dom.js';
+import {
+    visitMode, fieldKey, isBlank, listOf,
+    isFieldFilled, fieldText, uzywkiEntries,
+    medDoseText, diagnosisText, visitSummary
+} from './_visit-describe.js';
 
-/* --------------------------------------------------------------------------
-   Mini-helper `el()` — vanilla DOM (ten sam styl co app-new.js).
-   -------------------------------------------------------------------------- */
-function el(tag, props = {}, children = []) {
-    const node = document.createElement(tag);
-    for (const [k, v] of Object.entries(props || {})) {
-        if (v == null) continue;
-        if (k === 'class') node.className = v;
-        else if (k === 'html') node.innerHTML = v;
-        else if (k === 'dataset' && typeof v === 'object') {
-            for (const [dk, dv] of Object.entries(v)) node.dataset[dk] = dv;
-        } else if (k.startsWith('on') && typeof v === 'function') {
-            node.addEventListener(k.slice(2).toLowerCase(), v);
-        } else if (k === 'style' && typeof v === 'object') {
-            for (const [sk, sv] of Object.entries(v)) node.style[sk] = sv;
-        } else if (k === 'checked') {
-            node.checked = !!v;
-        } else if (typeof v === 'boolean') {
-            if (v) node.setAttribute(k, '');
-        } else {
-            node.setAttribute(k, v);
-        }
-    }
-    if (!Array.isArray(children)) children = [children];
-    for (const c of children) {
-        if (c == null || c === false) continue;
-        if (typeof c === 'string' || typeof c === 'number') {
-            node.appendChild(document.createTextNode(String(c)));
-        } else {
-            node.appendChild(c);
-        }
-    }
-    return node;
+const DEFAULT_VISIT_TYPE = 'next_meeting';
+
+function todayISO() {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
-/* --------------------------------------------------------------------------
-   Renderery dla pola głównego (slot 3) — każdy zwraca DOMNode.
-   Każdy honoruje `initialValue` jeśli jest dostępne w `raw`.
-   -------------------------------------------------------------------------- */
-
-/* Auto-grow helper — dopasowuje wysokość textarea-y do zawartości.
-   Wywołać po wstrzyknięciu w DOM oraz po każdym `input`. */
-function _autoGrowTextarea(ta) {
-    if (!ta || !ta.classList || !ta.classList.contains('psy-vf__textarea--autogrow')) return;
-    // Reset, żeby `scrollHeight` odzwierciedlał aktualną zawartość, nie poprzednią wysokość.
-    ta.style.height = 'auto';
-    ta.style.height = (ta.scrollHeight + 2) + 'px';   // +2 px na border
-}
-
-function renderTextarea(name, initial = '', opts = {}) {
-    // Domyślnie WSZYSTKIE textarea w formularzu wizyty rosną z zawartością
-    // (PR-J: notatki/opisy „muszą być widoczne w całości"). Wyjątek: gdy
-    // wywołujący jawnie poda `autoGrow: false` (np. 1-linijkowy komentarz
-    // sekcji w summary collapsible — narzędzie dev).
-    const autoGrow = (opts.autoGrow !== false);
-    const klass = ['psy-vf__textarea'];
-    if (opts.compact) klass.push('psy-vf__textarea--compact');
-    if (autoGrow)     klass.push('psy-vf__textarea--autogrow');
-    const ta = el('textarea', {
-        class: klass.join(' '),
-        name,
-        rows: opts.rows || 2,
-        placeholder: opts.placeholder || '',
-        readonly: opts.readonly || false
-    });
-    ta.value = initial == null ? '' : initial;
-    return ta;
-}
-
-
-function renderInput(type, name, initial = '', opts = {}) {
-    const attrs = { type, name, class: 'psy-vf__input', value: initial == null ? '' : initial };
-    if (opts.readonly) attrs.readonly = true;
-    if (opts.placeholder) attrs.placeholder = opts.placeholder;
-    if (opts.unit) attrs.dataset = { unit: opts.unit };
-    return el('input', attrs);
-}
-
-function renderSelect(name, options, initial = '') {
-    const opts = [el('option', { value: '' }, ['— wybierz —'])];
-    for (const o of options) {
-        opts.push(el('option', { value: o, selected: o === initial }, [o]));
-    }
-    return el('select', { name, class: 'psy-vf__select' }, opts);
-}
-
-function renderRadio(name, options, initial = '') {
-    const group = el('div', { class: 'psy-vf__radio-group' });
-    for (const o of options) {
-        const id = name + '_r_' + o.replace(/\W+/g, '_');
-        group.appendChild(el('label', { class: 'psy-vf__radio', for: id }, [
-            el('input', {
-                type: 'radio', id, name,
-                value: o,
-                checked: o === initial
-            }),
-            el('span', {}, [o])
-        ]));
-    }
-    return group;
-}
-
-function renderCheckboxGroup(name, options, initial = []) {
-    const group = el('div', { class: 'psy-vf__checkbox-group' });
-    const set = new Set(Array.isArray(initial) ? initial : []);
-    for (const o of options) {
-        const id = name + '_c_' + o.replace(/\W+/g, '_');
-        group.appendChild(el('label', { class: 'psy-vf__checkbox', for: id }, [
-            el('input', {
-                type: 'checkbox',
-                id,
-                name: name + '[]',
-                value: o,
-                checked: set.has(o)
-            }),
-            el('span', {}, [o])
-        ]));
-    }
-    return group;
-}
-
-/** Multi-select → renderujemy jako checkbox-group (prostsze niż <select multiple>) */
-function renderMultiSelect(name, options, initial = []) {
-    return renderCheckboxGroup(name, options, initial);
-}
-
-/* --------------------------------------------------------------------------
-   Multi-tag ICD-10 autocomplete (slot 3 dla `tag-input-icd10`).
-   `initial` może być:
-     - tablicą stringów (kodów),  np. ['F32.1','F41.1']
-     - tablicą obiektów {code, description},
-     - stringiem CSV (z `_raw[name]`), np. 'F32.1,F41.1'
-   -------------------------------------------------------------------------- */
-function normalizeIcd10Initial(initial) {
-    if (initial == null) return [];
-    let arr;
-    if (typeof initial === 'string') {
-        arr = initial.split(',').map((s) => s.trim()).filter(Boolean);
-    } else if (Array.isArray(initial)) {
-        arr = initial;
-    } else {
-        return [];
-    }
-    const out = [];
-    for (const item of arr) {
-        if (typeof item === 'string' && item.trim()) {
-            const code = item.trim().toUpperCase();
-            const hit = findIcd10ByCode(code);
-            out.push({ code, description: hit ? hit.description : '' });
-        } else if (item && typeof item === 'object' && item.code) {
-            out.push({
-                code: String(item.code).toUpperCase(),
-                description: item.description || ''
-            });
-        }
-    }
-    return out;
-}
-
-function renderTagIcd10(name, initial = []) {
-    const selected = normalizeIcd10Initial(initial);
-    let matches = [];
-    let activeIdx = -1;
-    let popover = null;
-
-    const wrap = el('div', { class: 'psy-vf__tag-icd10 psy-autocomplete' });
-    const tagsBox = el('div', { class: 'psy-vf__tag-icd10__tags' });
-    const input = el('input', {
-        type: 'text',
-        class: 'psy-vf__input psy-vf__tag-icd10__input',
-        placeholder: 'wpisz kod lub fragment opisu (np. F32…)',
-        autocomplete: 'off'
-    });
-    const hidden = el('input', { type: 'hidden', name });
-
-    function syncHidden() {
-        hidden.value = selected.map((s) => s.code).join(',');
-        // Trigger autozapisu
-        hidden.dispatchEvent(new Event('change', { bubbles: true }));
-    }
-
-    function renderTags() {
-        tagsBox.innerHTML = '';
-        selected.forEach((s, i) => {
-            const chip = el('span', {
-                class: 'psy-vf__tag-icd10__chip',
-                title: s.description || s.code
-            }, [
-                el('span', { class: 'psy-vf__tag-icd10__chip-code' }, [s.code]),
-                s.description
-                    ? el('span', { class: 'psy-vf__tag-icd10__chip-desc' }, [s.description])
-                    : null,
-                el('button', {
-                    type: 'button',
-                    class: 'psy-vf__tag-icd10__chip-remove',
-                    'aria-label': 'Usuń ' + s.code,
-                    onclick: (ev) => {
-                        ev.preventDefault();
-                        selected.splice(i, 1);
-                        syncHidden();
-                        renderTags();
-                        input.focus();
-                    }
-                }, ['✕'])
-            ]);
-            tagsBox.appendChild(chip);
-        });
-        tagsBox.style.display = selected.length ? '' : 'none';
-    }
-
-    function addEntry(code, description) {
-        const c = String(code || '').trim().toUpperCase();
-        if (!c) return false;
-        if (selected.some((s) => s.code === c)) return false;
-        selected.push({ code: c, description: description || '' });
-        syncHidden();
-        renderTags();
-        return true;
-    }
-
-    function closePopover() {
-        if (popover && popover.parentNode) popover.remove();
-        popover = null;
-        activeIdx = -1;
-    }
-
-    function renderPopover() {
-        closePopover();
-        if (!matches.length) return;
-        popover = el('div', { class: 'psy-autocomplete__popover' });
-        matches.forEach((m, i) => {
-            const item = el('div', {
-                class: 'psy-autocomplete__item' +
-                    (i === activeIdx ? ' psy-autocomplete__item--active' : ''),
-                onmousedown: (ev) => {
-                    ev.preventDefault();
-                    pickMatch(m);
-                }
-            }, [
-                el('span', { class: 'psy-autocomplete__code' }, [m.code]),
-                el('span', { class: 'psy-autocomplete__desc' }, [m.description])
-            ]);
-            popover.appendChild(item);
-        });
-        wrap.appendChild(popover);
-    }
-
-    function pickMatch(m) {
-        addEntry(m.code, m.description);
-        input.value = '';
-        matches = [];
-        closePopover();
-        input.focus();
-    }
-
-    function refreshSuggestions() {
-        const q = input.value.trim();
-        matches = q ? searchIcd10(q, 8) : [];
-        activeIdx = -1;
-        renderPopover();
-    }
-
-    input.addEventListener('input', refreshSuggestions);
-    input.addEventListener('focus', () => { if (input.value.trim()) refreshSuggestions(); });
-    input.addEventListener('blur', () => setTimeout(closePopover, 180));
-    input.addEventListener('keydown', (ev) => {
-        if (ev.key === 'ArrowDown') {
-            ev.preventDefault();
-            if (!matches.length) { refreshSuggestions(); return; }
-            activeIdx = Math.min(activeIdx + 1, matches.length - 1);
-            renderPopover();
-        } else if (ev.key === 'ArrowUp') {
-            ev.preventDefault();
-            activeIdx = Math.max(activeIdx - 1, -1);
-            renderPopover();
-        } else if (ev.key === 'Enter') {
-            ev.preventDefault();
-            if (activeIdx >= 0 && matches[activeIdx]) {
-                pickMatch(matches[activeIdx]);
-            } else if (input.value.trim()) {
-                const c = input.value.trim().toUpperCase();
-                const hit = findIcd10ByCode(c);
-                addEntry(c, hit ? hit.description : '');
-                input.value = '';
-                matches = [];
-                closePopover();
-            }
-        } else if (ev.key === 'Escape') {
-            closePopover();
-        } else if (ev.key === 'Backspace' && !input.value && selected.length > 0) {
-            selected.pop();
-            syncHidden();
-            renderTags();
-        } else if (ev.key === ',' || ev.key === ';') {
-            ev.preventDefault();
-            const c = input.value.trim().toUpperCase();
-            if (c) {
-                const hit = findIcd10ByCode(c);
-                addEntry(c, hit ? hit.description : '');
-                input.value = '';
-                matches = [];
-                closePopover();
-            }
-        }
-    });
-
-    syncHidden();
-    renderTags();
-
-    wrap.appendChild(tagsBox);
-    wrap.appendChild(input);
-    wrap.appendChild(hidden);
-    return wrap;
-}
-
-/** Specjalny renderer sekcji Używki (2.9). */
-function renderUzywkiSpecial(sectionId, raw) {
-    const { VISIT_DICT } = window.__psyVisitDict || {};
-    const list = (VISIT_DICT && VISIT_DICT.UZYWKI_11) || [];
-    const wrap = el('div', { class: 'psy-vf__uzywki' });
-
-    list.forEach((label, idx) => {
-        const checkName = sectionId + '_u_' + idx;
-        const intName   = sectionId + '_u_' + idx + '_i';
-        const noteName  = sectionId + '_u_' + idx + '_n';
-        const isChecked = raw && raw[checkName] != null
-            ? !!raw[checkName]
-            : false;
-        const intVal  = (raw && raw[intName]) || '';
-        const noteVal = (raw && raw[noteName]) || '';
-
-        const row = el('div', { class: 'psy-vf__uzywki-row' + (isChecked ? ' psy-vf__uzywki-row--checked' : '') }, [
-            el('label', { class: 'psy-vf__checkbox' }, [
-                el('input', { type: 'checkbox', name: checkName, value: '1', checked: isChecked }),
-                el('span', {}, [label])
-            ]),
-            el('div', { class: 'psy-vf__uzywki-detail', 'data-idx': idx }, [
-                renderSelect(intName,
-                    ['Nigdy', 'Okazjonalnie', 'Regularnie', 'Uzależnienie (podejrzenie / diagnoza)'],
-                    intVal
-                ),
-                el('textarea', {
-                    class: 'psy-vf__textarea psy-vf__textarea--compact psy-vf__textarea--autogrow',
-                    name: noteName,
-                    rows: 1,
-                    placeholder: 'uwagi…'
-                }, [noteVal])
-
-            ])
-        ]);
-        wrap.appendChild(row);
-    });
-
-    // Pokaż detail tylko gdy checkbox zaznaczony (delegacja)
-    wrap.addEventListener('change', (ev) => {
-        if (ev.target.type !== 'checkbox') return;
-        const row = ev.target.closest('.psy-vf__uzywki-row');
-        if (!row) return;
-        row.classList.toggle('psy-vf__uzywki-row--checked', ev.target.checked);
-    });
-
-    return wrap;
-}
-
-function renderLinkView(label, href) {
-    return el('div', { class: 'psy-vf__link-view' }, [
-        el('button', {
-            class: 'btn btn--secondary btn--sm',
-            onclick: (e) => { e.preventDefault(); window.location.hash = href; }
-        }, [label || '🔗 Przejdź']),
-        el('span', { class: 'psy-new-hint' }, [' (edytuje się w dedykowanym widoku)'])
-    ]);
-}
-
-/* --------------------------------------------------------------------------
-   renderCompactGrid (2026-06-13, klientka „dane wizyty w jednym oknie
-   tak samo jak parametry") — render WSZYSTKICH subpól sekcji w kompaktowym
-   gridzie 2-kolumnowym (label + input), zamiast jako oddzielne pozycje na
-   pasku narzędzi po lewej. Używane dla sekcji z `compactGrid: true`
-   (`visitData`, `parametry`).
-   -------------------------------------------------------------------------- */
-function renderCompactGrid(field, raw) {
-    const sectionId = field._groupId;
-    const subfields = field.subfields || [];
-
-    const wrap = el('div', {
-        class: 'psy-vf__compact-grid',
-        dataset: { section: sectionId }
-    });
-
-    for (const sf of subfields) {
-        if (sf.input && sf.input.type === 'header') continue;
-        const inputNode = renderInputForField(sectionId, sf, raw);
-        const labelTxt = sf.label + (sf.required ? ' *' : '');
-        const unit = sf.input && sf.input.unit;
-
-        const cellClasses = ['psy-vf__compact-grid-cell'];
-        if (sf.fullWidth) cellClasses.push('psy-vf__compact-grid-cell--full');
-
-        const inputWrap = unit
-            ? el('div', { class: 'psy-vf__compact-grid-input-row' }, [
-                inputNode,
-                el('span', { class: 'psy-vf__compact-grid-unit' }, [unit])
-            ])
-            : el('div', { class: 'psy-vf__compact-grid-input' }, [inputNode]);
-
-        const cell = el('div', { class: cellClasses.join(' ') }, [
-            el('div', { class: 'psy-vf__compact-grid-label' }, [labelTxt]),
-            inputWrap
-        ]);
-        wrap.appendChild(cell);
-    }
-
-    // BMI auto-compute (tylko dla sekcji `parametry`)
-    if (sectionId === 'parametry') {
-        const recomputeBmi = () => {
-            const wzInput = wrap.querySelector('input[name="parametry.wzrost"]');
-            const maInput = wrap.querySelector('input[name="parametry.masa"]');
-            const bmiInput = wrap.querySelector('input[name="parametry.bmi"]');
-            if (!wzInput || !maInput || !bmiInput) return;
-            const wz = parseFloat(wzInput.value);
-            const ma = parseFloat(maInput.value);
-            if (wz > 0 && ma > 0) {
-                const m = wz / 100;
-                const bmi = ma / (m * m);
-                if (isFinite(bmi)) bmiInput.value = bmi.toFixed(1);
-            } else {
-                bmiInput.value = '';
-            }
-        };
-        wrap.addEventListener('input', (ev) => {
-            const n = ev.target && ev.target.name;
-            if (n === 'parametry.wzrost' || n === 'parametry.masa') {
-                recomputeBmi();
-            }
-        });
-        // Initial compute (gdy pacjent ma już wzrost+wagę zapisane)
-        setTimeout(recomputeBmi, 0);
-    }
-
-    return wrap;
-}
-
-/* --------------------------------------------------------------------------
-   renderInlineDiagnoses (2026-06-13, klientka „diagnozy w wizyty") —
-   inline mini-CRUD ICD-10 rozpoznań tej wizyty. Klient nie chodzi do
-   osobnego widoku — dodaje rozpoznanie tu, w sekcji „Rozpoznanie" wizyty.
-   • Lista chipów (kod · opis · ✕).
-   • Autocomplete z `searchIcd10()` (wszystkie kody, decyzja PO 2026-06-13).
-   • Data + autor wypełniane automatycznie z kontekstu wizyty.
-   • Klient bez `_visitId` (lazy create) → najpierw woła ensureVisitId().
-   -------------------------------------------------------------------------- */
-function renderInlineDiagnoses(ctx) {
-    const { getVisitId, getPatientId } = ctx;
-
-    const wrap = el('div', { class: 'psy-vf__inline-diagnoses' });
-
-    function getList() {
-        const pid = getPatientId();
-        const vid = getVisitId(false);   // bez lazy-create — tylko odczyt
-        if (!pid || !vid) return [];
-        return Store.getDiagnoses(pid).filter((d) => d.linkedVisitId === vid);
-    }
-
-    function refresh() {
-        wrap.innerHTML = '';
-
-        // Lista chipów
-        const list = el('div', { class: 'psy-vf__inline-diagnoses__list' });
-        const items = getList();
-        if (!items.length) {
-            list.appendChild(el('div', { class: 'psy-vf__inline-diagnoses__empty' }, [
-                'Brak rozpoznań w tej wizycie. Wpisz kod ICD-10 poniżej.'
-            ]));
-        }
-        for (const d of items) {
-            list.appendChild(el('div', { class: 'psy-vf__inline-diagnoses__chip' }, [
-                el('span', { class: 'psy-vf__inline-diagnoses__chip-code' }, [d.code || '?']),
-                el('span', { class: 'psy-vf__inline-diagnoses__chip-desc' }, [
-                    d.description || '(brak opisu)'
-                ]),
-                el('button', {
-                    type: 'button',
-                    class: 'psy-vf__inline-diagnoses__chip-remove',
-                    title: 'Usuń rozpoznanie',
-                    onclick: () => {
-                        Store.removeDiagnosis(d.id);
-                        refresh();
-                    }
-                }, ['✕'])
-            ]));
-        }
-        wrap.appendChild(list);
-
-        // Autocomplete input
-        const acWrap = el('div', { class: 'psy-vf__inline-diagnoses__add psy-autocomplete' });
-        const input = el('input', {
-            type: 'text',
-            class: 'psy-vf__input',
-            placeholder: 'Dodaj rozpoznanie ICD-10 (kod lub fragment opisu)…',
-            autocomplete: 'off'
-        });
-        let popover = null;
-        let matches = [];
-        let activeIdx = -1;
-
-        function closePop() {
-            if (popover && popover.parentNode) popover.remove();
-            popover = null;
-            activeIdx = -1;
-        }
-        function renderPop() {
-            closePop();
-            if (!matches.length) return;
-            popover = el('div', { class: 'psy-autocomplete__popover' });
-            matches.forEach((m, i) => {
-                popover.appendChild(el('div', {
-                    class: 'psy-autocomplete__item' +
-                        (i === activeIdx ? ' psy-autocomplete__item--active' : ''),
-                    onmousedown: (ev) => { ev.preventDefault(); pickMatch(m); }
-                }, [
-                    el('span', { class: 'psy-autocomplete__code' }, [m.code]),
-                    el('span', { class: 'psy-autocomplete__desc' }, [m.description])
-                ]));
-            });
-            acWrap.appendChild(popover);
-        }
-        function pickMatch(m) {
-            const pid = getPatientId();
-            const vid = getVisitId(true);   // lazy create OK
-            if (!pid || !vid) return;
-            const existing = Store.getDiagnoses(pid).find(
-                (d) => d.linkedVisitId === vid && d.code === m.code
-            );
-            if (existing) {
-                input.value = '';
-                matches = [];
-                closePop();
-                return;
-            }
-            const v = Store.getVisitById(vid);
-            const visitDate = (v && v.date) || '';
-            Store.addDiagnosis({
-                patientId: pid,
-                linkedVisitId: vid,
-                code: m.code,
-                description: m.description,
-                assignedAt: visitDate,
-                author: 'lek. prowadzący',
-                status: 'aktualne'
-            });
-            input.value = '';
-            matches = [];
-            closePop();
-            refresh();
-        }
-
-        input.addEventListener('input', () => {
-            const q = input.value.trim();
-            matches = q ? searchIcd10(q, 8) : [];
-            activeIdx = -1;
-            renderPop();
-        });
-        input.addEventListener('focus', () => {
-            const q = input.value.trim();
-            if (q) {
-                matches = searchIcd10(q, 8);
-                renderPop();
-            }
-        });
-        input.addEventListener('blur', () => setTimeout(closePop, 180));
-        input.addEventListener('keydown', (ev) => {
-            if (ev.key === 'ArrowDown') {
-                ev.preventDefault();
-                if (!matches.length) {
-                    matches = searchIcd10('', 8);
-                }
-                activeIdx = Math.min(activeIdx + 1, matches.length - 1);
-                renderPop();
-            } else if (ev.key === 'ArrowUp') {
-                ev.preventDefault();
-                activeIdx = Math.max(activeIdx - 1, -1);
-                renderPop();
-            } else if (ev.key === 'Enter') {
-                ev.preventDefault();
-                if (activeIdx >= 0 && matches[activeIdx]) pickMatch(matches[activeIdx]);
-                else if (input.value.trim()) {
-                    // Manualny kod (nie ze słownika)
-                    const code = input.value.trim().toUpperCase();
-                    const hit = findIcd10ByCode(code);
-                    pickMatch({ code, description: hit ? hit.description : '' });
-                }
-            } else if (ev.key === 'Escape') {
-                closePop();
-            }
-        });
-        acWrap.appendChild(input);
-        wrap.appendChild(acWrap);
-    }
-
-    refresh();
-    return wrap;
-}
-
-/* --------------------------------------------------------------------------
-   renderInlineMeds (2026-06-13, klientka „leki w wizycie") — inline
-   mini-CRUD leków tej wizyty.
-   • Lista wierszy: nazwa handlowa + substancja (auto, r/o) + aktualna dawka
-     (number+jednostka z max dawki) + max dawka (auto, r/o) + ✕.
-   • Autocomplete z `searchMeds()` — nazwa BEZ NAWIASÓW (decyzja PO 2026-06-13).
-   • Dodanie leku natychmiast wpisuje do Store z linkedVisitId.
-   -------------------------------------------------------------------------- */
-function _extractUnit(maxDose) {
-    // „200 mg/d" → „mg/d";  „60–72 mg/d*" → „mg/d";  „wg litemii…" → ''
-    if (!maxDose) return '';
-    const m = String(maxDose).match(/[\d,.\s]+([a-zA-Z\u00C0-\u017F\/]+)(?:\s*\*+|$)/);
-    if (m && m[1]) return m[1].trim();
-    return '';
-}
-
-function renderInlineMeds(ctx) {
-    const { getVisitId, getPatientId } = ctx;
-
-    const wrap = el('div', { class: 'psy-vf__inline-meds' });
-
-    function getList() {
-        const pid = getPatientId();
-        const vid = getVisitId(false);
-        if (!pid || !vid) return [];
-        return Store.getMeds(pid).filter((m) => m.linkedVisitId === vid);
-    }
-
-    function refresh() {
-        wrap.innerHTML = '';
-        const items = getList();
-
-        // Lista wierszy
-        const list = el('div', { class: 'psy-vf__inline-meds__list' });
-        if (!items.length) {
-            list.appendChild(el('div', { class: 'psy-vf__inline-meds__empty' }, [
-                'Brak leków w tej wizycie. Wpisz nazwę handlową poniżej.'
-            ]));
-        }
-        for (const m of items) {
-            const unit = _extractUnit(m.maxDose);
-            const doseInput = el('input', {
-                type: 'number',
-                class: 'psy-vf__input psy-vf__inline-meds__dose-input',
-                value: m.dose ? String(m.dose).replace(/[^\d.,]/g, '') : '',
-                step: '0.5',
-                min: '0',
-                placeholder: 'dawka',
-                oninput: (ev) => {
-                    const v = ev.target.value.trim();
-                    Store.updateMed(m.id, { dose: v ? v + (unit ? ' ' + unit : '') : '' });
-                }
-            });
-            const row = el('div', { class: 'psy-vf__inline-meds__row' }, [
-                el('div', { class: 'psy-vf__inline-meds__name' }, [
-                    el('strong', {}, [m.name || '(bez nazwy)']),
-                    m.substance
-                        ? el('span', { class: 'psy-vf__inline-meds__substance' }, [' · ' + m.substance])
-                        : null
-                ].filter(Boolean)),
-                el('div', { class: 'psy-vf__inline-meds__dose' }, [
-                    el('label', {}, ['Aktualna: ']),
-                    doseInput,
-                    unit ? el('span', { class: 'psy-vf__inline-meds__unit' }, [unit]) : null
-                ]),
-                el('div', { class: 'psy-vf__inline-meds__maxdose', title: 'Max dawka (z bazy leków)' }, [
-                    el('label', {}, ['Max: ']),
-                    el('span', { class: 'psy-vf__inline-meds__maxdose-value' }, [m.maxDose || '—'])
-                ]),
-                el('button', {
-                    type: 'button',
-                    class: 'psy-vf__inline-meds__remove',
-                    title: 'Usuń lek',
-                    onclick: () => {
-                        Store.removeMed(m.id);
-                        refresh();
-                    }
-                }, ['✕'])
-            ]);
-            list.appendChild(row);
-        }
-        wrap.appendChild(list);
-
-        // Autocomplete input
-        const acWrap = el('div', { class: 'psy-vf__inline-meds__add psy-autocomplete' });
-        const input = el('input', {
-            type: 'text',
-            class: 'psy-vf__input',
-            placeholder: 'Dodaj lek — nazwa handlowa (np. Sertralina, Xanax, Lerivon…)',
-            autocomplete: 'off'
-        });
-        let popover = null;
-        let matches = [];
-        let activeIdx = -1;
-
-        function closePop() {
-            if (popover && popover.parentNode) popover.remove();
-            popover = null;
-            activeIdx = -1;
-        }
-        function renderPop() {
-            closePop();
-            if (!matches.length) return;
-            popover = el('div', { class: 'psy-autocomplete__popover' });
-            matches.forEach((m, i) => {
-                popover.appendChild(el('div', {
-                    class: 'psy-autocomplete__item' +
-                        (i === activeIdx ? ' psy-autocomplete__item--active' : ''),
-                    onmousedown: (ev) => { ev.preventDefault(); pickMatch(m); }
-                }, [
-                    // BEZ NAWIASÓW (decyzja PO 2026-06-13: „nazwa handlowa sama")
-                    el('span', { class: 'psy-autocomplete__code' }, [m.name]),
-                    el('span', { class: 'psy-autocomplete__desc' }, [
-                        m.substance + ' · max ' + m.maxDose
-                    ])
-                ]));
-            });
-            acWrap.appendChild(popover);
-        }
-        function pickMatch(m) {
-            const pid = getPatientId();
-            const vid = getVisitId(true);
-            if (!pid || !vid) return;
-            // Sprawdź duplikat
-            const existing = Store.getMeds(pid).find(
-                (x) => x.linkedVisitId === vid && x.name === m.name
-            );
-            if (existing) {
-                input.value = '';
-                matches = [];
-                closePop();
-                return;
-            }
-            const v = Store.getVisitById(vid);
-            const visitDate = (v && v.date) || '';
-            Store.addMed({
-                patientId: pid,
-                linkedVisitId: vid,
-                name: m.name,
-                substance: m.substance || '',
-                group: m.group || '',
-                dose: '',
-                maxDose: m.maxDose || '',
-                prescribedAt: visitDate,
-                prescribedBy: '',
-                notes: ''
-            });
-            input.value = '';
-            matches = [];
-            closePop();
-            refresh();
-        }
-
-        input.addEventListener('input', () => {
-            const q = input.value.trim();
-            matches = q ? searchMeds(q, 8) : [];
-            activeIdx = -1;
-            renderPop();
-        });
-        input.addEventListener('focus', () => {
-            const q = input.value.trim();
-            if (q) {
-                matches = searchMeds(q, 8);
-                renderPop();
-            }
-        });
-        input.addEventListener('blur', () => setTimeout(closePop, 180));
-        input.addEventListener('keydown', (ev) => {
-            if (ev.key === 'ArrowDown') {
-                ev.preventDefault();
-                if (!matches.length) matches = searchMeds('', 8);
-                activeIdx = Math.min(activeIdx + 1, matches.length - 1);
-                renderPop();
-            } else if (ev.key === 'ArrowUp') {
-                ev.preventDefault();
-                activeIdx = Math.max(activeIdx - 1, -1);
-                renderPop();
-            } else if (ev.key === 'Enter') {
-                ev.preventDefault();
-                if (activeIdx >= 0 && matches[activeIdx]) pickMatch(matches[activeIdx]);
-            } else if (ev.key === 'Escape') {
-                closePop();
-            }
-        });
-        acWrap.appendChild(input);
-        wrap.appendChild(acWrap);
-    }
-
-    refresh();
-    return wrap;
-}
-
-/** Ruter typu pola (slot 3) → właściwy renderer. */
-function renderInputForField(sectionId, field, raw) {
-    const name = sectionId + '.' + field.id;
-    const type = (field.input && field.input.type) || null;
-
-    // Wartości — szukamy w raw po name
-    const flatVal  = raw && raw[name] != null ? raw[name] : null;
-    const arrayVal = (raw && Array.isArray(raw[name])) ? raw[name] :
-                     (raw && Array.isArray(raw[name + '[]']) ? raw[name + '[]'] : []);
-
-    if (field.fullWidth || type == null) {
-        return null; // slot 3 pusty, uwagi (4) zajmą pełną szerokość
-    }
-
-    if (type === 'header') {
-        return el('div', { class: 'psy-vf__sub-header' }, [field.label]);
-    }
-
-    if (type === 'text')     return renderInput('text', name, flatVal || '');
-    if (type === 'number')   return renderInput('number', name, flatVal || '', { unit: field.input.unit, readonly: field.input.readonly });
-    if (type === 'date')     return renderInput('date', name, flatVal || '');
-    if (type === 'textarea') return renderTextarea(name, flatVal || '', { rows: 3 });
-    if (type === 'select')   return renderSelect(name, field.input.options || [], flatVal || '');
-    if (type === 'radio')    return renderRadio(name, field.input.options || [], flatVal || '');
-    if (type === 'checkbox-group') return renderCheckboxGroup(name, field.input.options || [], arrayVal);
-    if (type === 'multi-select')   return renderMultiSelect(name, field.input.options || [], arrayVal);
-    if (type === 'tag-input-icd10') return renderTagIcd10(name, flatVal || []);
-    if (type === 'link-view')      return renderLinkView(field.label, field.input.ref || '#');
-    if (type === 'uzywki-special') return renderUzywkiSpecial(sectionId, raw);
-
-    // 2026-06-13 — kompaktowy grid dla sekcji 1-okienowych (visitData, parametry)
-    if (type === 'compact-grid') return renderCompactGrid(field, raw);
-
-    // 2026-06-13 — inline diagnozy i leki (mini-CRUD w wizycie)
-    if (type === 'inline-diagnoses') {
-        if (field._inlineCtx) return renderInlineDiagnoses(field._inlineCtx);
-        return el('div', { class: 'psy-new-hint' }, ['(brak kontekstu wizyty)']);
-    }
-    if (type === 'inline-meds') {
-        if (field._inlineCtx) return renderInlineMeds(field._inlineCtx);
-        return el('div', { class: 'psy-new-hint' }, ['(brak kontekstu wizyty)']);
-    }
-
-    return el('div', { class: 'psy-new-hint' }, ['(nieznany typ: ' + type + ')']);
-}
-
-/* --------------------------------------------------------------------------
-   Render wiersza podpola (slots 2-3-4).
-   -------------------------------------------------------------------------- */
-function renderSubfieldRow(sectionId, field, raw) {
-    const inputNode = renderInputForField(sectionId, field, raw);
-
-    // Specjalny case: header
-    if (field.input && field.input.type === 'header') {
-        return el('div', { class: 'psy-vf__row psy-vf__row--header' }, [inputNode]);
-    }
-
-    const fullWidth = field.fullWidth || inputNode == null;
-    const showNotes = field.notes !== false;
-    const notesName = sectionId + '.' + field.id + '.__notes';
-    const notesVal  = (raw && raw[notesName]) || '';
-
-    const parts = [
-        el('div', { class: 'psy-vf__row-label' }, [
-            field.label + (field.required ? ' *' : '')
-        ])
-    ];
-
-    if (!fullWidth) {
-        parts.push(el('div', { class: 'psy-vf__row-input' }, [inputNode]));
-    }
-
-    if (showNotes) {
-        parts.push(el('div', {
-            class: 'psy-vf__row-notes' + (fullWidth ? ' psy-vf__row-notes--wide' : '')
-        }, [
-            renderTextarea(notesName, notesVal, {
-                compact: true,
-                rows: 1,
-                placeholder: fullWidth ? '' : 'uwagi…'
-            })
-        ]));
-    }
-
-    return el('div', {
-        class: 'psy-vf__row' +
-            (fullWidth ? ' psy-vf__row--fullwidth' : '') +
-            (!showNotes ? ' psy-vf__row--no-notes' : '')
-    }, parts);
-}
-
-/* --------------------------------------------------------------------------
-   Build preview-line dla sekcji „Dane wizyty" (sticky w schemie, ale po
-   ust. PO 2026-05-01 renderowane jako collapsible details). Pokazuje:
-   data · godzina · typ wizyty · czas trwania · osoby obecne.
-   -------------------------------------------------------------------------- */
-function buildVisitDataPreview(raw, typeObj) {
-    if (!raw) raw = {};
-    const parts = [];
-    const date = raw['visitData.data'] || '';
-    const time = raw['visitData.czasOd'] || raw['visitData.czas'] || raw['visitData.time'] || '';
-    if (date) parts.push(date + (time ? ' ' + time : ''));
-    if (typeObj && typeObj.label) parts.push(typeObj.label);
-    const dur = raw['visitData.czasTrwania'] || raw['visitData.duration'] || '';
-    if (dur) parts.push(String(dur).match(/^\d+$/) ? dur + ' min' : dur);
-    // Osoby obecne (multi-select array)
-    const persons = raw['visitData.osoby'] || raw['visitData.osobyObecne'] || raw['visitData.uczestnicy'] || [];
-    if (Array.isArray(persons) && persons.length) {
-        parts.push(persons.slice(0, 3).join(', ') + (persons.length > 3 ? '…' : ''));
-    }
-    return parts.length ? parts.join(' · ') : '(uzupełnij dane wizyty)';
-}
-
-/** Zaktualizuj preview-line w summary sekcji visitData (po zmianie pól). */
-function updateVisitDataPreview(rootEl, typeObj) {
-    if (!rootEl) return;
-    const sec = rootEl.querySelector('details[data-section="visitData"]');
-    if (!sec) return;
-    const previewSpan = sec.querySelector('.psy-vf__summary-preview');
-    if (!previewSpan) return;
-    const raw = readRawFormData(rootEl);
-    previewSpan.textContent = buildVisitDataPreview(raw, typeObj);
-}
-
-/* --------------------------------------------------------------------------
-   Render sekcji (rozdziału) — <details>/<summary>.
-   PO 2026-05-01: wszystkie sekcje są collapsible (default closed),
-   włącznie z `sticky: true` (Dane wizyty), która zyskuje preview-line
-   w summary zamiast samej etykiety.
-   -------------------------------------------------------------------------- */
-function renderSection(section, raw, ctx = {}) {
-    const commentName = section.id + '.__comment';
-    const comment     = (raw && raw[commentName]) || '';
-
-    const headerLeft = el('div', { class: 'psy-vf__summary-left' }, [
-        el('span', { class: 'psy-vf__summary-icon' }, [section.icon || '📄']),
-        el('span', { class: 'psy-vf__summary-title' }, [section.title])
-    ]);
-
-    // === Sekcja sticky (visitData) — collapsible z preview-line ===
-    if (section.sticky) {
-        const previewText = buildVisitDataPreview(raw, ctx.typeObj);
-        headerLeft.appendChild(el('span', {
-            class: 'psy-vf__summary-preview',
-            'aria-hidden': 'true'
-        }, [previewText]));
-
-        const details = el('details', {
-            class: 'psy-vf__section psy-vf__section--datadown',
-            'data-section': section.id,
-            open: false
-        });
-        const summary = el('summary', { class: 'psy-vf__summary' }, [headerLeft]);
-        details.appendChild(summary);
-
-        const body = el('div', { class: 'psy-vf__body' });
-        for (const f of section.subfields || []) {
-            body.appendChild(renderSubfieldRow(section.id, f, raw));
-        }
-        details.appendChild(body);
-        return details;
-    }
-
-    const headerRight = section.sectionComment
-        ? el('div', {
-            class: 'psy-vf__summary-right',
-            onclick: (e) => e.stopPropagation()
-        }, [
-            el('label', { class: 'psy-vf__summary-comment-label' }, ['Komentarz:']),
-            // narzędzie dev — 1-linijkowy szybki komentarz w summary; bez auto-grow,
-            // żeby nie rozjechało układu summary collapsible.
-            renderTextarea(commentName, comment, {
-                compact: true,
-                rows: 1,
-                autoGrow: false,
-                placeholder: 'krótki komentarz do rozdziału…'
-            })
-
-        ])
-        : null;
-
-    if ((section.subfields || []).length === 0) {
-        return el('section', { class: 'psy-vf__section psy-vf__section--simple' }, [
-            el('div', { class: 'psy-vf__summary psy-vf__summary--simple' }, [
-                headerLeft,
-                el('div', { class: 'psy-vf__simple-field' }, [
-                    renderTextarea(commentName, comment, {
-                        rows: 3,
-                        placeholder: 'opis / notatka dla tego rozdziału…'
-                    })
-                ])
-            ])
-        ]);
-    }
-
-    // PO 2026-05-01: wszystkie sekcje DEFAULT CLOSED (ignoruj `defaultOpen`
-    // ze schematu, żeby strona nie była zalana).
-    const details = el('details', {
-        class: 'psy-vf__section',
-        'data-section': section.id,
-        open: false
-    });
-
-    const summaryChildren = [headerLeft];
-    if (headerRight) summaryChildren.push(headerRight);
-    const summary = el('summary', { class: 'psy-vf__summary' }, summaryChildren);
-    details.appendChild(summary);
-
-    const body = el('div', { class: 'psy-vf__body' });
-    for (const f of section.subfields || []) {
-        body.appendChild(renderSubfieldRow(section.id, f, raw));
-    }
-    details.appendChild(body);
-    return details;
-}
-
-/* --------------------------------------------------------------------------
-   readRawFormData — flat-mapa stanu formularza.
-   -------------------------------------------------------------------------- */
-function readRawFormData(root) {
+function clone(v) { return JSON.parse(JSON.stringify(v || [])); }
+
+/* ==========================================================================
+   Odczyt kontrolek → wartości (`name` kontrolki = klucz w `raw`)
+   ========================================================================== */
+function readControls(scope) {
     const out = {};
-    root.querySelectorAll('input[name], select[name], textarea[name]').forEach((node) => {
+    scope.querySelectorAll('input[name], select[name], textarea[name]').forEach((node) => {
         const name = node.name;
-        if (!name) return;
-
         if (node.type === 'checkbox') {
             if (name.endsWith('[]')) {
-                const k = name.slice(0, -2); // strip '[]' for storage key
+                const k = name.slice(0, -2);
                 if (!Array.isArray(out[k])) out[k] = [];
                 if (node.checked) out[k].push(node.value);
             } else {
@@ -1075,9 +59,6 @@ function readRawFormData(root) {
         } else if (node.type === 'radio') {
             if (node.checked) out[name] = node.value;
             else if (!(name in out)) out[name] = '';
-        } else if (node.type === 'hidden') {
-            // np. CSV z renderTagIcd10
-            out[name] = node.value;
         } else {
             out[name] = node.value;
         }
@@ -1085,615 +66,774 @@ function readRawFormData(root) {
     return out;
 }
 
-/* --------------------------------------------------------------------------
-   buildSummary — krótki opis wizyty na listę historii.
-   Bierze pierwszy nie-pusty komentarz lub wartość z najwyższych sekcji.
-   -------------------------------------------------------------------------- */
-function buildSummary(raw) {
-    if (!raw) return '';
-    const candidates = [
-        raw['visitData.powod'],
-        raw['problemZdrowotny.__comment'],
-        raw['wywiad.__comment'],
-        raw['rozpoznanie.__comment'],
-        raw['oddzialywania.__comment']
-    ];
-    for (const c of candidates) {
-        if (c && typeof c === 'string' && c.trim()) {
-            const s = c.trim();
-            return s.length > 120 ? s.slice(0, 117) + '…' : s;
-        }
-    }
-    return '';
+/* ==========================================================================
+   Kontrolki edycji — proste typy
+   ========================================================================== */
+function editInput(type, name, value, opts = {}) {
+    return el('input', {
+        type, name,
+        class: 'psy-vf__input',
+        value: value == null ? '' : String(value),
+        readonly: !!opts.readonly,
+        placeholder: opts.placeholder || null,
+        step: type === 'number' ? 'any' : null
+    });
 }
 
-/* --------------------------------------------------------------------------
-   GŁÓWNY EXPORT — renderer widoku.
-   -------------------------------------------------------------------------- */
+function editTextarea(name, value, opts = {}) {
+    const ta = el('textarea', {
+        class: 'psy-vf__textarea psy-vf__textarea--autogrow' + (opts.compact ? ' psy-vf__textarea--compact' : ''),
+        name,
+        rows: opts.rows || 3,
+        placeholder: opts.placeholder || null
+    });
+    ta.value = value == null ? '' : String(value);
+    return ta;
+}
 
-/**
- * Renderuje widok formularza wizyty.
- * @param {object} opts — { isNew?: bool, typeId?: string, visitId?: string }
- */
-export function renderVisitForm(opts = {}) {
-    // Wymuś load słownika do window cache (renderUzywki nie ma importa).
-    if (!window.__psyVisitDict) {
-        import('./_visit-dict.js').then((m) => { window.__psyVisitDict = m; });
-    }
+function editSelect(name, options, value) {
+    const nodes = [el('option', { value: '' }, ['— wybierz —'])];
+    for (const o of options) nodes.push(el('option', { value: o, selected: o === value }, [o]));
+    return el('select', { name, class: 'psy-vf__select' }, nodes);
+}
 
-    const patient = Store.state.currentPatient;
-    if (!patient) {
-        const r = el('div', { class: 'psy-new-view' });
-        r.appendChild(el('div', { class: 'psy-new-view__header' }, [
-            el('div', {}, [el('h1', { class: 'psy-new-view__title' }, ['Formularz wizyty'])])
+/** Radio z możliwością odznaczenia (ponowny klik w zaznaczoną opcję czyści wybór). */
+function editRadio(name, options, value) {
+    const group = el('div', { class: 'psy-vf__radio-group' });
+    options.forEach((o, i) => {
+        const id = name.replace(/\W+/g, '_') + '_r' + i;
+        const input = el('input', { type: 'radio', id, name, value: o, checked: o === value });
+        input.dataset.was = o === value ? '1' : '0';
+        input.addEventListener('click', () => {
+            if (input.dataset.was === '1') {
+                input.checked = false;
+                input.dataset.was = '0';
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+            } else {
+                group.querySelectorAll('input[type="radio"]').forEach((r) => {
+                    r.dataset.was = r === input ? '1' : '0';
+                });
+            }
+        });
+        group.appendChild(el('label', { class: 'psy-vf__radio', for: id }, [input, el('span', {}, [o])]));
+    });
+    return group;
+}
+
+function editCheckboxes(name, options, value) {
+    const selected = new Set(listOf(value));
+    const group = el('div', { class: 'psy-vf__checkbox-group' });
+    options.forEach((o, i) => {
+        const id = name.replace(/\W+/g, '_') + '_c' + i;
+        group.appendChild(el('label', { class: 'psy-vf__checkbox', for: id }, [
+            el('input', { type: 'checkbox', id, name: name + '[]', value: o, checked: selected.has(o) }),
+            el('span', {}, [o])
         ]));
-        r.appendChild(el('div', { class: 'psy-new-view__body' }, [
-            el('div', { class: 'psy-new-hint' }, ['Wybierz pacjenta, aby rozpocząć wizytę.'])
-        ]));
-        return r;
+    });
+    return group;
+}
+
+/* ==========================================================================
+   Autocomplete (wspólny dla ICD-10 i leków)
+   - `transient`: kontrolka pomocnicza, jej wpisywanie nie jest zmianą notatki.
+   ========================================================================== */
+function attachAutocomplete(host, input, { search, itemParts, onPick, onFreeText }) {
+    let matches = [];
+    let activeIdx = -1;
+    let popover = null;
+    input.dataset.transient = '1';
+
+    function close() {
+        if (popover) popover.remove();
+        popover = null;
+        activeIdx = -1;
+    }
+    function render() {
+        close();
+        if (!matches.length) return;
+        popover = el('div', { class: 'psy-autocomplete__popover' });
+        matches.forEach((m, i) => {
+            const [code, desc] = itemParts(m);
+            popover.appendChild(el('div', {
+                class: 'psy-autocomplete__item' + (i === activeIdx ? ' psy-autocomplete__item--active' : ''),
+                // mousedown + preventDefault: wybór bez utraty fokusu pola
+                onmousedown: (ev) => { ev.preventDefault(); pick(m); }
+            }, [
+                el('span', { class: 'psy-autocomplete__code' }, [code]),
+                el('span', { class: 'psy-autocomplete__desc' }, [desc])
+            ]));
+        });
+        host.appendChild(popover);
+    }
+    function pick(m) {
+        input.value = '';
+        matches = [];
+        close();
+        onPick(m);
+    }
+    function refresh() {
+        const q = input.value.trim();
+        matches = q ? search(q) : [];
+        activeIdx = -1;
+        render();
     }
 
-    // Resolve visit / mode
-    let visit    = null;
-    let mode     = 'followup';
-    let title    = 'Nowa wizyta';
-    let _typeId  = opts.typeId || null;
-    let _visitId = opts.visitId || null;
-
-    // Typy wizyt, które wymagają pełnego wywiadu (`first` mode).
-    // PR-J4 (2026-05-11): tylko `first_meeting` wymaga pełnego wywiadu.
-    // Legacy `interview`/`diagnosis` zachowane dla wstecznej kompatybilności
-    // (stare zapisy w localStorage).
-    const FIRST_MODE_TYPES = new Set([
-        'first_meeting',
-        'interview', 'diagnosis',
-        'first', 'first-visit'
-    ]);
-
-    function resolveMode(visitType) {
-        const t = String(visitType || '').toLowerCase();
-        if (FIRST_MODE_TYPES.has(t)) return 'first';
-        if (/wywiad|first/.test(t)) return 'first';
-        return 'followup';
-    }
-
-    if (_visitId) {
-        visit = Store.getVisitById(_visitId);
-        if (!visit) {
-            const r = el('div', { class: 'psy-new-view' });
-            r.appendChild(el('div', { class: 'psy-new-view__header' }, [
-                el('div', {}, [el('h1', { class: 'psy-new-view__title' }, ['Wizyta — nie znaleziono'])])
-            ]));
-            r.appendChild(el('div', { class: 'psy-new-view__body' }, [
-                el('div', { class: 'psy-new-hint' }, [
-                    'Wizyta o ID „' + _visitId + '" nie istnieje. ',
-                    el('a', { href: '#/history', onclick: (e) => { e.preventDefault(); window.location.hash = '#/history'; } }, ['Wróć do historii'])
-                ])
-            ]));
-            return r;
+    input.addEventListener('input', refresh);
+    input.addEventListener('focus', () => { if (input.value.trim()) refresh(); });
+    input.addEventListener('blur', () => setTimeout(close, 150));
+    input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'ArrowDown') {
+            ev.preventDefault();
+            if (!matches.length) matches = search(input.value.trim());
+            activeIdx = Math.min(activeIdx + 1, matches.length - 1);
+            render();
+        } else if (ev.key === 'ArrowUp') {
+            ev.preventDefault();
+            activeIdx = Math.max(activeIdx - 1, -1);
+            render();
+        } else if (ev.key === 'Enter') {
+            ev.preventDefault();
+            if (activeIdx >= 0 && matches[activeIdx]) pick(matches[activeIdx]);
+            else if (matches.length === 1) pick(matches[0]);
+            else if (input.value.trim() && onFreeText) {
+                const text = input.value.trim();
+                input.value = '';
+                matches = [];
+                close();
+                onFreeText(text);
+            }
+        } else if (ev.key === 'Escape' && popover) {
+            ev.stopPropagation();          // Esc zamyka listę, nie cały akapit
+            close();
         }
-        mode = resolveMode(visit.type);
-        _typeId = visit.type;
-    } else if (opts.isNew) {
-        const t = _typeId ? visitTypeById(_typeId) : null;
-        mode = resolveMode(t && t.id);
-    }
+    });
+}
 
-    // Dev override (radio switcher na modebar)
-    if (window.__psyVisitFormModeOverride === 'first' ||
-        window.__psyVisitFormModeOverride === 'followup') {
-        mode = window.__psyVisitFormModeOverride;
-    }
-
-    const schema = schemaForMode(mode);
-    const initialRaw = Object.assign({}, (visit && visit.data && visit.data._raw) || {});
-
-    // Tytuł / podtytuł
-    const typeObj = visitTypeById(_typeId);
-    const isNew   = !visit;
-
-    // PR-J14b (2026-05-14, klientka): nowa wizyta = data domyślnie dzisiejsza.
-    // User może zmienić ręcznie w polu — to tylko pre-fill. Wstawiamy do
-    // initialRaw, żeby renderer pola pokazał dzisiejszą datę od razu i żeby
-    // autozapis przy pierwszej innej zmianie zachował tę datę w Store.
-    if (isNew && !initialRaw['visitData.data']) {
-        const _today = new Date();
-        const _y = _today.getFullYear();
-        const _m = String(_today.getMonth() + 1).padStart(2, '0');
-        const _d = String(_today.getDate()).padStart(2, '0');
-        initialRaw['visitData.data'] = `${_y}-${_m}-${_d}`;
-    }
-    if (isNew) {
-        title = '+ Nowa wizyta' + (typeObj ? ' · ' + typeObj.label : '');
-    } else {
-        title = 'Wizyta · ' + visit.date + (visit.time ? ' ' + visit.time : '') +
-                (typeObj ? ' · ' + typeObj.label : '');
-    }
-
-    /* ------------------ ROOT (LIVE) ----------------- */
-    const root = el('div', {
-        class: 'psy-new-view psy-visit-form-view',
-        dataset: { live: 'true' }   // app-new pomija pasywny re-render
+/* ==========================================================================
+   Hipoteza diagnostyczna — tagi ICD-10 (wartość: kody rozdzielone przecinkiem)
+   ========================================================================== */
+function editIcd10Tags(name, value) {
+    const codes = listOf(value).map((c) => String(c).toUpperCase());
+    const wrap = el('div', { class: 'psy-vf__tag-icd10 psy-autocomplete' });
+    const tagsBox = el('div', { class: 'psy-vf__tag-icd10__tags' });
+    const hidden = el('input', { type: 'hidden', name, value: codes.join(',') });
+    const input = el('input', {
+        type: 'text',
+        class: 'psy-vf__input psy-vf__tag-icd10__input',
+        placeholder: 'wpisz kod lub fragment opisu (np. F32…)',
+        autocomplete: 'off'
     });
 
-    /* ------------------ Breadcrumb ------------------ */
-    const breadcrumb = el('nav', { class: 'psy-new-breadcrumb' }, [
-        el('a', {
-            href: '#/history',
-            class: 'psy-new-breadcrumb__link',
-            onclick: (e) => { e.preventDefault(); window.location.hash = '#/history'; }
-        }, ['🗓️ Historia wizyt']),
-        el('span', { class: 'psy-new-breadcrumb__sep' }, ['›']),
-        el('span', { class: 'psy-new-breadcrumb__current' }, [title])
-    ]);
+    function commit() {
+        hidden.value = codes.join(',');
+        hidden.dispatchEvent(new Event('change', { bubbles: true }));
+        renderTags();
+    }
+    function renderTags() {
+        tagsBox.innerHTML = '';
+        codes.forEach((code, i) => {
+            const hit = findIcd10ByCode(code);
+            tagsBox.appendChild(el('span', { class: 'psy-vf__tag-icd10__chip' }, [
+                el('span', { class: 'psy-vf__tag-icd10__chip-code' }, [code]),
+                hit ? el('span', { class: 'psy-vf__tag-icd10__chip-desc' }, [hit.description]) : null,
+                el('button', {
+                    type: 'button',
+                    class: 'psy-vf__tag-icd10__chip-remove',
+                    'aria-label': 'Usuń ' + code,
+                    onclick: () => { codes.splice(i, 1); commit(); input.focus(); }
+                }, ['✕'])
+            ]));
+        });
+        tagsBox.style.display = codes.length ? '' : 'none';
+    }
+    function add(code) {
+        const c = String(code || '').trim().toUpperCase();
+        if (!c || codes.includes(c)) return;
+        codes.push(c);
+        commit();
+    }
 
-    /* ------------------ Akcje nagłówka --------------
-     * PO 2026-05-01: usunięto badge „Robocza"/„Zamknięta" i przyciski
-     * zamknij/otwórz. Zostaje: ← Wróć + 🗑 Usuń (zawsze, gdy nie isNew). */
-    const backBtn = el('button', {
-        class: 'btn btn--secondary',
-        onclick: () => { window.location.hash = '#/history'; }
-    }, ['← Wróć do listy']);
+    attachAutocomplete(wrap, input, {
+        search: (q) => searchIcd10(q, 8),
+        itemParts: (m) => [m.code, m.description],
+        onPick: (m) => { add(m.code); input.focus(); },
+        onFreeText: (text) => add(text)
+    });
+    input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Backspace' && !input.value && codes.length) { codes.pop(); commit(); }
+    });
 
-    const deleteBtn = !isNew ? el('button', {
-        class: 'btn btn--danger',
-        title: 'Usuń tę wizytę',
-        onclick: async () => {
-            const ok = await openConfirm({
-                title: 'Usunąć wizytę?',
-                message: 'Wizyta zostanie trwale usunięta. Operacji nie da się cofnąć.',
-                confirmLabel: 'Usuń',
-                variant: 'danger'
-            });
-            if (!ok) return;
-            const removed = Store.removeVisit(_visitId);
-            if (removed) {
-                window.location.hash = '#/history';
-            }
-        }
-    }, ['🗑 Usuń']) : null;
+    renderTags();
+    wrap.appendChild(tagsBox);
+    wrap.appendChild(input);
+    wrap.appendChild(hidden);
+    return wrap;
+}
 
-    /* ------------------ Header ---------------------- */
-    root.appendChild(el('div', { class: 'psy-new-view__header' }, [
-        el('div', {}, [
-            breadcrumb,
-            el('h1', { class: 'psy-new-view__title' }, [title]),
-            el('div', { class: 'psy-new-view__subtitle' }, [
-                patient.imie + ' ' + patient.nazwisko +
-                ' · tryb: ' + (mode === 'first' ? 'pierwsza wizyta (pełny wywiad)' : 'kolejna wizyta')
+/* ==========================================================================
+   Używki — 11 pozycji: zaznaczenie + intensywność + uwagi
+   ========================================================================== */
+function editUzywki(sectionId, raw) {
+    const wrap = el('div', { class: 'psy-vf__uzywki' });
+    (VISIT_DICT.UZYWKI_11 || []).forEach((label, idx) => {
+        const base = sectionId + '_u_' + idx;
+        const c = raw[base];
+        const checked = c === true || c === '1' || c === 1 || c === 'true';
+        const note = editTextarea(base + '_n', raw[base + '_n'] || '', { compact: true, rows: 1, placeholder: 'uwagi…' });
+        wrap.appendChild(el('div', {
+            class: 'psy-vf__uzywki-row' + (checked ? ' psy-vf__uzywki-row--checked' : '')
+        }, [
+            el('label', { class: 'psy-vf__checkbox' }, [
+                el('input', { type: 'checkbox', name: base, value: '1', checked }),
+                el('span', {}, [label])
+            ]),
+            el('div', { class: 'psy-vf__uzywki-detail' }, [
+                editSelect(base + '_i', VISIT_DICT.INTENSYWNOSC_UZYWEK || [], raw[base + '_i'] || ''),
+                note
             ])
-        ]),
-        el('div', { class: 'psy-new-view__actions' }, [
-            backBtn,
-            deleteBtn
-        ].filter(Boolean))
-    ]));
+        ]));
+    });
+    wrap.addEventListener('change', (ev) => {
+        if (ev.target.type !== 'checkbox') return;
+        const row = ev.target.closest('.psy-vf__uzywki-row');
+        if (row) row.classList.toggle('psy-vf__uzywki-row--checked', ev.target.checked);
+    });
+    return wrap;
+}
 
-    /* ------------------ Mode bar (dev) -------------- */
-    const modeBar = el('div', { class: 'psy-vf__modebar' }, [
-        el('span', { class: 'psy-new-hint' }, ['Tryb: ']),
-        el('label', { class: 'psy-vf__radio psy-vf__radio--inline' }, [
-            el('input', {
-                type: 'radio', name: '__mode', value: 'first',
-                checked: mode === 'first',
-                onchange: () => {
-                    window.__psyVisitFormModeOverride = 'first';
-                    if (window.AppController) window.AppController._renderView(true);
-                }
-            }),
-            el('span', {}, ['Pierwsza wizyta (pełny wywiad)'])
-        ]),
-        el('label', { class: 'psy-vf__radio psy-vf__radio--inline' }, [
-            el('input', {
-                type: 'radio', name: '__mode', value: 'followup',
-                checked: mode === 'followup',
-                onchange: () => {
-                    window.__psyVisitFormModeOverride = 'followup';
-                    if (window.AppController) window.AppController._renderView(true);
-                }
-            }),
-            el('span', {}, ['Kolejna wizyta'])
-        ]),
-        el('span', { class: 'psy-new-hint psy-vf__autosave-info' }, [
-            schema.length + ' sekcji · 💾 autozapis aktywny'
-        ])
-    ]);
+/* ==========================================================================
+   Sekcja „w jednym oknie" (Dane wizyty, Parametry somatyczne)
+   ========================================================================== */
+function editGrid(section, raw) {
+    const wrap = el('div', { class: 'psy-vf__compact-grid', dataset: { section: section.id } });
+    for (const sf of (section.subfields || [])) {
+        const control = editControl(section.id, sf, raw);
+        const unit = sf.input && sf.input.unit;
+        wrap.appendChild(el('div', {
+            class: 'psy-vf__compact-grid-cell' + (sf.fullWidth ? ' psy-vf__compact-grid-cell--full' : '')
+        }, [
+            el('div', { class: 'psy-vf__compact-grid-label' }, [sf.label + (sf.required ? ' *' : '')]),
+            unit
+                ? el('div', { class: 'psy-vf__compact-grid-input-row' }, [
+                    control, el('span', { class: 'psy-vf__compact-grid-unit' }, [unit])
+                ])
+                : el('div', { class: 'psy-vf__compact-grid-input' }, [control])
+        ]));
+    }
 
-    /* ------------------ Form body (toolbar) ----------
-     * PR-J14 (2026-05-14): zamiast collapsible sections — pasek wszystkich
-     * pól po lewej + aktywne pole po prawej. Dot indicator 🟢/⚪ wskazuje
-     * wypełnienie. Wszystkie pola spłaszczone do jednej listy z grupowaniem
-     * po sekcjach (etap przejściowy — klientka dostarczy hierarchię 1/2).
-     */
-    // 2026-06-13 — Kontekst dla inline-diagnoses/inline-meds (closure).
-    // Renderery te potrzebują dostępu do bieżącego visitId i ensureVisitExists
-    // (lazy-create), więc opakowujemy w gettery przekazywane przez `_inlineCtx`.
-    const inlineCtx = {
-        getPatientId: () => patient.id,
-        getVisitId: (allowLazyCreate) => {
-            if (_visitId) return _visitId;
-            if (allowLazyCreate) {
-                ensureVisitExists();
-                return _visitId;
-            }
-            return null;
+    if (section.id === 'parametry') {
+        const q = (id) => wrap.querySelector('input[name="parametry.' + id + '"]');
+        // Listener na `wrap` odpala się przed listenerem formularza (bąbelkowanie),
+        // więc przeliczone BMI trafia do stanu razem ze wzrostem / wagą.
+        wrap.addEventListener('input', (ev) => {
+            const n = ev.target && ev.target.name;
+            if (n !== 'parametry.wzrost' && n !== 'parametry.masa') return;
+            const cm = parseFloat(String(q('wzrost').value).replace(',', '.'));
+            const kg = parseFloat(String(q('masa').value).replace(',', '.'));
+            q('bmi').value = (cm > 0 && kg > 0) ? (kg / Math.pow(cm / 100, 2)).toFixed(1) : '';
+        });
+    }
+    return wrap;
+}
+
+/* ==========================================================================
+   Rozpoznania tej wizyty (ICD-10: jedno pole „kod — opis")
+   ========================================================================== */
+function editDiagnoses(ctx) {
+    const wrap = el('div', { class: 'psy-vf__inline-diagnoses' });
+    const list = el('div', { class: 'psy-vf__inline-diagnoses__list' });
+    const addBox = el('div', { class: 'psy-vf__inline-diagnoses__add psy-autocomplete' });
+    const input = el('input', {
+        type: 'text',
+        class: 'psy-vf__input',
+        placeholder: 'Dodaj rozpoznanie — kod ICD-10 lub fragment opisu…',
+        autocomplete: 'off'
+    });
+
+    function renderList() {
+        list.innerHTML = '';
+        const items = ctx.data.diagnoses;
+        if (!items.length) {
+            list.appendChild(el('div', { class: 'psy-vf__inline-diagnoses__empty' },
+                ['Brak rozpoznań w tej wizycie.']));
         }
-    };
+        items.forEach((d, i) => {
+            list.appendChild(el('div', { class: 'psy-vf__inline-diagnoses__chip' }, [
+                el('span', { class: 'psy-vf__inline-diagnoses__chip-code' }, [d.code || '?']),
+                el('span', { class: 'psy-vf__inline-diagnoses__chip-desc' }, [d.description || '(kod spoza słownika)']),
+                el('button', {
+                    type: 'button',
+                    class: 'psy-vf__inline-diagnoses__chip-remove',
+                    title: 'Usuń rozpoznanie',
+                    onclick: () => { items.splice(i, 1); ctx.changed(); renderList(); }
+                }, ['✕'])
+            ]));
+        });
+    }
+    function add(code, description) {
+        const c = String(code || '').trim().toUpperCase();
+        if (!c || ctx.data.diagnoses.some((d) => d.code === c)) return;
+        ctx.data.diagnoses.push({ code: c, description: description || '' });
+        ctx.changed();
+        renderList();
+    }
 
+    attachAutocomplete(addBox, input, {
+        search: (q) => searchIcd10(q, 8),
+        itemParts: (m) => [m.code, m.description],
+        onPick: (m) => { add(m.code, m.description); input.focus(); },
+        onFreeText: (text) => {
+            const hit = findIcd10ByCode(text.toUpperCase());
+            add(text, hit ? hit.description : '');
+        }
+    });
+
+    renderList();
+    addBox.appendChild(input);
+    wrap.appendChild(list);
+    wrap.appendChild(addBox);
+    return wrap;
+}
+
+/* ==========================================================================
+   Leki tej wizyty
+   - nazwa handlowa (sama, bez nawiasu), substancja i grupa ze słownika,
+   - aktualna dawka = liczba, jednostka taka jak w dawce maksymalnej,
+   - dawka maksymalna tylko do odczytu.
+   ========================================================================== */
+
+/** „200 mg/d" → „mg/d";  „wg litemii; zwykle 1200–1500 mg/d*" → „mg/d". */
+export function unitFromMaxDose(maxDose) {
+    const m = String(maxDose || '').match(/\d[\d.,–-]*\s*([a-zA-Zµ]+(?:\/[a-zA-Z]+)*)\*?\s*$/);
+    return m ? m[1] : '';
+}
+
+function editMeds(ctx) {
+    const wrap = el('div', { class: 'psy-vf__inline-meds' });
+    const list = el('div', { class: 'psy-vf__inline-meds__list' });
+    const addBox = el('div', { class: 'psy-vf__inline-meds__add psy-autocomplete' });
+    const input = el('input', {
+        type: 'text',
+        class: 'psy-vf__input',
+        placeholder: 'Dodaj lek — nazwa handlowa lub substancja…',
+        autocomplete: 'off'
+    });
+
+    function renderList(focusIdx = -1) {
+        list.innerHTML = '';
+        const items = ctx.data.meds;
+        if (!items.length) {
+            list.appendChild(el('div', { class: 'psy-vf__inline-meds__empty' }, ['Brak leków w tej wizycie.']));
+        }
+        items.forEach((m, i) => {
+            const dose = el('input', {
+                type: 'number',
+                class: 'psy-vf__input psy-vf__inline-meds__dose-input',
+                value: isBlank(m.dose) ? '' : String(m.dose),
+                step: 'any', min: '0',
+                placeholder: 'dawka',
+                'aria-label': 'Aktualna dawka — ' + (m.name || ''),
+                dataset: { transient: '1' },
+                oninput: (ev) => { m.dose = ev.target.value.trim(); ctx.changed(); }
+            });
+            // Lek spoza słownika nie ma dawki maksymalnej — jednostkę wpisuje się ręcznie.
+            const unit = m.maxDose
+                ? (m.unit ? el('span', { class: 'psy-vf__inline-meds__unit' }, [m.unit]) : null)
+                : el('input', {
+                    type: 'text',
+                    class: 'psy-vf__input psy-vf__inline-meds__dose-input',
+                    value: m.unit || '',
+                    placeholder: 'jedn.',
+                    'aria-label': 'Jednostka dawki',
+                    dataset: { transient: '1' },
+                    oninput: (ev) => { m.unit = ev.target.value.trim(); ctx.changed(); }
+                });
+            list.appendChild(el('div', { class: 'psy-vf__inline-meds__row' }, [
+                el('div', { class: 'psy-vf__inline-meds__name', title: m.group || null }, [
+                    el('strong', {}, [m.name || '(bez nazwy)']),
+                    m.substance ? el('span', { class: 'psy-vf__inline-meds__substance' }, [' · ' + m.substance]) : null
+                ]),
+                el('div', { class: 'psy-vf__inline-meds__dose' }, [el('label', {}, ['Aktualna:']), dose, unit]),
+                el('div', { class: 'psy-vf__inline-meds__maxdose', title: 'Dawka maksymalna (z bazy leków)' }, [
+                    el('label', {}, ['Max:']),
+                    el('span', { class: 'psy-vf__inline-meds__maxdose-value' }, [m.maxDose || '—'])
+                ]),
+                el('button', {
+                    type: 'button',
+                    class: 'psy-vf__inline-meds__remove',
+                    title: 'Usuń lek',
+                    onclick: () => { items.splice(i, 1); ctx.changed(); renderList(); }
+                }, ['✕'])
+            ]));
+            if (i === focusIdx) setTimeout(() => { try { dose.focus(); } catch (_) { /* */ } }, 0);
+        });
+    }
+    function add(med) {
+        if (ctx.data.meds.some((x) => x.name === med.name)) return;
+        ctx.data.meds.push(med);
+        ctx.changed();
+        renderList(ctx.data.meds.length - 1);   // kursor od razu w polu dawki
+    }
+
+    attachAutocomplete(addBox, input, {
+        search: (q) => searchMeds(q, 8),
+        itemParts: (m) => [m.name, m.substance + ' · max ' + m.maxDose],
+        onPick: (m) => add({
+            name: m.name,
+            substance: m.substance || '',
+            group: m.group || '',
+            dose: '',
+            unit: unitFromMaxDose(m.maxDose),
+            maxDose: m.maxDose || ''
+        }),
+        onFreeText: (text) => add({ name: text, substance: '', group: '', dose: '', unit: 'mg/d', maxDose: '' })
+    });
+
+    renderList();
+    addBox.appendChild(input);
+    wrap.appendChild(list);
+    wrap.appendChild(addBox);
+    return wrap;
+}
+
+/* ==========================================================================
+   Kontrolka wg typu pola
+   ========================================================================== */
+function editControl(sectionId, field, raw, ctx) {
+    const name = fieldKey(sectionId, field.id);
+    const input = field.input || { type: 'textarea' };
+    const value = raw[name];
+    switch (input.type) {
+        case 'text':            return editInput('text', name, value);
+        case 'number':          return editInput('number', name, value, { readonly: input.readonly });
+        case 'date':            return editInput('date', name, value);
+        case 'textarea':        return editTextarea(name, value);
+        case 'select':          return editSelect(name, input.options || [], value || '');
+        case 'radio':           return editRadio(name, input.options || [], value || '');
+        case 'checkbox-group':
+        case 'multi-select':    return editCheckboxes(name, input.options || [], value);
+        case 'tag-input-icd10': return editIcd10Tags(name, value);
+        case 'uzywki-special':  return editUzywki(sectionId, raw);
+        case 'inline-diagnoses': return editDiagnoses(ctx);
+        case 'inline-meds':     return editMeds(ctx);
+        default:
+            return el('div', { class: 'psy-new-hint' }, ['(nieobsługiwany typ pola: ' + input.type + ')']);
+    }
+}
+
+/* ==========================================================================
+   Tryb odczytu — „gotowa notatka" (same wybrane wartości / tekst)
+   ========================================================================== */
+function readText(text) {
+    const div = el('div', { class: 'psy-form-toolbar__entry-text' }, [text]);
+    div.style.whiteSpace = 'pre-wrap';
+    return div;
+}
+
+function readEmpty() {
+    return el('div', { class: 'psy-form-toolbar__entry-empty' }, ['(puste — kliknij, aby uzupełnić)']);
+}
+
+function readLines(lines) {
+    return el('div', { class: 'psy-form-toolbar__entry-text' },
+        lines.map((parts) => el('div', {}, parts)));
+}
+
+function readField(sectionId, field, raw, data) {
+    const type = (field.input && field.input.type) || 'textarea';
+
+    if (type === 'inline-diagnoses') {
+        if (!data.diagnoses.length) return readEmpty();
+        return readLines(data.diagnoses.map((d) => [
+            el('strong', { style: { fontFamily: 'monospace' } }, [d.code || '?']),
+            d.description ? ' — ' + d.description : ''
+        ]));
+    }
+    if (type === 'inline-meds') {
+        if (!data.meds.length) return readEmpty();
+        return readLines(data.meds.map((m) => {
+            const dose = medDoseText(m);
+            return [
+                el('strong', {}, [m.name || '(bez nazwy)']),
+                m.substance ? ' (' + m.substance + ')' : '',
+                dose ? ' — ' + dose : '',
+                m.maxDose ? el('span', { class: 'psy-new-hint' }, [' · max ' + m.maxDose]) : null
+            ];
+        }));
+    }
+    if (type === 'uzywki-special') {
+        const entries = uzywkiEntries(sectionId, raw);
+        if (!entries.length) return readEmpty();
+        return readLines(entries.map((u) => [
+            el('strong', {}, [u.label.split(':')[0]]),
+            u.intensity ? ' — ' + u.intensity : '',
+            u.notes ? el('span', { class: 'psy-new-hint' }, [' · ' + u.notes]) : null
+        ]));
+    }
+    if (type === 'multi-select' || type === 'checkbox-group') {
+        const items = listOf(raw[fieldKey(sectionId, field.id)]);
+        if (!items.length) return readEmpty();
+        return el('div', { class: 'psy-form-toolbar__entry-tags' },
+            items.map((item) => el('span', { class: 'psy-form-toolbar__entry-tag' }, [item])));
+    }
+    if (type === 'tag-input-icd10') {
+        const codes = listOf(raw[fieldKey(sectionId, field.id)]);
+        if (!codes.length) return readEmpty();
+        return readLines(codes.map((code) => {
+            const hit = findIcd10ByCode(String(code).toUpperCase());
+            return [diagnosisText({ code: String(code).toUpperCase(), description: hit ? hit.description : '' })];
+        }));
+    }
+    const text = fieldText(sectionId, field, raw, data);
+    return text ? readText(text) : readEmpty();
+}
+
+function readGrid(section, raw, data) {
+    const rows = [];
+    for (const sf of (section.subfields || [])) {
+        const text = fieldText(section.id, sf, raw, data);
+        if (!text) continue;
+        rows.push(el('div', { class: 'psy-vf__read-grid-label' }, [sf.label.replace(/\s*\(auto\)$/, '') + ':']));
+        const val = el('div', { class: 'psy-vf__read-grid-value' }, [text]);
+        val.style.whiteSpace = 'pre-wrap';
+        rows.push(val);
+    }
+    return rows.length ? el('div', { class: 'psy-vf__read-grid' }, rows) : readEmpty();
+}
+
+/* ==========================================================================
+   Widoki pomocnicze
+   ========================================================================== */
+function messageView(title, children) {
+    return el('div', { class: 'psy-new-view' }, [
+        el('div', { class: 'psy-new-view__header' }, [
+            el('div', {}, [el('h1', { class: 'psy-new-view__title' }, [title])])
+        ]),
+        el('div', { class: 'psy-new-view__body' }, [el('div', { class: 'psy-new-hint' }, children)])
+    ]);
+}
+
+/* ==========================================================================
+   GŁÓWNY EXPORT
+   @param {object} opts — { isNew?: boolean, typeId?: string, visitId?: string }
+   ========================================================================== */
+export function renderVisitForm(opts = {}) {
+    const patient = Store.state.currentPatient;
+    if (!patient) return messageView('Formularz wizyty', ['Wybierz pacjenta, aby rozpocząć wizytę.']);
+
+    let visitId = opts.visitId || null;
+    const visit = visitId ? Store.getVisitById(visitId) : null;
+    if (visitId && (!visit || visit.patientId !== patient.id)) {
+        return messageView('Wizyta — nie znaleziono', [
+            'Ta wizyta nie istnieje u wybranego pacjenta. ',
+            el('a', { href: '#/history' }, ['Wróć do historii wizyt'])
+        ]);
+    }
+
+    const typeId = visit ? visit.type : (visitTypeById(opts.typeId) ? opts.typeId : DEFAULT_VISIT_TYPE);
+    const typeObj = visitTypeById(typeId);
+    const mode = visitMode(typeId);
+    const schema = schemaForMode(mode);
+
+    /* ---------------- stan formularza (jedno źródło prawdy) ---------------- */
+    const raw = Object.assign({}, (visit && visit.data && visit.data._raw) || {});
+    const data = {
+        meds: clone(visit && visit.data && visit.data.meds),
+        diagnoses: clone(visit && visit.data && visit.data.diagnoses)
+    };
+    // Nowa wizyta: data domyślnie dzisiejsza (zapisze się przy pierwszej zmianie).
+    if (!visit && isBlank(raw['visitData.data'])) raw['visitData.data'] = todayISO();
+
+    let dirty = false;
+    let deleted = false;
+    let saveTimer = null;
+
+    /* ---------------- pola paska ---------------- */
     const groups = schema.map((section) => {
-        // 2026-06-13 — sekcje `compactGrid: true` (visitData, parametry):
-        // zamiast listy per-field na pasku po lewej, jedno wirtualne pole
-        // `__grid` które wyrenderuje WSZYSTKIE subfields w 1-okiennym
-        // kompaktowym gridzie (klientka „w jednym oknie tak jak parametry").
         if (section.compactGrid) {
             return {
-                id: section.id,
-                title: section.title,
-                fields: [{
-                    id: '__grid',
-                    label: section.title,
-                    input: { type: 'compact-grid' },
-                    subfields: (section.subfields || []).filter(
-                        (f) => !(f.input && f.input.type === 'header')
-                    ),
-                    fullWidth: true,
-                    notes: false
-                }]
+                id: section.id, title: section.title,
+                fields: [{ id: '__grid', label: section.title, input: { type: 'compact-grid' }, section, notes: false }]
             };
         }
-
-        const fields = (section.subfields || [])
-            .filter((f) => !(f.input && f.input.type === 'header'))
-            .map((f) => {
-                const out = { ...f };
-                // 2026-06-13 — wstrzyknij kontekst dla inline-diagnoses/inline-meds
-                const t = f.input && f.input.type;
-                if (t === 'inline-diagnoses' || t === 'inline-meds') {
-                    out._inlineCtx = inlineCtx;
-                }
-                return out;
-            });
-        // Komentarz sekcji jako wirtualne pole (dawny slot 5 — textarea).
+        const fields = (section.subfields || []).filter((f) => !(f.input && f.input.type === 'header'));
+        const out = fields.slice();
         if (section.sectionComment) {
-            fields.push({
+            out.push({
                 id: '__comment',
-                label: 'Komentarz sekcji',
+                // Sekcja bez własnych pól = jeden opis pod nazwą sekcji.
+                label: fields.length ? 'Komentarz sekcji' : section.title,
                 input: { type: 'textarea' },
                 notes: false
             });
         }
-        return { id: section.id, title: section.title, fields };
+        return { id: section.id, title: section.title, fields: out };
     });
 
-    function _fieldRenderer(field, raw) {
-        return renderInputForField(field._groupId, field, raw);
+    const ctx = { data, changed: () => markDirty() };
+
+    function gridFilled(section) {
+        return (section.subfields || []).some((sf) => isFieldFilled(section.id, sf, raw, data));
     }
 
-    function _fieldIsFilled(field, raw) {
-        if (!raw) return false;
-        const t = field.input && field.input.type;
-
-        // 2026-06-13 — compact-grid wypełniony gdy KTÓRYKOLWIEK subfield ma wartość
-        if (t === 'compact-grid') {
-            const subfields = field.subfields || [];
-            for (const sf of subfields) {
-                const k = field._groupId + '.' + sf.id;
-                const sv = raw[k];
-                if (sv == null) continue;
-                if (typeof sv === 'string' && sv.trim()) return true;
-                if (Array.isArray(sv) && sv.length) return true;
-                if (typeof sv === 'boolean' && sv) return true;
-                if (typeof sv === 'number' && sv !== 0) return true;
-            }
-            return false;
-        }
-
-        // 2026-06-13 — inline-diagnoses/inline-meds: sprawdź czy są rekordy w Store
-        // z linkedVisitId == bieżąca wizyta
-        if (t === 'inline-diagnoses' || t === 'inline-meds') {
-            if (!field._inlineCtx) return false;
-            const pid = field._inlineCtx.getPatientId();
-            const vid = field._inlineCtx.getVisitId(false);
-            if (!pid || !vid) return false;
-            const list = t === 'inline-diagnoses'
-                ? Store.getDiagnoses(pid)
-                : Store.getMeds(pid);
-            return list.some((x) => x.linkedVisitId === vid);
-        }
-
-        const key = field._groupId + '.' + field.id;
-        const v = raw[key];
-        if (v == null) return false;
-        if (typeof v === 'string') return v.trim() !== '';
-        if (Array.isArray(v)) return v.length > 0;
-        if (typeof v === 'boolean') return v;
-        if (typeof v === 'number') return v !== 0;
-        return !!v;
+    function isFilled(field) {
+        if (field.id === '__grid') return gridFilled(field.section);
+        return isFieldFilled(field._groupId, field, raw, data);
     }
 
-    function _fieldNotesValue(field, raw) {
-        const key = field._groupId + '.' + field.id + '.__notes';
-        return (raw && raw[key]) || '';
-    }
-
-    function _showFieldNotes(field) {
-        if (!field) return false;
-        if (field.notes === false) return false;
-        const t = field.input && field.input.type;
-        // Pomijamy notes dla typów, które mają własne UI lub są syntetycznymi
-        // polami komentarzy (slot 4 byłby duplikatem).
-        if (t === 'textarea' || t === 'header' ||
-            t === 'link-view' || t === 'uzywki-special') return false;
-        if (field.id === '__comment') return false;
-        return true;
-    }
-
-    // PR-J14b (2026-05-14, klientka): preview wartości pola obok labela
-    // na pasku po lewej, mniejszą czcionką. Sprawia że bez klika widać
-    // co już jest wpisane (np. „Data wizyty / 2026-05-14").
-    function _fieldPreview(field, raw) {
-        if (!raw || !field) return '';
-        const t = field.input && field.input.type;
-        // Pola bez sensownego preview (special-UI, headery, link-out).
-        if (t === 'header' || t === 'link-view' || t === 'uzywki-special') {
-            return '';
-        }
-
-        // 2026-06-13 — compact-grid: pierwsze 2 wypełnione subfields
-        if (t === 'compact-grid') {
-            const subfields = field.subfields || [];
+    function preview(field) {
+        const cut = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+        const type = field.input && field.input.type;
+        if (field.id === '__grid') {
             const parts = [];
-            for (const sf of subfields) {
-                const k = field._groupId + '.' + sf.id;
-                const sv = raw[k];
-                if (sv == null) continue;
-                let display = '';
-                if (Array.isArray(sv)) display = sv.length ? sv.join(', ') : '';
-                else if (typeof sv === 'boolean') display = sv ? 'tak' : 'nie';
-                else display = String(sv).trim();
-                if (!display) continue;
-                parts.push(display.length > 30 ? display.slice(0, 27) + '…' : display);
+            for (const sf of (field.section.subfields || [])) {
+                const t = fieldText(field.section.id, sf, raw, data);
+                if (t) parts.push(cut(t.replace(/\s+/g, ' '), 28));
                 if (parts.length >= 2) break;
             }
             return parts.join(' · ');
         }
-
-        // 2026-06-13 — inline-diagnoses: lista kodów ICD-10
-        if (t === 'inline-diagnoses') {
-            if (!field._inlineCtx) return '';
-            const pid = field._inlineCtx.getPatientId();
-            const vid = field._inlineCtx.getVisitId(false);
-            if (!pid || !vid) return '';
-            const list = Store.getDiagnoses(pid).filter((d) => d.linkedVisitId === vid);
-            if (!list.length) return '';
-            const codes = list.slice(0, 3).map((d) => d.code || '?');
-            return codes.join(', ') + (list.length > 3 ? ` (+${list.length - 3})` : '');
+        if (type === 'inline-meds') return cut(data.meds.map((m) => m.name).join(', '), 80);
+        if (type === 'inline-diagnoses') return cut(data.diagnoses.map((d) => d.code).join(', '), 80);
+        if (type === 'uzywki-special') {
+            const n = uzywkiEntries(field._groupId, raw).length;
+            return n ? n + ' ' + (n === 1 ? 'pozycja' : (n < 5 ? 'pozycje' : 'pozycji')) : '';
         }
-
-        // 2026-06-13 — inline-meds: lista nazw handlowych
-        if (t === 'inline-meds') {
-            if (!field._inlineCtx) return '';
-            const pid = field._inlineCtx.getPatientId();
-            const vid = field._inlineCtx.getVisitId(false);
-            if (!pid || !vid) return '';
-            const list = Store.getMeds(pid).filter((m) => m.linkedVisitId === vid);
-            if (!list.length) return '';
-            const names = list.slice(0, 3).map((m) => m.name || '(?)');
-            return names.join(', ') + (list.length > 3 ? ` (+${list.length - 3})` : '');
-        }
-
-        const key = field._groupId + '.' + field.id;
-        const v = raw[key];
-        if (v == null) return '';
-        if (Array.isArray(v)) {
-            if (!v.length) return '';
-            if (v.length <= 3) return v.join(', ');
-            return v.slice(0, 3).join(', ') + ` … (+${v.length - 3})`;
-        }
-        if (typeof v === 'boolean') return v ? 'tak' : 'nie';
-        const s = String(v).trim();
-        if (!s) return '';
-        // Skróć długie textarea — pasek ma ograniczoną szerokość, ellipsis
-        // doda się w CSS, ale dodatkowo hard-cap żeby DOM nie wybuchł.
-        if (s.length > 80) return s.slice(0, 77) + '…';
-        return s;
+        if (type === 'tag-input-icd10') return cut(listOf(raw[fieldKey(field._groupId, field.id)]).join(', '), 80);
+        return cut(fieldText(field._groupId, field, raw, data).replace(/\s+/g, ' '), 80);
     }
-
-    // PR-J16 (2026-05-16) — read-renderer dla growing journal.
-    // Render pola w trybie read-mode: tekst, lista tagów lub specjalny widok.
-    // Dla 3 special-types (tag-input-icd10, uzywki-special, link-view) zwracamy
-    // null → toolbar fallback do edit-mode wszędzie (input zawsze widoczny).
-    function _fieldReadRenderer(field, raw) {
-        if (!field) return null;
-        const t = field.input && field.input.type;
-        // Special types — fallback do edit-mode (toolbar pokaże input).
-        // 2026-06-13 — compact-grid + inline-diagnoses + inline-meds:
-        //   te typy mają już z natury kompaktowy widok (grid label:value /
-        //   lista chipów z autocomplete). Read=edit, więc null żeby toolbar
-        //   pokazał edit (klientka klikiem w sekcję otwiera edit — tutaj
-        //   sekcja zawsze jest „edit-ready").
-        if (t === 'tag-input-icd10' || t === 'uzywki-special' || t === 'link-view' ||
-            t === 'compact-grid' || t === 'inline-diagnoses' || t === 'inline-meds') {
-            return null;
-        }
-        const key = field._groupId + '.' + field.id;
-        const v = raw && raw[key];
-
-        // Pusta wartość — placeholder
-        const isEmptyVal = v == null ||
-            (typeof v === 'string' && !v.trim()) ||
-            (Array.isArray(v) && !v.length);
-        if (isEmptyVal) {
-            const div = document.createElement('div');
-            div.className = 'psy-form-toolbar__entry-empty';
-            div.textContent = '(puste — kliknij, aby uzupełnić)';
-            return div;
-        }
-
-        // checkbox-group / multi-select — lista tagów
-        if (t === 'checkbox-group' || t === 'multi-select') {
-            const arr = Array.isArray(v) ? v : (typeof v === 'string' ? v.split(',').map(s => s.trim()).filter(Boolean) : []);
-            const wrap = document.createElement('div');
-            wrap.className = 'psy-form-toolbar__entry-tags';
-            for (const item of arr) {
-                const tag = document.createElement('span');
-                tag.className = 'psy-form-toolbar__entry-tag';
-                tag.textContent = item;
-                wrap.appendChild(tag);
-            }
-            return wrap;
-        }
-
-        // boolean / checkbox single
-        if (typeof v === 'boolean') {
-            const div = document.createElement('div');
-            div.className = 'psy-form-toolbar__entry-text';
-            div.textContent = v ? '✓ Tak' : '✗ Nie';
-            return div;
-        }
-
-        // textarea / text / select / radio / date / number — paragraph
-        const div = document.createElement('div');
-        div.className = 'psy-form-toolbar__entry-text';
-        div.style.whiteSpace = 'pre-wrap';
-        div.textContent = String(v);
-        return div;
-    }
-
-    // PR-J16a (2026-05-16) — preview tekstu pod nagłówkiem sekcji w pasku,
-    // gdy sekcja jest zwinięta. Klientka: „małe podsumowanie mniejsza czcionka
-    // w sekcji — zrobmy na razie tylko dane wizyty, jako podsumowanie wstawmy
-    // początek Powód zgłoszenia". Inne sekcje na razie bez preview.
-    function _groupPreview(group, raw) {
-        if (!group || !raw) return '';
-        if (group.id === 'visitData') {
-            const powod = raw['visitData.powod'];
-            if (powod && typeof powod === 'string' && powod.trim()) {
-                const s = powod.trim();
-                return s.length > 60 ? s.slice(0, 57) + '…' : s;
-            }
-        }
-        return '';
-    }
-
-    // PR-J16: hiddenFields per wizyta (klik X w akapicie — persisted).
-    const initialHidden = (visit && visit.data && Array.isArray(visit.data._hiddenFields))
-        ? visit.data._hiddenFields.slice()
-        : [];
 
     const toolbar = createFormToolbar({
         groups,
-        values: initialRaw,
-        fieldRenderer: _fieldRenderer,
-        fieldNotesValue: _fieldNotesValue,
-        fieldIsFilled: _fieldIsFilled,
-        showFieldNotes: _showFieldNotes,
-        fieldPreview: _fieldPreview,
-        // PR-J16 — tryb growing journal
-        mode: 'journal',
-        hiddenFields: initialHidden,
-        onHiddenFieldsChange: (newArray) => {
-            // Persyst do Store natychmiast (bez debounce — to user action)
-            const id = _visitId || (ensureVisitExists() && _visitId);
-            if (!id) return;
-            const cur = Store.getVisitById(id);
-            const data = (cur && cur.data) || { _raw: {} };
-            Store.updateVisit(id, { data: { ...data, _hiddenFields: newArray } });
+        values: raw,
+        isFilled,
+        preview,
+        renderEdit: (field) => (field.id === '__grid'
+            ? editGrid(field.section, raw)
+            : editControl(field._groupId, field, raw, ctx)),
+        renderRead: (field) => (field.id === '__grid'
+            ? readGrid(field.section, raw, data)
+            : readField(field._groupId, field, raw, data)),
+        groupPreview: (group) => {
+            if (group.id !== 'visitData') return '';
+            const s = String(raw['visitData.powod'] || '').trim();
+            return s.length > 60 ? s.slice(0, 57) + '…' : s;
         },
-        readRenderer: _fieldReadRenderer,
-        // PR-J16a — preview pod nagłówkiem sekcji (gdy zwinięta)
-        groupPreview: _groupPreview
+        // Uwagi mają sens przy polach wyboru; pole tekstowe samo jest opisem.
+        showNotes: (field) => {
+            if (field.notes === false) return false;
+            const t = field.input && field.input.type;
+            return !['textarea', 'compact-grid', 'uzywki-special', 'inline-meds', 'inline-diagnoses', 'link-view'].includes(t);
+        },
+        notesValue: (field) => raw[fieldKey(field._groupId, field.id) + '.__notes'] || ''
     });
 
+    /* ---------------- zapis ---------------- */
+    function persist() {
+        if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+        if (!dirty || deleted) return;
+        dirty = false;
 
+        const date = isBlank(raw['visitData.data']) ? ((visit && visit.date) || todayISO()) : raw['visitData.data'];
+        const payload = { _raw: Object.assign({}, raw), meds: clone(data.meds), diagnoses: clone(data.diagnoses) };
+        const summary = visitSummary({ data: payload });
 
-    root.appendChild(modeBar);
-    root.appendChild(toolbar);
-
-    /* ------------------ Autozapis -------------------- */
-    let _autosaveTimer = null;
-
-    function ensureVisitExists() {
-        if (_visitId) return Store.getVisitById(_visitId);
-        // Lazy create — pierwsza zmiana w polu (closed=false legacy)
-        const created = Store.addVisit({
-            patientId: patient.id,
-            type: _typeId || 'followup',
-            closed: false,
-            data: { _raw: {} }
-        });
-        _visitId = created.id;
-        // Zmień hash bez triggerowania hashchange (re-renderu)
-        try {
-            history.replaceState(null, '', '#/visit/form/' + _visitId);
-        } catch (_) { /* SecurityError fallback */ }
-        return created;
-    }
-
-    function autosaveNow() {
-        const id = _visitId || (ensureVisitExists() && _visitId);
-        if (!id) return;
-        // KRYTYCZNE (PR-J14b 2026-05-14): toolbar renderuje TYLKO aktywne pole,
-        // więc `readRawFormData(toolbar)` daje tylko świeże wartości WIDOCZNYCH
-        // pól. Bez merge'a z istniejącym stanem Store, wartości pól nieobecnych
-        // w bieżącym DOM zostałyby SKASOWANE (Store.updateVisit nadpisuje
-        // `data._raw` w całości). Klientka raport: „jak wypełniam następne to
-        // zaznacza się zielona kropka w nowym, a w poprzednim robi się biała".
-        //
-        // PR-J14c (2026-05-14, klientka 2): pre-fille (np. domyślna data
-        // dzisiejsza) muszą być w merge na PIERWSZYM miejscu — inaczej `||`
-        // w starym kodzie wracał do `{}` (bo `{}` jest truthy w JS) i pre-fill
-        // ginął przy pierwszej zmianie GDZIEKOLWIEK. Łańcuch:
-        //   initialRaw (pre-fille) → existing (Store) → fresh (DOM)
-        // gwarantuje że nic nie zniknie.
-        const fresh = readRawFormData(toolbar);
-        const cur = Store.getVisitById(id);
-        const existing = (cur && cur.data && cur.data._raw) || {};
-        const raw = { ...initialRaw, ...existing, ...fresh };
-
-        const summary = buildSummary(raw);
-        const date = raw['visitData.data'] || (visit && visit.date) || undefined;
-        const patch = { data: { _raw: raw } };
-        if (summary) patch.summary = summary;
-        if (date) patch.date = date;
-        Store.updateVisit(id, patch);
-        // Re-paint kropek + preview na pasku (bez re-renderu treści, focus OK).
-        if (typeof toolbar.refreshDots === 'function') toolbar.refreshDots(raw);
-    }
-
-    function scheduleAutosave() {
-        if (_autosaveTimer) clearTimeout(_autosaveTimer);
-        _autosaveTimer = setTimeout(autosaveNow, 400);
-    }
-
-    toolbar.addEventListener('input', scheduleAutosave);
-    toolbar.addEventListener('change', scheduleAutosave);
-
-    /* ------------------ Auto-grow textarea (PR-J) -----
-     * W nowym modelu treść po prawej re-renderuje się przy zmianie aktywnego
-     * pola, więc grow-ujemy po initial mount + po każdej zmianie focusu. */
-    function _growAllAutoTextareas(scope) {
-        (scope || toolbar).querySelectorAll('.psy-vf__textarea--autogrow')
-            .forEach(_autoGrowTextarea);
-    }
-    requestAnimationFrame(() => _growAllAutoTextareas());
-
-    toolbar.addEventListener('input', (ev) => {
-        const t = ev.target;
-        if (t && t.tagName === 'TEXTAREA' &&
-            t.classList && t.classList.contains('psy-vf__textarea--autogrow')) {
-            _autoGrowTextarea(t);
+        if (!visitId) {
+            const created = Store.addVisit({ patientId: patient.id, type: typeId, date, summary, data: payload });
+            visitId = created.id;
+            // Stabilny adres bez przeładowania widoku — ale tylko gdy nadal jesteśmy
+            // na „nowej wizycie". Jeśli użytkownik właśnie przechodzi gdzie indziej,
+            // podmiana adresu cofnęłaby jego nawigację.
+            if (window.location.hash.startsWith('#/visit/form/new')) {
+                try { history.replaceState(null, '', '#/visit/form/' + visitId); } catch (_) { /* */ }
+            }
+            deleteBtn.style.display = '';
+        } else {
+            const current = Store.getVisitById(visitId);
+            if (!current) return;                       // usunięta w międzyczasie
+            Store.updateVisit(visitId, { date, summary, data: Object.assign({}, current.data, payload) });
         }
-    });
+    }
 
-    // Re-grow po przełączeniu aktywnego pola (klik w pasku po lewej) —
-    // nowe textarea zostają zmountowane, scrollHeight przed layoutem = 0.
-    toolbar.addEventListener('click', (ev) => {
-        if (!ev.target.closest('.psy-form-toolbar__field')) return;
-        requestAnimationFrame(() => _growAllAutoTextareas());
-    });
+    function markDirty() {
+        dirty = true;
+        toolbar.refresh();
+        // Zapis najpóźniej 400 ms po pierwszej zmianie (nie przesuwamy terminu przy
+        // kolejnych — przy ciągłym pisaniu Store i tak dostaje dane na bieżąco).
+        if (!saveTimer) saveTimer = setTimeout(persist, 400);
+    }
+
+    function onControlEvent(ev) {
+        const t = ev.target;
+        if (t && t.dataset && t.dataset.transient === '1') return;   // pola pomocnicze
+        Object.assign(raw, readControls(toolbar.contentEl));
+        markDirty();
+    }
+    toolbar.addEventListener('input', onControlEvent);
+    toolbar.addEventListener('change', onControlEvent);
+
+    const onPageHide = () => persist();
+    window.addEventListener('pagehide', onPageHide);
+
+    /* ---------------- nagłówek ---------------- */
+    const title = visit
+        ? 'Wizyta · ' + visit.date + (visit.time ? ' ' + visit.time : '') + (typeObj ? ' · ' + typeObj.label : '')
+        : '+ Nowa wizyta' + (typeObj ? ' · ' + typeObj.label : '');
+
+    const deleteBtn = el('button', {
+        class: 'btn btn--danger',
+        title: 'Usuń tę wizytę',
+        style: { display: visit ? '' : 'none' },
+        onclick: async () => {
+            const ok = await openConfirm({
+                title: 'Usunąć wizytę?',
+                message: 'Wizyta zostanie trwale usunięta razem z wpisanymi w niej lekami i rozpoznaniami. '
+                    + 'Operacji nie da się cofnąć.',
+                confirmLabel: 'Usuń',
+                variant: 'danger'
+            });
+            if (!ok) return;
+            deleted = true;
+            if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+            if (visitId) Store.removeVisit(visitId);
+            window.location.hash = '#/history';
+        }
+    }, ['🗑 Usuń']);
+
+    const root = el('div', {
+        class: 'psy-new-view psy-visit-form-view',
+        dataset: { live: 'true' }       // kontroler nie przerysowuje tego widoku przy zmianach Store
+    }, [
+        el('div', { class: 'psy-new-view__header' }, [
+            el('div', {}, [
+                el('nav', { class: 'psy-new-breadcrumb' }, [
+                    el('a', { href: '#/history', class: 'psy-new-breadcrumb__link' }, ['🗓️ Historia wizyt']),
+                    el('span', { class: 'psy-new-breadcrumb__sep' }, ['›']),
+                    el('span', { class: 'psy-new-breadcrumb__current' }, [title])
+                ]),
+                el('h1', { class: 'psy-new-view__title' }, [title]),
+                el('div', { class: 'psy-new-view__subtitle' }, [
+                    (patient.imie || '') + ' ' + (patient.nazwisko || '') + ' · '
+                    + (mode === 'first' ? 'pełny wywiad (pierwsza wizyta)' : 'notatka z wizyty')
+                    + ' · 💾 zapis automatyczny'
+                ])
+            ]),
+            el('div', { class: 'psy-new-view__actions' }, [
+                el('button', {
+                    class: 'btn btn--secondary',
+                    onclick: () => { window.location.hash = '#/history'; }
+                }, ['← Wróć do listy']),
+                deleteBtn
+            ])
+        ]),
+        toolbar
+    ]);
+
+    // Kontroler woła to przed zdjęciem widoku z ekranu (zmiana trasy).
+    root.psyTeardown = () => {
+        persist();
+        window.removeEventListener('pagehide', onPageHide);
+    };
 
     return root;
 }
-
-

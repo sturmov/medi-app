@@ -1,23 +1,13 @@
 // ============================================================================
-// app-new.js — kontroler nowej aplikacji (app.html).
+// app-new.js — kontroler aplikacji: nawigacja (hash), powłoka (topbar, menu
+// boczne) i widoki list. Formularze i magazyn danych żyją w `js/views/`.
 //
-// Po refaktorze 2026-04-30 (CRUD inline + autozapis + runner testów):
-//   - wszystkie formularze CRUD (Pacjent, Lek, Diagnoza, Zalecenie, Wizyta) są
-//     widokami inline z autozapisem (route-based, brak modali);
-//   - runner testów (PHQ-9, GAD-7) zamiast „toast PR-16";
-//   - status wizyty: closed=false (Robocza, można skasować) / closed=true
-//     (Zamknięta — wpis medyczny, bez kasacji z UI);
-//   - jedyny modal w UI to `openConfirm` („Czy na pewno usunąć?").
-//
-// Architektura:
-//   - statyczny shell HTML w app.html (#psy-new-shell, #psy-new-sidebar, …)
-//   - vanilla JS kontroler `AppController` zarządza nawigacją/render
-//   - `Store` (`js/views/_store.js`) trzyma dane + persystencję w localStorage
-//   - widoki listy żyją w tym pliku, formularze inline w `js/views/view-*-form.js`,
-//     formularz wizyty w `js/views/view-visit-form.js`, runner w `view-test-runner.js`.
-//
-// LIVE-VIEW: widoki formularzy mają `data-live="true"` na rootu — `_renderView()`
-// pomija pasywny re-render (autozapis nie zabija formularza/focusu/scroll).
+//   • `Store` (`views/_store.js`) — stan + zapis do magazynu (Dysk Google /
+//     folder lokalny) albo tryb demo.
+//   • Wizyta jest jedynym źródłem prawdy; Leki / Diagnozy / Parametry / Plan
+//     leczenia to osie czasu wyliczane z wizyt (tylko do odczytu).
+//   • Widoki z `data-live="true"` (formularze) nie są przerysowywane przy
+//     zmianach Store; przed zdjęciem z ekranu dostają `psyTeardown()`.
 // ============================================================================
 
 import './components/psy-toast.js';
@@ -25,23 +15,15 @@ import './components/psy-toast-container.js';
 
 import { Store } from './views/_store.js';
 import { APP_MENU, APP_PATIENTS_ROUTE, APP_SETTINGS_ROUTE, APP_DEFAULT_ROUTE } from './views/_menu.js';
-
-import {
-    VISIT_TYPES,
-    visitTypeById,
-    FAKE_MED_DICT
-} from './views/_fake-data.js';
-import { schemaForMode, VISIT_FORM_SCHEMA } from './views/_visit-form-schema.js';
-import { VISIT_DICT } from './views/_visit-dict.js';
+import { VISIT_TYPES, visitTypeById, visitTypeLabel } from './views/_visit-types.js';
+import { FAKE_MED_DICT } from './views/_meds-dict.js';
+import { describeVisit, medDoseText } from './views/_visit-describe.js';
+import { el, toast } from './views/_dom.js';
+import { getGoogleClientId, setGoogleClientId, DEFAULT_GOOGLE_CLIENT_ID } from './views/_config.js';
 
 import { openConfirm } from './views/_modal.js';
 import { renderVisitForm } from './views/view-visit-form.js';
-// 2026-06-13: view-diagnosis-form.js USUNIĘTE — diagnoza edytowana INLINE
-// w sekcji wizyty (sekcja `rozpoznanie` typu `inline-diagnoses`). Routes
-// `#/diagnoses/new` i `#/diagnoses/edit/:id` redirectują do historii wizyt.
 import { renderRecommendationForm } from './views/view-recommendation-form.js';
-import { renderMedForm } from './views/view-med-form.js';
-import { renderPatientForm } from './views/view-patient-form.js';
 import { renderPatientDetail } from './views/view-patient-detail.js';
 import { renderTestRunner } from './views/view-test-runner.js';
 import { renderTreatmentPlan } from './views/view-treatment-plan.js';
@@ -49,43 +31,11 @@ import { renderParameters } from './views/view-parameters.js';
 import { renderDocuments } from './views/view-documents.js';
 import { listAvailableTests } from './views/_tests-catalog.js';
 
-import { showFolderGate, hideFolderGate, shouldShowGate } from './views/view-folder-gate.js';
+import { showStorageGate, hideStorageGate, shouldShowGate } from './views/view-folder-gate.js';
 import { installAutogrow } from './views/_autogrow.js';
 
 
 // ---- helpers ---------------------------------------------------------------
-
-function el(tag, props = {}, children = []) {
-    const node = document.createElement(tag);
-    for (const [k, v] of Object.entries(props || {})) {
-        if (v == null) continue;
-        if (k === 'class') node.className = v;
-        else if (k === 'html') node.innerHTML = v;
-        else if (k === 'dataset' && typeof v === 'object') {
-            for (const [dk, dv] of Object.entries(v)) node.dataset[dk] = dv;
-        } else if (k.startsWith('on') && typeof v === 'function') {
-            node.addEventListener(k.slice(2).toLowerCase(), v);
-        } else if (k === 'style' && typeof v === 'object') {
-            for (const [sk, sv] of Object.entries(v)) node.style[sk] = sv;
-        } else if (k === 'checked') {
-            node.checked = !!v;
-        } else if (typeof v === 'boolean') {
-            if (v) node.setAttribute(k, '');
-        } else {
-            node.setAttribute(k, v);
-        }
-    }
-    if (!Array.isArray(children)) children = [children];
-    for (const c of children) {
-        if (c == null || c === false) continue;
-        if (typeof c === 'string' || typeof c === 'number') {
-            node.appendChild(document.createTextNode(String(c)));
-        } else {
-            node.appendChild(c);
-        }
-    }
-    return node;
-}
 
 function ageOf(patient) {
     if (!patient) return '';
@@ -268,16 +218,11 @@ function _buildPatientPreviewPopover(p) {
 }
 
 
-function toast(variant, title, message) {
-
-    if (window.PsyToast) {
-        window.PsyToast.notify({ variant, title, message }, 'psy-app-toasts');
-    }
-}
-
-function visitTypeLabel(type) {
-    const t = visitTypeById(type);
-    return t ? t.label : type;
+/** Polska odmiana: plural(3, 'wpis', 'wpisy', 'wpisów') → 'wpisy'. */
+function plural(n, one, few, many) {
+    if (n === 1) return one;
+    const d = n % 10, h = n % 100;
+    return (d >= 2 && d <= 4 && !(h >= 12 && h <= 14)) ? few : many;
 }
 
 // Stan filtrów per widok (utrzymywany pomiędzy re-renderami)
@@ -379,11 +324,13 @@ function viewPatients() {
         ]));
         const tbody = el('tbody', {});
         for (const p of patients) {
-            const visits = Store.getVisits(p.id);
+            const lastVisit = Store.getLastVisitDate(p.id);
+            const loadError = Store.getPatientLoadError(p.id);
             const nameCell = [
                 (p.imie || '') + ' ' + (p.nazwisko || ''),
                 p.minor ? el('span', { style: { color: '#EC4899', marginLeft: '6px' }, title: 'Niepełnoletni' }, ['●']) : null,
-                p.archived ? el('span', { class: 'psy-new-badge psy-new-badge--neutral', style: { marginLeft: '6px' } }, ['archiwum']) : null
+                p.archived ? el('span', { class: 'psy-new-badge psy-new-badge--neutral', style: { marginLeft: '6px' } }, ['archiwum']) : null,
+                loadError ? el('span', { style: { color: '#B45309', marginLeft: '6px' }, title: 'Nie udało się odczytać danych: ' + loadError }, ['⚠ błąd odczytu']) : null
             ];
             const tr = el('tr', {
                 'data-patient-id': p.id,
@@ -397,7 +344,7 @@ function viewPatients() {
                 el('td', {}, nameCell),
                 el('td', {}, [ageOf(p)]),
                 el('td', {}, [p.telefon || '—']),
-                el('td', {}, [visits.length ? visits[0].date : '—']),
+                el('td', {}, [lastVisit || '—']),
                 el('td', { class: 'psy-row-actions', style: { textAlign: 'right' } }, [
                     // Akcja PO 2026-05-01: na liście tylko „Wybierz".
                     // Edycja i archiwizacja są w widoku detali pacjenta.
@@ -446,288 +393,6 @@ function goToDetail(patient) {
 //   • tło: paid=false → `psy-history-paragraph--unpaid` (żółtawe).
 //
 // Wcześniejszy widok tabeli (PR-G) usunięty.
-
-/** Sformatuj surowy klucz z `_raw` (np. `cosWaznego`, `visitData.osoby`)
- *  na czytelną etykietę. Dla nieznanych kluczy — naturalna konwersja
- *  camelCase / kropki → spacje + capitalize. */
-function _prettyVisitFieldLabel(rawKey) {
-    if (!rawKey) return '';
-    // Zdejmij prefix sekcji ze schematu (np. `visitData.`, `wywiad.`)
-    let key = String(rawKey).replace(/^[a-zA-Z]+\./, '');
-    // Pomiń techniczne kotwice
-    if (key === '__comment' || key === '__notes' || key.endsWith('.__notes') || key.endsWith('.__comment')) {
-        return '';
-    }
-    const map = {
-        rodzajWizyty:           'Rodzaj wizyty',
-        osobyObecne:            'Osoby obecne',
-        powodKonsultacji:       'Powód konsultacji',
-        objawyDepresyjne:       'Objawy depresyjne',
-        objawyLekowe:           'Objawy lękowe',
-        hipotezaDiagnostyczna:  'Hipoteza diagnostyczna',
-        plan:                   'Plan',
-        planNaNastepne:         'Plan na następne spotkanie',
-        cosWaznego:             'Co ważnego',
-        historiaEdukacji:       'Historia edukacji',
-        historiaRodzinna:       'Historia rodzinna',
-        zasoby:                 'Zasoby pacjenta',
-        data:                   'Data',
-        czasOd:                 'Godzina rozpoczęcia',
-        czasTrwania:            'Czas trwania (min)',
-        osoby:                  'Osoby',
-        uczestnicy:             'Uczestnicy'
-    };
-    if (map[key]) return map[key];
-    // Fallback: camelCase / kebab / snake → naturalna fraza
-    return key
-        .replace(/([A-Z])/g, ' $1')
-        .replace(/[_-]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .replace(/^\w/, (c) => c.toUpperCase());
-}
-
-/** Zwróć tablicę `{label, value}` z `_raw` — w kolejności wstawienia,
- *  pomijając puste, techniczne, etykiety bez wartości.
- *  LEGACY — używane jako fallback dla wizyt bez `_raw` (PR-J5).
- *  Od PR-J15 (2026-05-30) główny widok historii używa
- *  `_extractVisitGroupedContent` — grupowanie po sekcjach formularza. */
-function _extractVisitContent(raw) {
-    if (!raw || typeof raw !== 'object') return [];
-    const out = [];
-    for (const [k, v] of Object.entries(raw)) {
-        const label = _prettyVisitFieldLabel(k);
-        if (!label) continue;
-        // Pusta wartość (null/empty string/empty array)
-        if (v == null) continue;
-        let display = '';
-        if (Array.isArray(v)) {
-            if (!v.length) continue;
-            display = v.join(', ');
-        } else if (typeof v === 'boolean') {
-            display = v ? 'tak' : 'nie';
-        } else {
-            display = String(v).trim();
-            if (!display) continue;
-        }
-        out.push({ label, value: display });
-    }
-    return out;
-}
-
-// ============================================================================
-// PR-J15 (2026-05-30) — pełna treść wizyty na liście historii (klientka).
-//
-// Decyzje PO:
-//   • na liście wizyt zamiast streszczenia chcemy wyświetlone wszystkie
-//     wypełnione pola — by terapeuta mógł szybko przejrzeć wszystkie wizyty;
-//   • grupowanie lekko zaznaczone (sub-headery sekcji w stylu kapitalików,
-//     bez ramek/tła);
-//   • sekcje puste pomijać (jak wizyta to tylko 3 wypełnione pola — widzisz
-//     tylko te 3, bez 13 pustych sekcji);
-//   • wszystkie sekcje zawsze rozwinięte, bez toggle „zwiń/rozwiń";
-//   • layout kompaktowy (theme--compact).
-//
-// Funkcje:
-//   - `_resolveVisitModeFromType(type)` → 'first' | 'followup'
-//   - `_formatVisitFieldValue(field, primary, arrayAlt)` — wartości słownikowe
-//     na polskie label-e + specjalne formattery (ICD-10, używki w extractor)
-//   - `_extractVisitGroupedContent(raw, mode)` → struktura grupowana
-// ============================================================================
-
-/** Mapowanie typu wizyty na tryb formularza (zgodne z `view-visit-form.js`). */
-function _resolveVisitModeFromType(visitType) {
-    const t = String(visitType || '').toLowerCase();
-    const FIRST_TYPES = new Set([
-        'first_meeting', 'interview', 'diagnosis',
-        'first', 'first-visit'
-    ]);
-    if (FIRST_TYPES.has(t)) return 'first';
-    if (/wywiad|first/.test(t)) return 'first';
-    return 'followup';
-}
-
-/** Formatowanie wartości dla pojedynczego pola schemy — czytelny string.
- *  Zwraca '' gdy puste. Słowniki `VISIT_DICT.*` w bieżącej apce to
- *  flat array stringów, więc value === label (nie ma mapy klucz→label). */
-function _formatVisitFieldValue(field, primary, arrayAlt) {
-    const type = field && field.input && field.input.type;
-
-    // tag-input-icd10 — kod + opis (per tag)
-    if (type === 'tag-input-icd10') {
-        let arr = [];
-        if (Array.isArray(primary)) {
-            arr = primary;
-        } else if (typeof primary === 'string' && primary.trim()) {
-            arr = primary.split(',').map((s) => s.trim()).filter(Boolean);
-        }
-        const parts = [];
-        for (const item of arr) {
-            if (typeof item === 'string') {
-                parts.push(item.toUpperCase());
-            } else if (item && typeof item === 'object' && item.code) {
-                const code = String(item.code).toUpperCase();
-                const desc = item.description ? ' · ' + item.description : '';
-                parts.push(code + desc);
-            }
-        }
-        return parts.join('; ');
-    }
-
-    // multi-select / checkbox-group → array of values, połącz przecinkami
-    if (type === 'multi-select' || type === 'checkbox-group') {
-        let arr = [];
-        if (Array.isArray(primary)) arr = primary;
-        else if (Array.isArray(arrayAlt)) arr = arrayAlt;
-        else if (typeof primary === 'string' && primary.trim()) {
-            arr = primary.split(',').map((s) => s.trim()).filter(Boolean);
-        }
-        return arr.filter(Boolean).join(', ');
-    }
-
-    // select / radio / text / textarea / number / date — wartość jako string
-    if (primary == null) return '';
-    if (Array.isArray(primary)) return primary.length ? primary.join(', ') : '';
-    if (typeof primary === 'boolean') return primary ? 'tak' : 'nie';
-    return String(primary).trim();
-}
-
-/** Specjalny extractor dla sekcji „Używki" (uzywki-special).
- *  Klucze w `_raw`: `<sectionId>_u_<idx>` (checkbox), `_i` (intensywność), `_n` (notatka).
- *  Zwraca tablicę `{label, value, notes}` dla wszystkich pozycji z czymkolwiek
- *  niepustym. Wpisuje wszystkie odwiedzone klucze do `usedKeys`. */
-function _extractUzywkiEntries(raw, sectionId, usedKeys) {
-    const out = [];
-    const LIST = (VISIT_DICT && VISIT_DICT.UZYWKI_11) || [];
-    LIST.forEach((label, idx) => {
-        const checkKey = sectionId + '_u_' + idx;
-        const intKey   = sectionId + '_u_' + idx + '_i';
-        const noteKey  = sectionId + '_u_' + idx + '_n';
-
-        usedKeys.add(checkKey);
-        usedKeys.add(intKey);
-        usedKeys.add(noteKey);
-
-        const checked = !!(raw[checkKey] === true || raw[checkKey] === '1' || raw[checkKey] === 1 || raw[checkKey] === 'true');
-        const intVal  = raw[intKey] && String(raw[intKey]).trim();
-        const noteVal = raw[noteKey] && String(raw[noteKey]).trim();
-
-        // Pomiń pozycje bez żadnej informacji
-        if (!checked && !intVal && !noteVal) return;
-
-        const parts = [];
-        if (checked) parts.push('✓ TAK');
-        if (intVal)  parts.push(intVal);
-        const value = parts.join(' · ');
-
-        out.push({
-            label: label,
-            value: value || (noteVal ? '(tylko notatka)' : ''),
-            notes: noteVal || ''
-        });
-    });
-    return out;
-}
-
-/** Wyciągnij treść wizyty pogrupowaną po sekcjach formularza.
- *  Zwraca:
- *    { sections: [{ sectionId, sectionTitle, comment, fields:[{label,value,notes}] }],
- *      otherFields: [{label, value}] } (klucze nie pasujące do schemy).
- *  Sekcje puste są pomijane. */
-function _extractVisitGroupedContent(raw, mode) {
-    if (!raw || typeof raw !== 'object') return { sections: [], otherFields: [] };
-
-    const schema = schemaForMode(mode);
-    const usedKeys = new Set();
-    const sections = [];
-
-    for (const section of schema) {
-        const sectionId = section.id;
-        const block = {
-            sectionId,
-            sectionTitle: section.title,
-            comment: '',
-            fields: []
-        };
-
-        // Komentarz sekcji
-        const commentKey = sectionId + '.__comment';
-        const commentVal = raw[commentKey];
-        if (commentVal != null && String(commentVal).trim()) {
-            block.comment = String(commentVal).trim();
-            usedKeys.add(commentKey);
-        }
-
-        // Subfieldy
-        for (const field of (section.subfields || [])) {
-            const fieldId = field.id;
-            const fieldType = field.input && field.input.type;
-
-            // Pomiń pola dekoracyjne / linki
-            if (fieldType === 'header' || fieldType === 'link-view') continue;
-
-            // Używki — special extractor
-            if (fieldType === 'uzywki-special') {
-                const uzywkiItems = _extractUzywkiEntries(raw, sectionId, usedKeys);
-                for (const u of uzywkiItems) block.fields.push(u);
-                continue;
-            }
-
-            const fullKey   = sectionId + '.' + fieldId;
-            const altKey    = fullKey + '[]';
-            const notesKey  = fullKey + '.__notes';
-
-            const rawValue = raw[fullKey];
-            const rawArray = raw[altKey];
-            const value = _formatVisitFieldValue(field, rawValue, rawArray);
-            const notesVal = raw[notesKey] && String(raw[notesKey]).trim();
-
-            if (value || notesVal) {
-                block.fields.push({
-                    label: field.label,
-                    value: value,
-                    notes: notesVal || ''
-                });
-                usedKeys.add(fullKey);
-                if (rawArray !== undefined) usedKeys.add(altKey);
-                if (notesVal) usedKeys.add(notesKey);
-            }
-        }
-
-        // Sekcja niepusta → dodaj
-        if (block.comment || block.fields.length) {
-            sections.push(block);
-        }
-    }
-
-    // Pozostałe klucze (np. legacy fake-data z flat keyami typu `rodzajWizyty`)
-    const otherFields = [];
-    for (const [k, v] of Object.entries(raw)) {
-        if (usedKeys.has(k)) continue;
-        if (k === '__comment' || k === '__notes') continue;
-        if (k.endsWith('.__comment') || k.endsWith('.__notes')) continue;
-        // Technical używki keys (gdy sekcja `uzywki` nie była w schemie dla tego trybu)
-        if (/_u_\d+(_[in])?$/.test(k)) continue;
-
-        const label = _prettyVisitFieldLabel(k);
-        if (!label) continue;
-
-        let display = '';
-        if (v == null) continue;
-        if (Array.isArray(v)) {
-            if (!v.length) continue;
-            display = v.join(', ');
-        } else if (typeof v === 'boolean') {
-            display = v ? 'tak' : 'nie';
-        } else {
-            display = String(v).trim();
-            if (!display) continue;
-        }
-        otherFields.push({ label, value: display });
-    }
-
-    return { sections, otherFields };
-}
 
 function viewHistory() {
     const patient = Store.state.currentPatient;
@@ -803,82 +468,39 @@ function viewHistory() {
             ])
         ]);
 
-        // Body: PR-J15 (2026-05-30) — pełna treść pogrupowana po sekcjach
-        // formularza. Sekcje puste pomijane, sub-headery delikatne, gęsty grid.
-        const raw = v.data && v.data._raw;
-        const mode = _resolveVisitModeFromType(v.type);
-        const grouped = _extractVisitGroupedContent(raw, mode);
-
-        const hasContent = (grouped.sections.length > 0 || grouped.otherFields.length > 0);
-
+        // Treść: wszystkie wypełnione pola pogrupowane po sekcjach formularza —
+        // z tego samego źródła co formularz i arkusz (`describeVisit`).
+        const described = describeVisit(v);
         let bodyNode;
-        if (hasContent) {
+        if (described.sections.length || described.other.length) {
             bodyNode = el('div', { class: 'psy-history-paragraph__body' });
-
-            // Sekcje pogrupowane (schema-driven)
-            for (const section of grouped.sections) {
-                const sectionEl = el('div', { class: 'psy-history-paragraph__section' });
-
-                // Sub-header sekcji — delikatny, lekko zaznacza grupę
-                sectionEl.appendChild(el('div', {
-                    class: 'psy-history-paragraph__section-title'
-                }, [section.sectionTitle]));
-
-                // Komentarz sekcji (jeśli jest) — pełna szerokość
-                if (section.comment) {
-                    sectionEl.appendChild(el('div', {
-                        class: 'psy-history-paragraph__section-comment'
-                    }, [section.comment]));
-                }
-
-                // Grid pól (label / value) + ewentualne notatki pól
-                if (section.fields.length) {
-                    const fieldsGrid = el('div', { class: 'psy-history-paragraph__fields' });
-                    for (const f of section.fields) {
-                        fieldsGrid.appendChild(el('div', {
-                            class: 'psy-history-paragraph__field-label'
-                        }, [f.label + ':']));
-                        fieldsGrid.appendChild(el('div', {
-                            class: 'psy-history-paragraph__field-value'
-                        }, [f.value || '—']));
-                        if (f.notes) {
-                            fieldsGrid.appendChild(el('div', {
-                                class: 'psy-history-paragraph__field-notes'
-                            }, ['↳ ' + f.notes]));
-                        }
+            const fieldsGrid = (fields) => {
+                const grid = el('div', { class: 'psy-history-paragraph__fields' });
+                for (const f of fields) {
+                    grid.appendChild(el('div', { class: 'psy-history-paragraph__field-label' }, [f.label + ':']));
+                    grid.appendChild(el('div', { class: 'psy-history-paragraph__field-value' }, [f.value || '—']));
+                    if (f.notes) {
+                        grid.appendChild(el('div', { class: 'psy-history-paragraph__field-notes' }, ['↳ ' + f.notes]));
                     }
-                    sectionEl.appendChild(fieldsGrid);
                 }
-
+                return grid;
+            };
+            for (const section of described.sections) {
+                const sectionEl = el('div', { class: 'psy-history-paragraph__section' }, [
+                    el('div', { class: 'psy-history-paragraph__section-title' }, [section.title])
+                ]);
+                if (section.comment) {
+                    sectionEl.appendChild(el('div', { class: 'psy-history-paragraph__section-comment' }, [section.comment]));
+                }
+                if (section.fields.length) sectionEl.appendChild(fieldsGrid(section.fields));
                 bodyNode.appendChild(sectionEl);
             }
-
-            // Pozostałe pola (legacy fake-data z płaskimi kluczami) — pokaż
-            // jako osobną sekcję „Treść notatki" bez sub-headera, w gridzie.
-            if (grouped.otherFields.length) {
-                const sectionEl = el('div', { class: 'psy-history-paragraph__section' });
-                // Nagłówek tylko jeśli powyżej były inne sekcje (inaczej ten
-                // jeden blok bez nazwy = naturalne, bez decoration)
-                if (grouped.sections.length) {
-                    sectionEl.appendChild(el('div', {
-                        class: 'psy-history-paragraph__section-title'
-                    }, ['Pozostałe pola']));
-                }
-                const fieldsGrid = el('div', { class: 'psy-history-paragraph__fields' });
-                for (const f of grouped.otherFields) {
-                    fieldsGrid.appendChild(el('div', {
-                        class: 'psy-history-paragraph__field-label'
-                    }, [f.label + ':']));
-                    fieldsGrid.appendChild(el('div', {
-                        class: 'psy-history-paragraph__field-value'
-                    }, [f.value || '—']));
-                }
-                sectionEl.appendChild(fieldsGrid);
-                bodyNode.appendChild(sectionEl);
+            if (described.other.length) {
+                bodyNode.appendChild(el('div', { class: 'psy-history-paragraph__section' }, [
+                    el('div', { class: 'psy-history-paragraph__section-title' }, ['Pozostałe pola']),
+                    fieldsGrid(described.other)
+                ]));
             }
-        } else if (v.summary && v.summary.trim()) {
-            // Fallback dla starych wizyt bez `_raw`
-            bodyNode = el('div', { class: 'psy-history-paragraph__body' }, [v.summary]);
         } else {
             bodyNode = el('div', {
                 class: 'psy-history-paragraph__body psy-history-paragraph__body--empty'
@@ -900,12 +522,23 @@ function viewHistory() {
 }
 
 
-// ----- Meds (2026-06-13 — read-only oś czasu z wizyt) -----------------------
+// ----- Leki / Diagnozy — osie czasu z wizyt (tylko do odczytu) ---------------
 //
-// Klientka: „leki w wizycie" — sekcja boczna „Leki" pokazuje ekstrakt
-// z treści wizyt wg daty i kolejności. Brak akcji „+ Dodaj/✎ Edytuj/🗑 Usuń"
-// — leki edytuje się INLINE w sekcji „Farmakoterapia" formularza wizyty.
-// Klik wiersza → otwiera wizytę powiązaną.
+// Leki i rozpoznania wpisuje się W WIZYCIE (sekcje „Ogólna farmakoterapia"
+// i „Rozpoznanie"). Te widoki są wyciągiem: od najnowszej wizyty, klik wiersza
+// otwiera wizytę, z której pochodzi wpis.
+
+function timelineHeader(title, patient, count, forms) {
+    return el('div', { class: 'psy-new-view__header' }, [
+        el('div', {}, [
+            el('h1', { class: 'psy-new-view__title' }, [title]),
+            el('div', { class: 'psy-new-view__subtitle' }, [
+                (patient.imie || '') + ' ' + (patient.nazwisko || '') + ' · ' + count + ' '
+                + plural(count, forms[0], forms[1], forms[2]) + ' · wyciąg z wizyt, od najnowszej'
+            ])
+        ])
+    ]);
+}
 
 function viewMeds() {
     const patient = Store.state.currentPatient;
@@ -913,57 +546,39 @@ function viewMeds() {
     const timeline = Store.getMedsTimeline(patient.id);
 
     const root = el('div', { class: 'psy-new-view' });
-    root.appendChild(el('div', { class: 'psy-new-view__header' }, [
-        el('div', {}, [
-            el('h1', { class: 'psy-new-view__title' }, ['Leki']),
-            el('div', { class: 'psy-new-view__subtitle' }, [
-                patient.imie + ' ' + patient.nazwisko + ' · ' + timeline.length +
-                ' ' + (timeline.length === 1 ? 'lek' : 'leków') +
-                ' · oś czasu z wizyt (read-only)'
-            ])
-        ])
-    ]));
+    root.appendChild(timelineHeader('Leki', patient, timeline.length, ['wpis', 'wpisy', 'wpisów']));
 
     const body = el('div', { class: 'psy-new-view__body psy-new-view__body--plain' });
     if (!timeline.length) {
         body.appendChild(emptyState('💊', 'Brak leków',
-            'Pacjent nie ma przypisanych leków. Dodaj lek w sekcji „Farmakoterapia" wizyty.', [
+            'Leki wpisuje się w wizycie, w sekcji „Ogólna farmakoterapia".', [
             { label: '🗓️ Przejdź do wizyt', variant: 'primary', onClick: () => (window.location.hash = '#/history') }
         ]));
     } else {
-        const table = el('table', { class: 'psy-new-table' });
+        const table = el('table', { class: 'psy-new-table psy-new-table--clickrows' });
         table.appendChild(el('thead', {}, [
             el('tr', {}, [
                 el('th', { style: { width: '120px' } }, ['Data wizyty']),
                 el('th', {}, ['Nazwa handlowa']),
                 el('th', {}, ['Substancja']),
                 el('th', { style: { width: '140px' } }, ['Aktualna dawka']),
-                el('th', { style: { width: '120px' } }, ['Max dawka']),
+                el('th', { style: { width: '180px' } }, ['Dawka maksymalna']),
                 el('th', {}, ['Typ wizyty'])
             ])
         ]));
         const tbody = el('tbody', {});
-        for (const entry of timeline) {
-            const m = entry.med;
-            const v = entry.visit;
-            const visitLabel = v
-                ? (v.date + (v.time ? ' ' + v.time : ''))
-                : (m.prescribedAt || '—');
-            const typeLabel = v ? (visitTypeLabel(v.type) || '—') : '(bez wizyty)';
-            const rowClick = v
-                ? () => { window.location.hash = '#/visit/form/' + v.id; }
-                : null;
+        for (const { visit, med } of timeline) {
             tbody.appendChild(el('tr', {
-                title: v ? 'Kliknij, aby otworzyć wizytę' : 'Lek bez przypisanej wizyty',
-                style: { cursor: rowClick ? 'pointer' : 'default' },
-                onclick: rowClick
+                title: 'Kliknij, aby otworzyć wizytę',
+                style: { cursor: 'pointer' },
+                onclick: () => { window.location.hash = '#/visit/form/' + visit.id; }
             }, [
-                el('td', {}, [visitLabel]),
-                el('td', {}, [el('strong', {}, [m.name || '(bez nazwy)'])]),
-                el('td', {}, [m.substance || '—']),
-                el('td', {}, [m.dose || '—']),
-                el('td', { style: { color: '#B91C1C', fontWeight: '600' } }, [m.maxDose || '—']),
-                el('td', { style: { color: '#475569' } }, [typeLabel])
+                el('td', {}, [visit.date || '—']),
+                el('td', {}, [el('strong', {}, [med.name || '(bez nazwy)'])]),
+                el('td', {}, [med.substance || '—']),
+                el('td', {}, [medDoseText(med) || '—']),
+                el('td', { style: { color: '#B91C1C', fontWeight: '600' } }, [med.maxDose || '—']),
+                el('td', { style: { color: '#475569' } }, [visitTypeLabel(visit.type)])
             ]));
         }
         table.appendChild(tbody);
@@ -973,73 +588,44 @@ function viewMeds() {
     return root;
 }
 
-// ----- Diagnoses (2026-06-13 — read-only oś czasu z wizyt) -----------------
-//
-// Klientka: „diagnozy w wizyty" + „element menu jak diagnoza to akapity
-// wizyty". Sekcja boczna „Diagnozy" pokazuje ekstrakt z wizyt — wszystkie
-// rozpoznania ICD-10 powiązane z wizytami (linkedVisitId), posortowane
-// chronologicznie. Brak akcji „+ Dodaj/✎ Edytuj/🗑 Usuń" — rozpoznania
-// dodaje/usuwa się INLINE w sekcji „Rozpoznanie" formularza wizyty.
-
 function viewDiagnoses() {
     const patient = Store.state.currentPatient;
     if (!patient) return noPatientView('Diagnozy', '🏥');
     const timeline = Store.getDiagnosesTimeline(patient.id);
 
     const root = el('div', { class: 'psy-new-view' });
-    root.appendChild(el('div', { class: 'psy-new-view__header' }, [
-        el('div', {}, [
-            el('h1', { class: 'psy-new-view__title' }, ['Diagnozy']),
-            el('div', { class: 'psy-new-view__subtitle' }, [
-                patient.imie + ' ' + patient.nazwisko + ' · ' + timeline.length +
-                ' ' + (timeline.length === 1 ? 'rozpoznanie' : 'rozpoznań') +
-                ' · oś czasu z wizyt (read-only)'
-            ])
-        ])
-    ]));
+    root.appendChild(timelineHeader('Diagnozy', patient, timeline.length, ['rozpoznanie', 'rozpoznania', 'rozpoznań']));
 
     const body = el('div', { class: 'psy-new-view__body psy-new-view__body--plain' });
     if (!timeline.length) {
-        body.appendChild(emptyState('🏥', 'Brak diagnoz',
-            'Pacjent nie ma rozpoznań ICD-10. Dodaj rozpoznanie w sekcji „Rozpoznanie" wizyty.', [
+        body.appendChild(emptyState('🏥', 'Brak rozpoznań',
+            'Rozpoznania ICD-10 wpisuje się w wizycie, w sekcji „Rozpoznanie".', [
             { label: '🗓️ Przejdź do wizyt', variant: 'primary', onClick: () => (window.location.hash = '#/history') }
         ]));
     } else {
         const stack = el('div', { class: 'psy-new-stack' });
-        for (const entry of timeline) {
-            const d = entry.diagnosis;
-            const v = entry.visit;
-            const visitLabel = v
-                ? (v.date + (v.time ? ' ' + v.time : ''))
-                : (d.assignedAt || '—');
-            const typeLabel = v ? (visitTypeLabel(v.type) || '') : '(bez wizyty)';
-            const rowClick = v
-                ? () => { window.location.hash = '#/visit/form/' + v.id; }
-                : null;
-            const card = el('div', {
-                title: v ? 'Kliknij, aby otworzyć wizytę' : '',
+        for (const { visit, diagnosis } of timeline) {
+            stack.appendChild(el('div', {
+                title: 'Kliknij, aby otworzyć wizytę',
                 style: {
                     padding: '10px 14px',
                     background: '#FFFFFF',
                     border: '1px solid #E5E7EB',
                     borderLeft: '4px solid #2563EB',
                     borderRadius: '8px',
-                    cursor: rowClick ? 'pointer' : 'default'
+                    cursor: 'pointer'
                 },
-                onclick: rowClick
+                onclick: () => { window.location.hash = '#/visit/form/' + visit.id; }
             }, [
                 el('div', { class: 'psy-new-row' }, [
-                    el('span', { style: { color: '#475569', minWidth: '110px', fontSize: '12.5px' } }, [visitLabel]),
+                    el('span', { style: { color: '#475569', minWidth: '110px', fontSize: '12.5px' } }, [visit.date || '—']),
                     el('strong', {
                         style: { fontFamily: 'monospace', fontSize: '14px', color: '#1D4ED8', minWidth: '70px' }
-                    }, [d.code || '—']),
-                    el('span', { style: { flex: '1' } }, [d.description || '(brak opisu)']),
-                    typeLabel
-                        ? el('span', { class: 'psy-new-hint' }, [typeLabel])
-                        : null
-                ].filter(Boolean))
-            ]);
-            stack.appendChild(card);
+                    }, [diagnosis.code || '—']),
+                    el('span', { style: { flex: '1' } }, [diagnosis.description || '(kod spoza słownika)']),
+                    el('span', { class: 'psy-new-hint' }, [visitTypeLabel(visit.type)])
+                ])
+            ]));
         }
         body.appendChild(stack);
     }
@@ -1314,79 +900,27 @@ function viewVisitNew() {
     return root;
 }
 
-// ----- Visit Form (delegat) ------------------------------------------------
-//
-// PO 2026-05-01: `viewVisitDetail` i route `#/visit/detail/:id` zostały
-// USUNIĘTE — wszystkie kliknięcia w wizytę otwierają formularz wizyty
-// (= jedyne miejsce edycji i podglądu, z 🗑 w nagłówku).
+// ----- Formularze (delegaty) ------------------------------------------------
 
 function viewVisitForm() {
     const hash = window.location.hash || '';
-    const mNew = hash.match(/^#\/visit\/form\/new(?:\/([a-zA-Z0-9-]+))?/);
-    if (mNew) {
-        return renderVisitForm({ isNew: true, typeId: mNew[1] || null });
-    }
+    // Identyfikatory typów zawierają podkreślnik (np. `first_meeting`).
+    const mNew = hash.match(/^#\/visit\/form\/new(?:\/([\w-]+))?/);
+    if (mNew) return renderVisitForm({ isNew: true, typeId: mNew[1] || null });
     const mEdit = hash.match(/^#\/visit\/form\/([^/?]+)/);
-    if (mEdit) {
-        return renderVisitForm({ visitId: decodeURIComponent(mEdit[1]) });
-    }
+    if (mEdit) return renderVisitForm({ visitId: decodeURIComponent(mEdit[1]) });
     return renderVisitForm({ isNew: true });
 }
 
-// ----- Diagnosis / Recommendation / Med / Patient / Test runner (delegaty) -
-
-// 2026-06-13: viewDiagnosisForm jest tylko REDIRECTEM. Klientka: „diagnoza
-// edytowana INLINE w sekcji wizyty". Stare URL-e `#/diagnoses/new` i
-// `#/diagnoses/edit/:id` przekierowują do historii wizyt lub do wizyty
-// powiązanej (gdy mamy linkedVisitId).
-function viewDiagnosisForm() {
-    const hash = window.location.hash || '';
-    const m = hash.match(/^#\/diagnoses\/edit\/([^/?]+)/);
-    const id = m ? decodeURIComponent(m[1]) : null;
-    let targetHash = '#/history';
-    if (id) {
-        const diag = Store.getDiagnosisById(id);
-        if (diag && diag.linkedVisitId) {
-            targetHash = '#/visit/form/' + diag.linkedVisitId;
-        }
-    }
-    setTimeout(() => {
-        toast('info', 'Diagnoza w wizycie',
-            'Edycja rozpoznania ICD-10 odbywa się teraz w sekcji „Rozpoznanie" wizyty.');
-        window.location.hash = targetHash;
-    }, 0);
-    return el('div', { class: 'psy-new-view' }, [
-        el('div', { class: 'psy-new-view__header' }, [
-            el('div', {}, [
-                el('h1', { class: 'psy-new-view__title' }, ['Przekierowanie…']),
-                el('div', { class: 'psy-new-view__subtitle' }, [
-                    'Diagnoza jest częścią wizyty — przekierowuję do ' + targetHash
-                ])
-            ])
-        ])
-    ]);
-}
-
 function viewRecommendationForm() {
-    const hash = window.location.hash || '';
-    const m = hash.match(/^#\/recommendations\/edit\/([^/?]+)/);
+    const m = (window.location.hash || '').match(/^#\/recommendations\/edit\/([^/?]+)/);
     return renderRecommendationForm({ id: m ? decodeURIComponent(m[1]) : null });
 }
 
-function viewMedForm() {
-    const hash = window.location.hash || '';
-    const m = hash.match(/^#\/meds\/edit\/([^/?]+)/);
-    return renderMedForm({ id: m ? decodeURIComponent(m[1]) : null });
-}
-
-// PR-H (2026-05-01 cd. 2): „edit pacjenta = view detali" — jedno miejsce.
-// `viewPatientForm` to teraz cienki delegat na `viewPatientDetail`:
-//   • #/patients/new            → renderPatientDetail({ id: null })
-//   • #/patients/edit/:id       → renderPatientDetail({ id })
-// Plik `view-patient-form.js` zostaje jako legacy (do skasowania w kolejnym PR).
+// Karta pacjenta jest jednym miejscem podglądu i edycji:
+// `#/patients/new`, `#/patients/edit/:id` i `#/patients/detail/:id`.
 function viewPatientForm() {
-    const hash = window.location.hash || '';
-    const m = hash.match(/^#\/patients\/edit\/([^/?]+)/);
+    const m = (window.location.hash || '').match(/^#\/patients\/edit\/([^/?]+)/);
     return renderPatientDetail({ id: m ? decodeURIComponent(m[1]) : null, tab: 'patient' });
 }
 
@@ -1434,102 +968,135 @@ function viewPatientData() {
 }
 
 
-// ----- Settings -------------------------------------------------------------
+// ----- Ustawienia -------------------------------------------------------------
+
+function storageDescription() {
+    const st = Store.state;
+    if (st.storageConnected && st.storageKind === 'gdrive') {
+        return '☁️ Dysk Google' + (st.storageLabel ? ' — ' + st.storageLabel.replace(/^Google Drive · /, '') : '');
+    }
+    if (st.storageConnected && st.storageKind === 'local') return '📁 Folder na tym komputerze — ' + st.storageLabel;
+    if (st.devMode) return '🧪 Tryb demo — dane przykładowe, tylko w tej przeglądarce';
+    return 'Niepodłączone';
+}
 
 function viewSettings() {
+    const st = Store.state;
     const root = el('div', { class: 'psy-new-view' });
     root.appendChild(el('div', { class: 'psy-new-view__header' }, [
         el('div', {}, [
             el('h1', { class: 'psy-new-view__title' }, ['Ustawienia']),
-            el('div', { class: 'psy-new-view__subtitle' }, [
-                'Integracje · Baza leków · UI · Backlog'
-            ])
+            el('div', { class: 'psy-new-view__subtitle' }, ['Miejsce przechowywania danych · Google · Baza leków'])
         ])
     ]));
 
     const body = el('div', { class: 'psy-new-view__body' });
 
-    body.appendChild(el('h3', {}, ['Integracje']));
-    body.appendChild(el('div', { class: 'psy-new-stack', style: { marginBottom: '18px' } }, [
-        el('div', { class: 'psy-new-row' }, [
-            el('span', { class: 'psy-new-badge psy-new-badge--neutral' }, ['📁 Folder lokalny: niepodpięty']),
-            el('button', {
-                class: 'btn btn--secondary btn--sm',
-                onclick: () => document.getElementById('btn-connect-folder').click()
-            }, ['Połącz folder'])
-        ]),
-        el('div', { class: 'psy-new-row' }, [
-            el('span', { class: 'psy-new-badge psy-new-badge--neutral' }, ['☁️ Google Drive: niepodpięty']),
-            el('button', {
-                class: 'btn btn--secondary btn--sm',
-                onclick: () => document.getElementById('btn-connect-drive').click()
-            }, ['Połącz Drive'])
-        ]),
-        el('div', { class: 'psy-new-row' }, [
-            el('label', { style: { minWidth: '200px' } }, ['Nazwa folderu głównego w Drive:']),
-            el('input', {
-                type: 'text',
-                value: 'pacjenci',
-                style: { flex: '1', padding: '6px 10px', border: '1px solid #D1D5DB', borderRadius: '6px' }
-            })
-        ])
-    ]));
-
-    body.appendChild(el('h3', { id: 'dev-data', style: { marginTop: '22px' } }, ['Stan lokalnego folderu (dev)']));
-    body.appendChild(el('div', { class: 'psy-new-hint', style: { marginBottom: '8px' } }, [
-        'Aplikacja działa obecnie w trybie dev — całość bazy pacjentów żyje w ' +
-        'localStorage przeglądarki (klucz ',
-        el('code', {}, ['psy-new:data']),
-        '). Przy pierwszym uruchomieniu została zaseedowana z `_fake-data.js`.'
-    ]));
-    body.appendChild(el('div', { class: 'psy-new-row', style: { marginBottom: '12px' } }, [
-        el('span', { class: 'psy-new-badge psy-new-badge--neutral' }, [
-            Store.state.patients.length + ' pacjentów · ' +
-            Store.state.visits.length + ' wizyt · ' +
-            Store.state.meds.length + ' leków · ' +
-            Store.state.diagnoses.length + ' diagnoz · ' +
-            Store.state.recommendations.length + ' zaleceń · ' +
-            Store.state.tests.length + ' testów'
-        ])
-    ]));
-    body.appendChild(el('div', { class: 'psy-new-row', style: { marginBottom: '18px', gap: '8px' } }, [
+    /* --- Magazyn danych --- */
+    body.appendChild(el('h3', {}, ['Gdzie są dane pacjentów']));
+    body.appendChild(el('div', { class: 'psy-new-row', style: { marginBottom: '8px' } }, [
+        el('span', { class: 'psy-new-badge psy-new-badge--' + (st.storageConnected ? 'success' : 'neutral') },
+            [storageDescription()]),
         el('button', {
             class: 'btn btn--secondary btn--sm',
-            title: 'Wyczyść localStorage i wczytaj demo (5 pacjentów z fake-data.js)',
             onclick: async () => {
+                if (!st.storageConnected && !st.devMode) { showStorageGate(); return; }
+                if (Store.hasUnsavedChanges()) {
+                    const saved = await Store.flushNow();
+                    if (!saved) {
+                        toast('warning', 'Są niezapisane zmiany', 'Najpierw przywróć połączenie, żeby zmiany się zapisały.');
+                        return;
+                    }
+                }
                 const ok = await openConfirm({
-                    title: 'Odłączyć folder i wczytać demo?',
-                    message: 'Wszystkie zmiany wprowadzone w tej sesji zostaną utracone. Dane zostaną przywrócone do początkowych fake-data (5 pacjentów).',
-                    confirmLabel: 'Wczytaj demo',
+                    title: 'Zmienić miejsce przechowywania danych?',
+                    message: st.devMode
+                        ? 'Wyjdziesz z trybu demo. Dane przykładowe zostaną w tej przeglądarce.'
+                        : 'Aplikacja odłączy się od obecnego magazynu. Dane pacjentów ZOSTAJĄ tam, gdzie są — '
+                          + 'możesz połączyć się ponownie w każdej chwili.',
+                    confirmLabel: 'Odłącz',
                     variant: 'primary'
                 });
-                if (ok) {
-                    Store.resetAll();
-                    toast('info', 'Wczytano demo', 'Zreseedowano z _fake-data.js.');
-                    window.location.hash = '#/patients';
-                }
+                if (!ok) return;
+                await Store.disconnectStorage();
+                window.location.hash = APP_PATIENTS_ROUTE;
+                showStorageGate();
             }
-        }, ['🔌 Odłącz folder & wczytaj demo']),
-        el('button', {
-            class: 'btn btn--danger btn--sm',
-            title: 'Wyczyść WSZYSTKO — pusta baza (jak po pierwszym uruchomieniu przed podpięciem folderu/Drive)',
-            onclick: async () => {
-                const ok = await openConfirm({
-                    title: 'Wyczyścić wszystko do zera?',
-                    message: 'Symulujesz pierwsze uruchomienie aplikacji. Cała lokalna baza zostanie usunięta — pacjenci, wizyty, leki, diagnozy, zalecenia, testy. Operacji nie da się cofnąć.',
-                    confirmLabel: 'Wyczyść wszystko',
-                    variant: 'danger'
-                });
-                if (ok) {
-                    Store.wipeAll();
-                    toast('warning', 'Wyczyszczono wszystko', 'Aplikacja w stanie pierwszego uruchomienia.');
-                    window.location.hash = '#/patients';
-                }
-            }
-        }, ['🧹 Wyczyść wszystko (czysty start)'])
+        }, [st.storageConnected || st.devMode ? 'Zmień / odłącz' : 'Połącz'])
+    ]));
+    body.appendChild(el('div', { class: 'psy-new-hint', style: { marginBottom: '18px' } }, [
+        'Na Dysku Google aplikacja zakłada folder „pacjenci", a w nim folder każdego pacjenta z jego arkuszem '
+        + 'i załącznikami. Arkusz ma czytelne zakładki (Pacjent, Wizyty, Leki, Diagnozy…), więc dane da się '
+        + 'przeglądać także bez aplikacji. Aplikacja nie ma własnego serwera ani kopii danych.'
     ]));
 
-    body.appendChild(el('h3', { style: { marginTop: '20px' } }, ['Baza leków psychotropowych (' + FAKE_MED_DICT.length + ')']));
+    /* --- Google --- */
+    const clientInput = el('input', {
+        type: 'text',
+        value: getGoogleClientId(),
+        spellcheck: 'false',
+        style: { flex: '1', padding: '6px 10px', border: '1px solid #D1D5DB', borderRadius: '6px', fontFamily: 'monospace', fontSize: '12px' }
+    });
+    body.appendChild(el('h3', { style: { marginTop: '8px' } }, ['Google — konfiguracja (dla administratora)']));
+    body.appendChild(el('div', { class: 'psy-new-row', style: { marginBottom: '6px' } }, [
+        el('label', { style: { minWidth: '150px' } }, ['Identyfikator klienta OAuth:']),
+        clientInput,
+        el('button', {
+            class: 'btn btn--secondary btn--sm',
+            onclick: () => {
+                setGoogleClientId(clientInput.value);
+                clientInput.value = getGoogleClientId();
+                toast('success', 'Zapisano', 'Nowy identyfikator zadziała przy następnym łączeniu z Dyskiem Google.');
+            }
+        }, ['Zapisz']),
+        el('button', {
+            class: 'btn btn--secondary btn--sm',
+            title: 'Przywróć identyfikator wbudowany w aplikację',
+            onclick: () => { setGoogleClientId(''); clientInput.value = DEFAULT_GOOGLE_CLIENT_ID; }
+        }, ['Domyślny'])
+    ]));
+    body.appendChild(el('div', { class: 'psy-new-hint', style: { marginBottom: '18px' } }, [
+        'W konsoli Google Cloud, przy tym kliencie OAuth, w „Authorized JavaScript origins" musi być adres: ',
+        el('code', {}, [window.location.origin]),
+        '. W projekcie muszą być włączone „Google Drive API" i „Google Sheets API".'
+    ]));
+
+    /* --- Tryb demo --- */
+    if (st.devMode) {
+        body.appendChild(el('h3', { style: { marginTop: '8px' } }, ['Tryb demo']));
+        body.appendChild(el('div', { class: 'psy-new-row', style: { marginBottom: '18px', gap: '8px' } }, [
+            el('span', { class: 'psy-new-badge psy-new-badge--neutral' }, [
+                st.patients.length + ' pacjentów · ' + st.visits.length + ' wizyt · ' + st.tests.length + ' testów'
+            ]),
+            el('button', {
+                class: 'btn btn--secondary btn--sm',
+                onclick: async () => {
+                    const ok = await openConfirm({
+                        title: 'Przywrócić dane przykładowe?',
+                        message: 'Zmiany wprowadzone w trybie demo zostaną zastąpione danymi przykładowymi.',
+                        confirmLabel: 'Przywróć',
+                        variant: 'primary'
+                    });
+                    if (ok) { Store.resetAll(); window.location.hash = APP_PATIENTS_ROUTE; }
+                }
+            }, ['Przywróć dane przykładowe']),
+            el('button', {
+                class: 'btn btn--danger btn--sm',
+                onclick: async () => {
+                    const ok = await openConfirm({
+                        title: 'Wyczyścić dane demo?',
+                        message: 'Lista pacjentów trybu demo będzie pusta (jak przy pierwszym uruchomieniu).',
+                        confirmLabel: 'Wyczyść',
+                        variant: 'danger'
+                    });
+                    if (ok) { Store.wipeAll(); window.location.hash = APP_PATIENTS_ROUTE; }
+                }
+            }, ['Wyczyść dane demo'])
+        ]));
+    }
+
+    /* --- Baza leków --- */
+    body.appendChild(el('h3', { style: { marginTop: '8px' } }, ['Baza leków psychotropowych (' + FAKE_MED_DICT.length + ')']));
     const table = el('table', { class: 'psy-new-table' });
     table.appendChild(el('thead', {}, [
         el('tr', {}, [
@@ -1607,8 +1174,6 @@ const ROUTE_MAP = {
     '#/patients':             { renderer: viewPatients,            menuId: null },
 
     // Diagnozy
-    '#/diagnoses/new':        { renderer: viewDiagnosisForm,       menuId: 'diagnoses',       needsPatient: true },
-    '#/diagnoses/edit':       { renderer: viewDiagnosisForm,       menuId: 'diagnoses',       needsPatient: true },
     '#/diagnoses':            { renderer: viewDiagnoses,           menuId: 'diagnoses',       needsPatient: true },
 
     // Zalecenia
@@ -1617,8 +1182,6 @@ const ROUTE_MAP = {
     '#/recommendations':      { renderer: viewRecommendations,     menuId: 'recommendations', needsPatient: true },
 
     // Leki
-    '#/meds/new':             { renderer: viewMedForm,             menuId: 'meds',            needsPatient: true },
-    '#/meds/edit':            { renderer: viewMedForm,             menuId: 'meds',            needsPatient: true },
     '#/meds':                 { renderer: viewMeds,                menuId: 'meds',            needsPatient: true },
 
     // Testy
@@ -1660,9 +1223,8 @@ const AppController = {
         this.mainEl = document.getElementById('psy-new-main');
         this.patientHostEl = document.getElementById('psy-new-topbar-patient');
         this.saveIndicatorEl = document.getElementById('save-indicator');
-        this.folderStatusEl = document.getElementById('folder-status');
+        this.storageBtnEl = document.getElementById('btn-storage');
         this._lastSaveStatus = null;
-        this._lastRenderedHash = null;
 
         this._bindTopbar();
         this._renderSidebar();
@@ -1671,108 +1233,79 @@ const AppController = {
             this.shellEl.classList.toggle('psy-new-shell--menu-open');
         });
 
-        // Hash change → force re-render (zmiana widoku, force=true)
         window.addEventListener('hashchange', () => this._onHashChange());
 
-        // Po zamknięciu modala — force re-render (modal mógł zmienić Store)
+        // Po zamknięciu okna potwierdzenia: odśwież widoki list (formularze „live"
+        // zostają nietknięte — same pilnują swojego stanu).
         window.addEventListener('psy-modal-closed', () => {
-            this._renderView(true);
+            this._renderView(false);
             this._updateSidebarActive();
             this._renderPatientTag();
         });
 
-        // Store subscription — pasywny re-render (pomija widoki z data-live)
         Store.subscribe((state) => {
             this._renderPatientTag();
             this._updateSaveIndicator(state.saveStatus);
-            this._updateFolderStatusBadge();
+            this._updateStorageBadge();
             this._renderView(false);
             this._updateSidebarActive();
         });
 
-        // PR-I: spróbuj odzyskać podpięcie folderu z poprzedniej sesji
-        // (IndexedDB). Jeśli się udało → state.folderConnected=true.
-        // Jeśli permission expired → state.folderStatus='denied' + folderName
-        // (gate pokaże opcję „Przywróć dostęp").
-        await Store.restoreLocalFolder();
+        // Ostatnio używany magazyn: folder lokalny wraca sam, Dysk Google wymaga
+        // jednego kliknięcia (przeglądarka nie pozwala otworzyć logowania bez gestu).
+        await Store.restoreStorage();
 
-        // Folder gate — pokaż gdy nie ma trybu storage'u (init/denied/unsupported
-        // i devMode=false). Apka się NIE rusza dopóki gate jest widoczny.
         if (shouldShowGate()) {
-            showFolderGate();
-            // Mimo że gate pokazany, ustaw resztę bootstrap'u (sidebar/topbar/route)
-            // — nie robimy renderView, bo gate to przykrywa.
-            Store.restoreLastPatient();
+            showStorageGate();
             this._updateSaveIndicator(Store.state.saveStatus);
-            this._updateFolderStatusBadge();
-            console.log('[PsychoApp new] initialized — folder gate active');
+            this._updateStorageBadge();
             return;
         }
+        this.afterStorageReady();
+    },
 
-        Store.restoreLastPatient();
-
-        if (!window.location.hash) {
-            window.location.hash = APP_DEFAULT_ROUTE;
-        } else {
-            this._onHashChange();
-        }
-
+    /** Magazyn wybrany (przy starcie albo na ekranie startowym) — pokaż aplikację. */
+    afterStorageReady() {
+        hideStorageGate();
         this._renderPatientTag();
         this._updateSaveIndicator(Store.state.saveStatus);
-        this._updateFolderStatusBadge();
-        this._renderView(true);
-        this._updateSidebarActive();
-
-        console.log('[PsychoApp new] initialized — ' +
-            (Store.state.folderConnected ? 'folder: ' + Store.state.folderName : 'devmode'));
+        this._updateStorageBadge();
+        if (!window.location.hash) window.location.hash = APP_DEFAULT_ROUTE;   // → hashchange
+        else this._onHashChange();
     },
 
     _bindTopbar() {
-        // PR-I: przycisk „Folder pacjentów" — jeśli niepodpięty, pokaż gate;
-        // jeśli podpięty, pokaż menu z opcją odpięcia.
-        document.getElementById('btn-connect-folder').addEventListener('click', async () => {
-            if (Store.isLocalConnected()) {
-                // Już podpięty — pokaż info + opcja odpięcia
-                const ok = await window.confirm(
-                    'Folder „' + Store.state.folderName + '" jest podpięty.\n\n' +
-                    'Czy chcesz go odpiąć? Dane zostaną w localStorage przeglądarki, ' +
-                    'ale przestaną się synchronizować z folderem.'
-                );
-                if (ok) {
-                    await Store.disconnectLocalFolder();
-                    toast('info', 'Folder odłączony', 'Aplikacja przeszła w tryb localStorage.');
-                    showFolderGate();
-                }
-            } else {
-                // Niepodpięty — pokaż gate
-                showFolderGate();
-            }
-        });
-        document.getElementById('btn-connect-drive').addEventListener('click', () => {
-            toast('info', 'Google Drive', 'Integracja z Drive zostanie aktywowana w Fazie 4 (PR-19).');
+        this.storageBtnEl.addEventListener('click', () => {
+            const st = Store.state;
+            if (st.storageConnected && st.storageStatus === 'needs-auth') Store.reconnectStorage();
+            else if (st.storageConnected || st.devMode) window.location.hash = APP_SETTINGS_ROUTE;
+            else showStorageGate();
         });
         document.getElementById('btn-settings').addEventListener('click', () => {
             window.location.hash = APP_SETTINGS_ROUTE;
         });
     },
 
-    _updateFolderStatusBadge() {
-        const btn = document.getElementById('btn-connect-folder');
+    _updateStorageBadge() {
+        const btn = this.storageBtnEl;
         if (!btn) return;
-        if (Store.isLocalConnected()) {
-            btn.textContent = '📁 ' + (Store.state.folderName || 'folder');
-            btn.classList.add('psy-new-topbar__btn--connected');
-            btn.title = 'Folder podpięty: ' + Store.state.folderName + ' — kliknij aby odłączyć';
-        } else if (Store.state.devMode) {
-            btn.textContent = '🧪 Tryb dev';
-            btn.classList.remove('psy-new-topbar__btn--connected');
+        const st = Store.state;
+        btn.classList.remove('psy-new-topbar__btn--connected', 'psy-new-topbar__btn--devmode');
+        if (st.storageConnected && st.storageStatus === 'needs-auth') {
+            btn.textContent = '⚠ Połącz ponownie';
+            btn.title = 'Połączenie z magazynem wymaga odnowienia — kliknij';
             btn.classList.add('psy-new-topbar__btn--devmode');
-            btn.title = 'Tryb deweloperski (localStorage) — kliknij aby podpiąć folder';
+        } else if (st.storageConnected) {
+            btn.textContent = st.storageKind === 'gdrive' ? '☁️ Dysk Google' : '📁 ' + (st.storageLabel || 'folder');
+            btn.title = 'Dane: ' + storageDescription();
+            btn.classList.add('psy-new-topbar__btn--connected');
+        } else if (st.devMode) {
+            btn.textContent = '🧪 Tryb demo';
+            btn.title = 'Dane przykładowe, tylko w tej przeglądarce — kliknij, aby podłączyć magazyn';
+            btn.classList.add('psy-new-topbar__btn--devmode');
         } else {
-            btn.textContent = '📁 Folder pacjentów';
-            btn.classList.remove('psy-new-topbar__btn--connected');
-            btn.classList.remove('psy-new-topbar__btn--devmode');
-            btn.title = 'Podpiej folder z pacjentami';
+            btn.textContent = 'Dane: niepodłączone';
+            btn.title = 'Wybierz miejsce przechowywania danych';
         }
     },
 
@@ -1781,33 +1314,20 @@ const AppController = {
         if (this._lastSaveStatus === status) return;
         this._lastSaveStatus = status;
 
-        const elNode = this.saveIndicatorEl;
-        elNode.classList.remove(
-            'psy-new-topbar__save--idle',
-            'psy-new-topbar__save--saving',
-            'psy-new-topbar__save--saved',
-            'psy-new-topbar__save--error'
+        const node = this.saveIndicatorEl;
+        node.classList.remove(
+            'psy-new-topbar__save--idle', 'psy-new-topbar__save--saving',
+            'psy-new-topbar__save--saved', 'psy-new-topbar__save--error'
         );
-
-        switch (status) {
-            case 'saving':
-                elNode.classList.add('psy-new-topbar__save--saving');
-                elNode.textContent = '⟳ Zapisywanie...';
-                break;
-            case 'saved':
-                elNode.classList.add('psy-new-topbar__save--saved');
-                elNode.textContent = '✓ Zapisano';
-                break;
-            case 'error':
-                elNode.classList.add('psy-new-topbar__save--error');
-                elNode.textContent = '⚠ Błąd zapisu';
-                break;
-            case 'idle':
-            default:
-                elNode.classList.add('psy-new-topbar__save--idle');
-                elNode.textContent = '💾 Autozapis (lokalnie)';
-                break;
-        }
+        const map = {
+            saving: ['psy-new-topbar__save--saving', '⟳ Zapisywanie…'],
+            saved:  ['psy-new-topbar__save--saved',  '✓ Zapisano'],
+            error:  ['psy-new-topbar__save--error',  '⚠ Niezapisane'],
+            idle:   ['psy-new-topbar__save--idle',   '💾 Autozapis']
+        };
+        const [cls, text] = map[status] || map.idle;
+        node.classList.add(cls);
+        node.textContent = text;
     },
 
     _renderSidebar() {
@@ -1911,55 +1431,81 @@ const AppController = {
 
 
     _onHashChange() {
+        if (shouldShowGate()) return;                       // ekran startowy przykrywa aplikację
         const resolved = resolveRoute(window.location.hash);
-        Store.setRoute(resolved.hash);
-
         if (resolved.needsPatient && !Store.state.currentPatient) {
             toast('warning', 'Wybierz pacjenta', 'Aby przejść do tej sekcji, najpierw wybierz pacjenta.');
             window.location.hash = APP_PATIENTS_ROUTE;
             return;
         }
-
-        // Zmiana hasha → force re-render
         this._renderView(true);
         this._updateSidebarActive();
     },
 
+    /** Pacjent, którego pełne dane są potrzebne do wyświetlenia bieżącej trasy. */
+    _patientIdForRoute(resolved) {
+        const m = (window.location.hash || '').match(/^#\/patients\/(?:detail|edit)\/([^/?]+)/);
+        if (m) return decodeURIComponent(m[1]);
+        if (resolved.needsPatient) return Store.state.currentPatient ? Store.state.currentPatient.id : null;
+        return null;
+    },
+
     /**
-     * @param {boolean} force — jeśli true, renderuje zawsze; jeśli false (domyślny
-     *   pasywny re-render po Store.subscribe), pomija gdy aktualnie renderowany
-     *   widok ma `data-live="true"` (formularz z autozapisem trzyma stan sam).
+     * @param {boolean} force — true: zawsze rysuj (zmiana trasy); false: odświeżenie
+     *   po zmianie danych, pomijane dla widoków „live" (formularzy).
      */
     _renderView(force = false) {
-        // Modal aktywny → pomijamy (klasycznie — żeby nie zabić formularza w modalu)
-        if (document.body.classList.contains('psy-modal-open')) {
-            return;
-        }
+        if (document.body.classList.contains('psy-modal-open')) return;
 
-        // Pasywny re-render i widok jest „live" → pomijamy
-        if (!force && this.mainEl.firstElementChild &&
-            this.mainEl.firstElementChild.dataset &&
-            this.mainEl.firstElementChild.dataset.live === 'true') {
-            return;
+        const current = this.mainEl.firstElementChild;
+        if (!force && current && current.dataset && current.dataset.live === 'true') return;
+
+        // Widok schodzi z ekranu — daj mu dokończyć zapis.
+        if (current && typeof current.psyTeardown === 'function') {
+            try { current.psyTeardown(); } catch (e) { console.error('[teardown]', e); }
         }
 
         const resolved = resolveRoute(window.location.hash);
         this.mainEl.innerHTML = '';
-        try {
-            const node = resolved.renderer();
-            this.mainEl.appendChild(node);
-            this._lastRenderedHash = resolved.hash;
-        } catch (e) {
-            console.error('[renderView]', e);
-            this.mainEl.appendChild(emptyState('⚠', 'Błąd renderowania', String(e && e.message || e), []));
-        }
 
-        // PR-J14: tryb form-mode shellu (sidebar zwężony do 56 px ze skrótami
-        // literowymi). Heurystyka: aktywujemy gdy widok zawiera `.psy-form-toolbar`
-        // (komponent pasek-narzędzi). Dzięki temu Etap B (pacjent/lek/diagnoza)
-        // dostanie zachowanie automatycznie — bez extra konfiguracji per route.
-        const isFormMode = !!this.mainEl.querySelector('.psy-form-toolbar');
-        this.shellEl.classList.toggle('psy-new-shell--form-mode', isFormMode);
+        let node;
+        const pid = this._patientIdForRoute(resolved);
+        if (pid && !Store.isPatientLoaded(pid)) {
+            node = this._patientLoadingView(pid);
+        } else {
+            try {
+                node = resolved.renderer();
+            } catch (e) {
+                console.error('[renderView]', e);
+                node = emptyState('⚠', 'Błąd wyświetlania', String(e && e.message || e), []);
+            }
+        }
+        this.mainEl.appendChild(node);
+
+        // Formularz wizyty zwęża menu boczne do ikon.
+        this.shellEl.classList.toggle('psy-new-shell--form-mode', !!this.mainEl.querySelector('.psy-form-toolbar'));
+    },
+
+    /** Dane pacjenta jeszcze nie pobrane z magazynu: pobierz i pokaż stan. */
+    _patientLoadingView(pid) {
+        const root = el('div', { class: 'psy-new-view' });
+        const body = el('div', { class: 'psy-new-view__body' });
+        const error = Store.getPatientLoadError(pid);
+        if (error) {
+            body.appendChild(emptyState('⚠', 'Nie udało się wczytać danych pacjenta', error, [
+                {
+                    label: 'Spróbuj ponownie', variant: 'primary',
+                    onClick: () => { Store.ensurePatientLoaded(pid, { retry: true }); this._renderView(true); }
+                },
+                { label: 'Lista pacjentów', onClick: () => (window.location.hash = APP_PATIENTS_ROUTE) }
+            ]));
+        } else {
+            body.appendChild(emptyState('⏳', 'Wczytuję dane pacjenta…', 'Pobieram arkusz pacjenta.', []));
+            // Zakończenie wczytywania zgłasza Store (subskrypcja przerysuje widok).
+            Store.ensurePatientLoaded(pid);
+        }
+        root.appendChild(body);
+        return root;
     },
 
     _updateSidebarActive() {

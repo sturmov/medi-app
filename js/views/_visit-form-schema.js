@@ -35,7 +35,7 @@
 //   label      - etykieta pola
 //   required   - true/false (gwiazdka)
 //   onlyIn     - 'first' | 'followup' | undefined
-//   fullWidth  - true = pole zajmuje pełną szerokość gridu
+//   fullWidth  - true = w sekcji `compactGrid` pole zajmuje obie kolumny siatki
 //   input      - { type, options?, unit?, ref? }
 //       type: 'text' | 'textarea' | 'number' | 'date' |
 //             'select' | 'multi-select' | 'radio' | 'checkbox-group' |
@@ -171,7 +171,7 @@ export const VISIT_FORM_SCHEMA = [
         id: 'farmakoterapia',
         title: 'Ogólna farmakoterapia (i suplementy)',        sectionComment: true,
         subfields: [
-            { id: 'leki', label: 'Leki psychotropowe', fullWidth: true, input: { type: 'inline-meds' }, notes: false }
+            { id: 'leki', label: 'Leki psychotropowe', input: { type: 'inline-meds' }, notes: false }
         ]
     },
 
@@ -182,7 +182,7 @@ export const VISIT_FORM_SCHEMA = [
         id: 'uzywki',
         title: 'Używki',        sectionComment: true,
         subfields: [
-            { id: 'substancje', label: 'Substancje', fullWidth: true, input: { type: 'uzywki-special' }, notes: false }
+            { id: 'substancje', label: 'Substancje', input: { type: 'uzywki-special' }, notes: false }
         ]
     },
 
@@ -215,7 +215,7 @@ export const VISIT_FORM_SCHEMA = [
             // Tryb mały (widoczny zawsze)
             { id: 'stanPsy',     label: 'Stan psychiczny',                      input: { type: 'multi-select', options: VISIT_DICT.STAN_PSYCHICZNY } },
             { id: 'wglad',       label: 'Stopień współpracy / wgląd',           input: { type: 'radio', options: VISIT_DICT.WGLAD } },
-            { id: 'obserwacje',  label: 'Obserwacje podczas spotkania',         fullWidth: true },
+            { id: 'obserwacje',  label: 'Obserwacje podczas spotkania',         input: { type: 'textarea' }, notes: false },
             { id: 'suicydalnosc',label: 'Suicydalność / zachowania autoagresywne', input: { type: 'radio', options: VISIT_DICT.SUICYDALNOSC_SHORT } },
             { id: 'ryzykoS',     label: 'Ocena ryzyka S',                       input: { type: 'select', options: VISIT_DICT.RYZYKO_S } },
 
@@ -259,7 +259,7 @@ export const VISIT_FORM_SCHEMA = [
             // Czynniki ochronne (oznaczone sub-headerem w labelu)
             { id: '__header_ochrona', label: '— Czynniki ochronne —', input: { type: 'header' }, notes: false },
 
-            { id: 'powstrzymuje',  label: 'Co powstrzymuje przed działaniem',               fullWidth: true },
+            { id: 'powstrzymuje',  label: 'Co powstrzymuje przed działaniem',               input: { type: 'textarea' }, notes: false },
             { id: 'osoba',         label: 'Osoba dostępna do kontaktu dziś/w nocy',         input: { type: 'text' } },
             { id: 'zdolnoscBezp',  label: 'Zdolność do utrzymania bezpieczeństwa',          input: { type: 'radio', options: VISIT_DICT.ZDOLNOSC_BEZP } },
             { id: 'gotowosc',      label: 'Gotowość do skorzystania z pomocy',              input: { type: 'radio', options: VISIT_DICT.GOTOWOSC_POMOC } },
@@ -305,7 +305,7 @@ export const VISIT_FORM_SCHEMA = [
         id: 'rozpoznanie',
         title: 'Rozpoznanie (ICD-10)',        sectionComment: true,
         subfields: [
-            { id: 'diagnozy', label: 'Rozpoznania', fullWidth: true, input: { type: 'inline-diagnoses' }, notes: false }
+            { id: 'diagnozy', label: 'Rozpoznania', input: { type: 'inline-diagnoses' }, notes: false }
         ]
     },
 
@@ -318,11 +318,11 @@ export const VISIT_FORM_SCHEMA = [
         sectionComment: true,
         subfields: [
             { id: 'rekomendacje',     label: 'Rekomendacje', onlyIn: 'first', input: { type: 'multi-select', options: VISIT_DICT.REKOMENDACJE_TYP } },
-            { id: 'ustalenia',        label: 'Ustalenia i plan leczenia',                 fullWidth: true },
+            { id: 'ustalenia',        label: 'Ustalenia i plan leczenia',                 input: { type: 'textarea' }, notes: false },
             { id: 'pilnaKonsultacja', label: 'Pilna konsultacja z innym specjalistą?',    input: { type: 'radio', options: VISIT_DICT.PILNA_KONSULTACJA } },
             { id: 'kontrolna',        label: 'Wizyta kontrolna',                          input: { type: 'select', options: VISIT_DICT.KONTROLNA_TERMIN } },
-            { id: 'ewaluacja',        label: 'Ewaluacja',                                 fullWidth: true },
-            { id: 'dodatkowe',        label: 'Informacje dodatkowe i zabezpieczenia',     onlyIn: 'first', fullWidth: true }
+            { id: 'ewaluacja',        label: 'Ewaluacja',                                 input: { type: 'textarea' }, notes: false },
+            { id: 'dodatkowe',        label: 'Informacje dodatkowe i zabezpieczenia',     onlyIn: 'first', input: { type: 'textarea' }, notes: false }
         ]
     }
 ];

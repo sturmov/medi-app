@@ -44,7 +44,7 @@ import {
     readPatientWorkbook
 } from './_xlsx-codec.js';
 
-import { patientFolderName } from './_storage-format.js';
+import { patientFolderName } from './_patient-doc.js';
 
 /** Nazwa pliku z danymi pacjenta wewnątrz subfolderu. */
 const PATIENT_FILE = 'pacjent.xlsx';
@@ -58,17 +58,12 @@ const DOCUMENTS_FOLDER = 'dokumenty';
 // ============================================================================
 
 /**
- * Skanuje folder root i zwraca listę „lekkich" metadanych pacjentów.
- * Otwiera każdy subfolder `{KOD}_{Naz}_{Imię}/pacjent.xlsx`, parsuje TYLKO
- * zakładkę Pacjent i wyciąga klucze do listy startowej.
- *
- * Pominięte subfoldery:
- *   - bez `pacjent.xlsx` (np. ręcznie utworzony pusty folder)
- *   - zaczynające się od `_` (zarezerwowane np. `_archive/`, `_backup/`)
+ * Skanuje folder główny: każdy podfolder z plikiem `pacjent.xlsx` to jeden pacjent.
+ * Zwraca od razu cały dokument pacjenta (plik i tak trzeba przeczytać).
+ * Podfoldery bez pliku pacjenta oraz zaczynające się od `_` są pomijane.
  *
  * @param {FileSystemDirectoryHandle} rootHandle
- * @returns {Promise<Array<{kod, folderName, folderHandle, imie, nazwisko, pesel,
- *                          telefon, email, dataUrodzenia, archived, lastModified}>>}
+ * @returns {Promise<Array<{folderName, doc} | {folderName, kod, error}>>}
  */
 export async function scanPatientFolders(rootHandle) {
     if (!rootHandle) return [];
@@ -76,62 +71,23 @@ export async function scanPatientFolders(rootHandle) {
     const results = [];
 
     for (const { name, handle } of subfolders) {
-        if (name.startsWith('_')) continue;   // zarezerwowane
-
+        if (name.startsWith('_')) continue;   // zarezerwowane (np. `_archiwum/`)
         try {
             const buf = await readBinaryFile(handle, PATIENT_FILE);
-            if (!buf) {
-                console.warn('[scanPatientFolders] brak pacjent.xlsx w', name);
-                continue;
-            }
-
-            const full = readPatientWorkbook(buf);
-            const p = full.patient || {};
-
-            // Wyciągnij ostatnią modyfikację z systemu plików (lastModified)
-            let lastModified = 0;
-            try {
-                const fh = await handle.getFileHandle(PATIENT_FILE);
-                const file = await fh.getFile();
-                lastModified = file.lastModified;
-            } catch (_) { /* ignore */ }
-
-            results.push({
-                kod: p.id || _parseKodFromFolderName(name),
-                folderName: name,
-                folderHandle: handle,
-                imie: p.imie || '',
-                nazwisko: p.nazwisko || '',
-                pesel: p.pesel || '',
-                telefon: p.telefon || '',
-                email: p.email || '',
-                dataUrodzenia: p.dataUrodzenia || '',
-                archived: p.archived === true,
-                lastModified
-            });
+            if (!buf) continue;               // folder bez pliku pacjenta — pomijamy
+            results.push({ folderName: name, doc: readPatientWorkbook(buf) });
         } catch (e) {
-            console.warn('[scanPatientFolders] błąd parsowania', name, e);
-            // best-effort: pomijamy zepsute pliki, ale dodajemy szkielet wiersza,
-            // żeby pacjent nie zniknął z listy.
+            console.warn('[scanPatientFolders] nie udało się odczytać', name, e);
+            // Pacjent nie może zniknąć z listy tylko dlatego, że plik jest uszkodzony.
             results.push({
-                kod: _parseKodFromFolderName(name),
                 folderName: name,
-                folderHandle: handle,
-                imie: '(błąd odczytu)',
-                nazwisko: name,
-                pesel: '',
-                telefon: '',
-                email: '',
-                dataUrodzenia: '',
-                archived: false,
-                lastModified: 0,
-                _parseError: String(e && e.message || e)
+                kod: _parseKodFromFolderName(name),
+                error: String(e && e.message || e)
             });
         }
     }
 
-    // Sortuj po kodzie (P001 < P002 < ...)
-    results.sort((a, b) => (a.kod || '').localeCompare(b.kod || ''));
+    results.sort((x, y) => x.folderName.localeCompare(y.folderName));
     return results;
 }
 

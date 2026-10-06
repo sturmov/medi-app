@@ -19,7 +19,8 @@
 
 import { Store } from './_store.js';
 import { openConfirm } from './_modal.js';
-import { downloadPatientWorkbook, buildFullPatient } from './_xlsx-codec.js';
+import { downloadPatientWorkbook } from './_xlsx-codec.js';
+import { buildPatientDoc } from './_patient-doc.js';
 // F5.4 (2026-05-11): walidatory PESEL/tel/mail + autofill z PESEL
 import {
     validatePesel, parsePesel, validatePhone, validateEmail
@@ -246,7 +247,7 @@ export function renderPatientDetail(opts = {}) {
         title: 'Pobierz pełną kartę pacjenta jako plik XLSX (kopia/backup)',
         onclick: () => {
             try {
-                const fullPatient = buildFullPatient(Store, _id);
+                const fullPatient = buildPatientDoc(Store.state, _id);
                 if (!fullPatient) {
                     toast('error', 'Brak pacjenta', 'Nie udało się znaleźć danych pacjenta.');
                     return;

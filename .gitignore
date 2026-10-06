@@ -44,3 +44,6 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Zrzuty ekranu z testu przeglądarkowego
+tools/.smoke/
