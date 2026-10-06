@@ -1,18 +1,19 @@
 // ============================================================================
-// view-parameters.js — sekcja „Parametry" pacjenta.
+// view-parameters.js — sekcja „Parametry" pacjenta (READ-ONLY OŚ CZASU).
 //
-// PR-J8 (2026-05-11): nowa pozycja w sidebarze (#9 wg z4.jpg).
-// Klientka: „to co już mamy idzie na górę, reszta niżej; sekcja powstaje
-// na przyszłość". Na start: wzrost, waga, BMI auto, ciśnienie skurczowe/
-// rozkurczowe, tętno. W przyszłości — trend wartości w czasie + powiązanie
-// z konkretną wizytą.
-//
-// Dane: `patient.parameters{height, weight, bmi, systolic, diastolic, pulse}`.
-// Autozapis: debounce 400 ms na każdej zmianie (jak w `view-patient-detail.js`).
-// LIVE-VIEW: root ma `data-live="true"` — autozapis nie tłucze focus/scroll.
+// 2026-06-13 (refactor wg klientki):
+//   • Klientka: „parametry to akapity wizyty — ekstrakt z treści wizyt
+//     wg daty i kolejności". Sekcja boczna „Parametry" pokazuje read-only
+//     listę pomiarów (wzrost / waga / BMI auto / komentarz) z każdej wizyty,
+//     posortowanych od najnowszej do najstarszej.
+//   • Edycja parametrów odbywa się INLINE w sekcji „Parametry somatyczne"
+//     formularza wizyty (1-okienny grid compact).
+//   • USUNIĘTE: ciśnienie skurczowe/rozkurczowe, tętno — klientka „reszta
+//     niepotrzebna, zostaje wzrost/waga/BMI/komentarz".
 // ============================================================================
 
 import { Store } from './_store.js';
+import { visitTypeById } from './_fake-data.js';
 
 // ---- helpers ----------------------------------------------------------------
 
@@ -46,24 +47,8 @@ function el(tag, props = {}, children = []) {
     return node;
 }
 
-/**
- * Wylicz BMI ze wzrostu (cm) i wagi (kg). Zwraca string z 1 miejscem po
- * przecinku lub '' gdy nie da się policzyć.
- */
-function computeBmi(heightCm, weightKg) {
-    const h = parseFloat(heightCm);
-    const w = parseFloat(weightKg);
-    if (!h || !w || h <= 0 || w <= 0) return '';
-    const m = h / 100;
-    const bmi = w / (m * m);
-    if (!isFinite(bmi)) return '';
-    return bmi.toFixed(1);
-}
-
-/**
- * Interpretacja BMI wg WHO (orientacyjnie, do wyświetlenia obok wartości).
- */
-function bmiCategory(bmiStr) {
+/** Interpretacja BMI wg WHO. */
+function _bmiCategory(bmiStr) {
     const v = parseFloat(bmiStr);
     if (!v) return '';
     if (v < 18.5) return 'niedowaga';
@@ -72,32 +57,6 @@ function bmiCategory(bmiStr) {
     if (v < 35)   return 'otyłość I°';
     if (v < 40)   return 'otyłość II°';
     return 'otyłość III°';
-}
-
-// ---- pojedyncze pole („nazwa : input [jedn.]") -----------------------------
-
-function paramField({ label, name, value, unit, type = 'number', readonly = false, hint = '', extra = '' }) {
-    const inputAttrs = {
-        type,
-        name,
-        class: 'psy-pdf__input',
-        value: value == null ? '' : String(value)
-    };
-    if (readonly) inputAttrs.readonly = true;
-    if (type === 'number') {
-        inputAttrs.step = name === 'parameters.bmi' ? '0.1' : '1';
-        inputAttrs.min  = '0';
-    }
-
-    return el('div', { class: 'psy-params__field' }, [
-        el('label', { class: 'psy-params__label' }, [label]),
-        el('div', { class: 'psy-params__input-row' }, [
-            el('input', inputAttrs),
-            unit ? el('span', { class: 'psy-params__unit' }, [unit]) : null,
-            extra ? el('span', { class: 'psy-params__extra' }, [extra]) : null
-        ]),
-        hint ? el('div', { class: 'psy-params__hint' }, [hint]) : null
-    ]);
 }
 
 // ---- VIEW -------------------------------------------------------------------
@@ -115,135 +74,84 @@ export function renderParameters() {
         return r;
     }
 
-    const params = patient.parameters || {};
+    const timeline = Store.getParametersTimeline(patient.id);
 
-    const root = el('div', {
-        class: 'psy-new-view psy-params-view',
-        dataset: { live: 'true' }   // pomiń pasywny re-render
-    });
+    const root = el('div', { class: 'psy-new-view' });
 
     // ---- nagłówek -----------------------------------------------------------
     root.appendChild(el('div', { class: 'psy-new-view__header' }, [
         el('div', {}, [
-            el('h1', { class: 'psy-new-view__title' }, ['📈 Parametry']),
+            el('h1', { class: 'psy-new-view__title' }, ['Parametry']),
             el('div', { class: 'psy-new-view__subtitle' }, [
-                patient.imie + ' ' + patient.nazwisko +
-                ' · autozapis aktywny · sekcja w rozwoju'
+                patient.imie + ' ' + patient.nazwisko + ' · ' + timeline.length +
+                ' ' + (timeline.length === 1 ? 'pomiar' : 'pomiarów') +
+                ' · oś czasu z wizyt (read-only)'
             ])
         ])
     ]));
 
     // ---- body ---------------------------------------------------------------
-    const body = el('div', { class: 'psy-new-view__body psy-params' });
+    const body = el('div', { class: 'psy-new-view__body psy-new-view__body--plain' });
 
-    // GŁÓWNY ZESTAW (klientka: „to co już mamy idzie na górę")
-    body.appendChild(el('h2', { class: 'psy-params__section-title' }, ['Antropometria i parametry życiowe']));
+    if (!timeline.length) {
+        body.appendChild(el('div', { class: 'psy-new-empty' }, [
+            el('div', { class: 'psy-new-empty__icon' }, ['📈']),
+            el('div', { class: 'psy-new-empty__title' }, ['Brak pomiarów']),
+            el('div', { class: 'psy-new-empty__description' }, [
+                'Pacjent nie ma jeszcze pomiarów antropometrycznych. ' +
+                'Dodaj wzrost/wagę w sekcji „Parametry somatyczne" formularza wizyty.'
+            ]),
+            el('div', { class: 'psy-new-empty__actions' }, [
+                el('button', {
+                    class: 'btn btn--primary',
+                    onclick: () => { window.location.hash = '#/history'; }
+                }, ['🗓️ Przejdź do wizyt'])
+            ])
+        ]));
+    } else {
+        const table = el('table', { class: 'psy-new-table' });
+        table.appendChild(el('thead', {}, [
+            el('tr', {}, [
+                el('th', { style: { width: '140px' } }, ['Data wizyty']),
+                el('th', { style: { width: '110px' } }, ['Wzrost (cm)']),
+                el('th', { style: { width: '110px' } }, ['Waga (kg)']),
+                el('th', { style: { width: '140px' } }, ['BMI (auto)']),
+                el('th', {}, ['Komentarz']),
+                el('th', { style: { width: '160px' } }, ['Typ wizyty'])
+            ])
+        ]));
+        const tbody = el('tbody', {});
+        for (const entry of timeline) {
+            const v = entry.visit;
+            const visitLabel = v.date + (v.time ? ' ' + v.time : '');
+            const typeObj = visitTypeById(v.type);
+            const typeLabel = typeObj ? typeObj.label : (v.type || '');
+            const bmiCat = _bmiCategory(entry.bmi);
+            const rowClick = () => { window.location.hash = '#/visit/form/' + v.id; };
 
-    const heightInput = paramField({
-        label: 'Wzrost',
-        name: 'parameters.height',
-        value: params.height,
-        unit: 'cm'
-    });
-    const weightInput = paramField({
-        label: 'Waga',
-        name: 'parameters.weight',
-        value: params.weight,
-        unit: 'kg'
-    });
-
-    // BMI — pole read-only wyliczane z wzrost+waga (live)
-    const initialBmi = computeBmi(params.height, params.weight) || params.bmi || '';
-    const bmiCat = bmiCategory(initialBmi);
-    const bmiField = paramField({
-        label: 'BMI',
-        name: 'parameters.bmi',
-        value: initialBmi,
-        unit: 'kg/m²',
-        readonly: true,
-        hint: 'auto (wzrost + waga)',
-        extra: bmiCat ? '· ' + bmiCat : ''
-    });
-
-    const sysField = paramField({
-        label: 'Ciśnienie skurczowe',
-        name: 'parameters.systolic',
-        value: params.systolic,
-        unit: 'mmHg'
-    });
-    const diaField = paramField({
-        label: 'Ciśnienie rozkurczowe',
-        name: 'parameters.diastolic',
-        value: params.diastolic,
-        unit: 'mmHg'
-    });
-    const pulseField = paramField({
-        label: 'Tętno',
-        name: 'parameters.pulse',
-        value: params.pulse,
-        unit: 'bpm'
-    });
-
-    const grid = el('div', { class: 'psy-params__grid' }, [
-        heightInput, weightInput, bmiField, sysField, diaField, pulseField
-    ]);
-    body.appendChild(grid);
-
-    // Dolna sekcja: placeholder na przyszłość
-    body.appendChild(el('h2', { class: 'psy-params__section-title psy-params__section-title--muted' }, [
-        'Dodatkowe parametry'
-    ]));
-    body.appendChild(el('div', { class: 'psy-new-empty' }, [
-        el('div', { class: 'psy-new-empty__icon' }, ['🚧']),
-        el('div', { class: 'psy-new-empty__title' }, ['Sekcja w rozwoju']),
-        el('div', { class: 'psy-new-empty__description' }, [
-            'W kolejnych iteracjach pojawią się: trend wartości w czasie (wykres), '
-            + 'pomiary powiązane z konkretną wizytą, dodatkowe parametry (saturacja, '
-            + 'temperatura, glikemia) — zgodnie z potrzebami klinicznymi.'
-        ])
-    ]));
+            tbody.appendChild(el('tr', {
+                title: 'Kliknij, aby otworzyć wizytę',
+                style: { cursor: 'pointer' },
+                onclick: rowClick
+            }, [
+                el('td', {}, [visitLabel]),
+                el('td', {}, [entry.wzrost || '—']),
+                el('td', {}, [entry.masa || '—']),
+                el('td', {}, [
+                    el('strong', {}, [entry.bmi || '—']),
+                    bmiCat ? el('span', {
+                        class: 'psy-new-hint',
+                        style: { marginLeft: '6px' }
+                    }, [' · ' + bmiCat]) : null
+                ].filter(Boolean)),
+                el('td', { style: { color: '#475569' } }, [entry.komentarz || '']),
+                el('td', { style: { color: '#475569' } }, [typeLabel])
+            ]));
+        }
+        table.appendChild(tbody);
+        body.appendChild(table);
+    }
 
     root.appendChild(body);
-
-    // ---- autozapis ----------------------------------------------------------
-    let _timer = null;
-
-    function readForm() {
-        const out = {};
-        body.querySelectorAll('input[name^="parameters."]').forEach((n) => {
-            if (n.readOnly) return;          // BMI auto, nie zapisujemy z formularza
-            const key = n.name.replace(/^parameters\./, '');
-            out[key] = n.value;
-        });
-        return out;
-    }
-
-    function autosave() {
-        const cp = Store.state.currentPatient;
-        if (!cp) return;
-        const raw = readForm();
-        const bmi = computeBmi(raw.height, raw.weight);
-        const next = Object.assign({}, params, raw, { bmi });
-        Store.updatePatient(cp.id, { parameters: next });
-
-        // Update BMI display + kategoria
-        const bmiInput = body.querySelector('input[name="parameters.bmi"]');
-        if (bmiInput) bmiInput.value = bmi;
-        const extraSpan = bmiInput && bmiInput.parentElement &&
-            bmiInput.parentElement.querySelector('.psy-params__extra');
-        if (extraSpan) {
-            const cat = bmiCategory(bmi);
-            extraSpan.textContent = cat ? '· ' + cat : '';
-        }
-    }
-
-    function scheduleAutosave() {
-        if (_timer) clearTimeout(_timer);
-        _timer = setTimeout(autosave, 400);
-    }
-
-    body.addEventListener('input', scheduleAutosave);
-    body.addEventListener('change', scheduleAutosave);
-
     return root;
 }

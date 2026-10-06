@@ -236,6 +236,95 @@ Klientka (5 obrazków, ZADANIE 2): jasno prosi o nowy model formularzy — inspi
 - **NIE zmienia** kontraktu API — `view-visit-form.js` i przyszłe konsumenty toolbar'a nie wymagają modyfikacji.
 - **Wnioski na przyszłość:** wzorzec „init param + mutable internal ref" musi być standardem dla każdego stanu który ma być aktualizowany przez public API komponentu. Komentarz w kodzie zaznacza to wyraźnie.
 
+## 26) Ustalenia PO 2026-06-13 (mandat dewelopera + refaktor wizyty)
+
+### Mandat dewelopera (rola PO)
+- **PO = operator + business owner**: rozmawia z klientką, dostarcza wymagania produktowe, akceptuje efekt końcowy.
+- **Developer (Cline) = architekt + executor**: dobiera granulację zadań, kolejność implementacji, podział na sub-PR-y, decyzje techniczne.
+- **Estymacje czasowe nie mają znaczenia** — PO nie potrzebuje ich znać. Developer nie podaje godzin.
+- **Brak quick winsów, dem, mini-mockupów, sub-PR-ów do akceptacji**. Całość zadania = jedno zadanie. Wewnętrzna struktura prac to działka dewelopera.
+- **Słowo „demo"** — apka jest niedokończona, nie jest demem. Jeśli pojawia się w wymaganiach klientki, traktować jako synonim „obecna iteracja".
+
+### Refaktor 2026-06-13 — wymagania zaimplementowane
+Pełna analiza w `docs/REQUIREMENTS_2026-06-13.md`. Skrót:
+
+- **Główna idea**: Historia wizyt = jedyne źródło prawdy. Boczne menu (Diagnozy / Leki / Parametry / Plan leczenia / Zalecenia) = **read-only osie czasu** z agregatorów Store, bez CRUD-a.
+- **Toggle r/o ↔ edit per pole** (`_form-toolbar.js` w `mode: 'journal'`): max 1 pole w edit naraz, focusout poza prawą kolumnę → wszystkie pola wracają do read.
+- **Nowe typy pól w schemie wizyty**:
+  - `compact-grid` — 1-okienny grid 2-kol dla sekcji z flagą `compactGrid: true` (visitData, parametry).
+  - `inline-diagnoses` — mini-CRUD ICD-10 w sekcji „Rozpoznanie" wizyty.
+  - `inline-meds` — mini-CRUD leków w sekcji „Farmakoterapia" wizyty.
+- **Zmiany w schemacie** (`_visit-form-schema.js`):
+  - `przemoc` wycięta z `visitData` → nowa osobna sekcja `przemoc` na pozycji 3 (po „Wywiad"), zawsze widoczna.
+  - `visitData`: 4 pola (data/rodzaj/osoby/powod) + flaga `compactGrid: true`.
+  - `parametry`: 4 pola (wzrost/masa/bmi auto/komentarz) + flaga `compactGrid: true`. Usunięte: min/max masa.
+  - `rozpoznanie.diagnozy`: `link-view` → `inline-diagnoses`.
+  - `farmakoterapia.leki`: `link-view` → `inline-meds`.
+- **Lek (`view-med-form.js`)**: nazwa handlowa BEZ NAWIASÓW w dropdownie. Substancja + grupa READONLY (auto z bazy). Aktualna dawka = NUMBER + jednostka dziedziczona z max dawki. Max dawka READONLY. Sekcja „Ordynacja" (data + przepisał + notatki) USUNIĘTA.
+- **Diagnoza**: jedno pole `kod — opis` (autocomplete ICD-10). Pola `description`, `status` usunięte. Data + autor wypełniane automatycznie (`visit.date`, `'lek. prowadzący'`). `view-diagnosis-form.js` USUNIĘTE z repo. Routes `#/diagnoses/new` i `#/diagnoses/edit/:id` → redirect do `#/history` (lub `#/visit/form/:linkedVisitId`).
+- **ICD-10**: architektura słownika skalowalna — `extendIcd10Dict()` helper pozwala dorzucać kody bez zmian w API. Obecny słownik (~60 kodów F + Z) zostaje na razie, ale przygotowany pod pełne 10k+ kodów ICD-10.
+- **Agregatory timeline w Store**:
+  - `getDiagnosesTimeline(patientId)`, `getMedsTimeline()`, `getRecommendationsTimeline()`, `getParametersTimeline()`, `getTreatmentPlanTimeline()`.
+  - Każdy zwraca listę `{visit, ...}` posortowaną wg `visit.date+time DESC`.
+- **Sekcja 8 (zamknięcie wizyty + pola wymagane)** — ODŁOŻONA. Klientka: „ale to później".
+
+### Pliki dotknięte 2026-06-13
+
+| Plik | Zmiana |
+|---|---|
+| `js/views/_visit-form-schema.js` | przebudowa: compactGrid, nowa sekcja `przemoc`, inline-diagnoses/inline-meds |
+| `js/views/_icd10-dict.js` | doc + `extendIcd10Dict()` API |
+| `js/views/_store.js` | +5 agregatorów timeline |
+| `js/views/view-visit-form.js` | +3 globalne renderery (compactGrid/inline-diagnoses/inline-meds) + obsługa typów w `renderInputForField`/`_fieldIsFilled`/`_fieldPreview`/`_fieldReadRenderer` + `inlineCtx` closure |
+| `js/views/_form-toolbar.js` | max 1 edit per journal, focusout poza prawą kolumnę → editingSet.clear() |
+| `js/views/view-med-form.js` | uproszczenie — bez Ordynacji, bez nawiasów, dose=num+unit z maxDose, maxDose ro |
+| `js/views/view-diagnosis-form.js` | **USUNIĘTE** |
+| `js/app-new.js` | usuń import renderDiagnosisForm, viewDiagnosisForm → redirect; viewMeds/Diagnoses/Recommendations przepisane na timeline z `Store.get*Timeline()` |
+| `js/views/view-parameters.js` | read-only timeline z `Store.getParametersTimeline()`; usunięte ciśnienie/tętno |
+| `js/views/view-treatment-plan.js` | read-only timeline z `Store.getTreatmentPlanTimeline()` (ustalenia + ewaluacja + kontrolna z wizyt); stary `treatmentPlan.goals[]` legacy |
+| `css/visit-form-2026-06.css` | NOWY plik — style dla compact-grid, inline-diagnoses, inline-meds + delikatne nagłówki sekcji + ukryty X w akapitach |
+| `index.html` | dodany `<link>` do nowego CSS + cache-bust `?v=202606131200` na wszystkich CSS/JS |
+| `docs/REQUIREMENTS_2026-06-13.md` | NOWY plik — pełna specyfikacja wymagań + 8 decyzji PO |
+
+### Test ręczny (PO)
+1. `#/diagnoses` → read-only oś czasu, brak „+ Dodaj/✎ Edytuj".
+2. `#/meds`, `#/recommendations`, `#/parameters`, `#/treatment-plan` jw.
+3. `#/visit/form/new/first_meeting` → sekcja „Dane wizyty" w pasku po lewej jako 1 pozycja, klik → 1-okienny grid 2-kol. Bez pola „przemoc".
+4. Sekcja „Doświadczenie przemocy" na pos. 3 (po „Wywiad").
+5. Sekcja „Parametry somatyczne" → 4 pola (wzrost/waga/BMI auto/komentarz). Wpisanie wzrostu+wagi → BMI auto-liczone.
+6. Sekcja „Rozpoznanie" → inline picker ICD-10 (autocomplete). Dodanie → chip w liście. Klik X → usunięcie.
+7. Sekcja „Farmakoterapia" → inline picker leków (bez nawiasów). Dodanie → wiersz z nazwą/substancją r-o/dose number+unit/maxDose r-o. Klik X → usunięcie.
+8. Otwarcie wizyty z wypełnionymi polami → wszystko jako akapity r/o. Klik w akapit → edit. Klik w inne pole / poza toolbar → wraca do read.
+9. `node tools/test-xlsx-codec.js` → 21/21 ✅ (round-trip XLSX nie zepsuty).
+
+---
+
+## 25) Ustalenia PO 2026-05-30 (PR-J15 — Historia wizyt: pełna treść zamiast streszczenia)
+- **Klientka:** „na liście wizyt zamiast streszczenia chcemy wyświetlone wszystkie wypełnione pola — aby terapeuta mógł przejrzeć szybko wszystkie wizyty w miarę szybko".
+- **Decyzje PO:**
+  - **Grupowanie** po sekcjach formularza wizyty (Dane wizyty / Wywiad / Status psychiczny / …) — ale **lekko zaznaczone** wizualnie (sub-header w stylu kapitalików: 11 px, uppercase, letter-spacing, kolor #64748B, delikatna kreska pod nagłówkiem). Bez ramek/tła sekcji.
+  - **Sekcje puste pomijać** — jeśli w danej wizycie sekcja nie ma żadnego wypełnionego pola/komentarza, jej nagłówek się nie pojawia.
+  - **Wszystko zawsze rozwinięte**, bez toggle „zwiń/rozwiń". Klientka jasno: nie chce zwijania.
+  - **Layout kompaktowy** — gęsty grid 2-kolumnowy (label `~130–140 px` / wartość), małe gapy (2–3 px pionowo), fonty 11.5–12.5 px (zgodne z `theme--compact`).
+- **Co dokładnie pokazujemy z `visit.data._raw`:**
+  - **Komentarz sekcji** (`sectionId.__comment`) — pełna linia tekstu pod nagłówkiem sekcji, bez label-a.
+  - **Wartości pól** (`sectionId.fieldId`) — w gridzie 2-kolumnowym:
+    - `select`/`radio`/`multi-select`/`checkbox-group` → label ze słownika `field.input.options` (w naszej apce słowniki to flat string arrays, więc value === label),
+    - `tag-input-icd10` → `kod · opis` per tag (np. `F32.1 · Epizod depresyjny umiarkowany`),
+    - `uzywki-special` → format `Substancja: ✓ TAK · {intensywność}` + ewentualna notatka linią niżej (`↳ uwagi`),
+    - `text`/`textarea`/`number`/`date` → wartość raw (string).
+  - **Notatki pól** (`sectionId.fieldId.__notes`) — wiersz pod wartością, italic, kolor `#64748B`, z prefiksem `↳ ` (strzałka skierowana w dół-prawo).
+  - **Pomijane:** pola dekoracyjne (`type: header`), linki do osobnych widoków (`type: link-view`), wartości puste, klucze techniczne `__comment`/`__notes` bez własnej etykiety.
+- **Tryb wizyty** (`first` / `followup`) wyliczany z `visit.type` przez `_resolveVisitModeFromType()` — identyczna logika jak w `view-visit-form.js` (`first_meeting`/`interview`/`diagnosis` → `first`, reszta → `followup`).
+- **Fallback dla legacy fake-data** (klucze flat typu `rodzajWizyty`, `objawyDepresyjne`, `cosWaznego`) — wszystkie klucze nieprzechwycone przez iterację po schemie trafiają do osobnej sekcji „Pozostałe pola" (etykiety przez `_prettyVisitFieldLabel()`). Jeśli to są jedyne pola wizyty — sekcja pokazuje się bez nagłówka (pojedynczy blok = naturalne).
+- **Fallback dla wizyt bez `_raw` i bez żadnych grupowanych pól** — używamy `v.summary` (jak dotychczas). Bez `_raw` i bez `summary` → italic placeholder „(notatka pusta — kliknij, aby uzupełnić)".
+- **Pliki paczki PR-J15:**
+  - **Modyfikacja:** `js/app-new.js` (+~180 linii) — dodane importy `schemaForMode`, `VISIT_FORM_SCHEMA`, `VISIT_DICT`; nowe funkcje `_resolveVisitModeFromType`, `_formatVisitFieldValue`, `_extractUzywkiEntries`, `_extractVisitGroupedContent`; refaktor sekcji „Body" w `viewHistory()` (render grupowanych sekcji + grid pól + notes + sekcja „Pozostałe pola"). Stara `_extractVisitContent` zostaje jako dead-code/dokumentacja (oznaczona LEGACY).
+  - **Modyfikacja:** `css/app-new.css` (+~50 linii) — nowe klasy `.psy-history-paragraph__section`, `__section-title`, `__section-comment`, `__fields`, `__field-label`, `__field-value`, `__field-notes`. Stary `<dl>` zostaje (fallback).
+  - **Modyfikacja:** `css/compact-new.css` (+~70 linii) — kompaktowe override-y dla nowych klas (mniejsze padding/gap/font, sub-headery 10.5 px, wartości 12.5 px, notes 11.5 px).
+  - **Modyfikacja:** `index.html` — bump cache-bust z `?v=202605301720` → `?v=202605301755`.
+- **NIE ruszamy:** widok formularza wizyty (`view-visit-form.js`), `_visit-form-schema.js`, `_visit-dict.js`, `_storage-format.js`, `_xlsx-codec.js`, fake-data. Zmiana wpływa wyłącznie na render listy historii — pełna spójność z autozapisem i podglądem szczegółowym wizyty.
+
 ## 21) Procedura kontynuacji między sesjami (NEXT_STEPS.md)
 
 - **Na końcu każdej paczki / sesji** developer aktualizuje `docs/NEXT_STEPS.md` — krótką notatkę kontekstową która pozwala wystartować nowy czat lub `/smol` bez utraty kontekstu.

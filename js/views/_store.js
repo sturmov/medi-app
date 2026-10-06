@@ -989,6 +989,145 @@ export const Store = {
         return this.updateRecommendation(id, { done: !r.done });
     },
 
+    // ---- TIMELINE AGGREGATORS (2026-06-13) ----------------------------------
+    //
+    // Klientka: „elementy menu jak diagnoza, parametry, plan leczenia,
+    // zalecenia to akapity wizyty — w tych elementach menu ma być po prostu
+    // ekstrakt z treści wizyt wg daty i kolejności". Boczne strony stają
+    // się read-only projekcjami osi czasu (od najnowszej wizyty do najstarszej).
+    //
+    // Każdy agregator zwraca listę `{ visit, ... }` posortowaną wg
+    // visit.date+time DESC. Element bez `linkedVisitId` (legacy) trafia na
+    // koniec listy z `visit: null`.
+
+    /** Lista visit→diagnoses pacjenta, w porządku malejącym (newest first). */
+    getDiagnosesTimeline(patientId) {
+        const pid = patientId || (state.currentPatient && state.currentPatient.id);
+        if (!pid) return [];
+        const diags = state.diagnoses.filter((d) => d.patientId === pid);
+        const visits = state.visits.filter((v) => v.patientId === pid);
+        const out = diags.map((d) => {
+            const v = d.linkedVisitId ? visits.find((x) => x.id === d.linkedVisitId) : null;
+            return {
+                diagnosis: d,
+                visit: v || null,
+                sortKey: (v && v.date ? v.date : (d.assignedAt || '0000-00-00')) +
+                         (v && v.time ? v.time : '99:99')
+            };
+        });
+        out.sort((a, b) => b.sortKey.localeCompare(a.sortKey));
+        return out;
+    },
+
+    /** Lista visit→meds pacjenta, newest first. */
+    getMedsTimeline(patientId) {
+        const pid = patientId || (state.currentPatient && state.currentPatient.id);
+        if (!pid) return [];
+        const meds = state.meds.filter((m) => m.patientId === pid);
+        const visits = state.visits.filter((v) => v.patientId === pid);
+        const out = meds.map((m) => {
+            const v = m.linkedVisitId ? visits.find((x) => x.id === m.linkedVisitId) : null;
+            return {
+                med: m,
+                visit: v || null,
+                sortKey: (v && v.date ? v.date : (m.prescribedAt || '0000-00-00')) +
+                         (v && v.time ? v.time : '99:99')
+            };
+        });
+        out.sort((a, b) => b.sortKey.localeCompare(a.sortKey));
+        return out;
+    },
+
+    /** Lista visit→recommendations, newest first. */
+    getRecommendationsTimeline(patientId) {
+        const pid = patientId || (state.currentPatient && state.currentPatient.id);
+        if (!pid) return [];
+        const recs = state.recommendations.filter((r) => r.patientId === pid);
+        const visits = state.visits.filter((v) => v.patientId === pid);
+        const out = recs.map((r) => {
+            const v = r.linkedVisitId ? visits.find((x) => x.id === r.linkedVisitId) : null;
+            return {
+                recommendation: r,
+                visit: v || null,
+                sortKey: (v && v.date ? v.date : (r.createdAt || '0000-00-00')) +
+                         (v && v.time ? v.time : '99:99')
+            };
+        });
+        out.sort((a, b) => b.sortKey.localeCompare(a.sortKey));
+        return out;
+    },
+
+    /**
+     * Lista parametrów somatycznych per wizyta — newest first.
+     * Każdy element: `{ visit, wzrost, masa, bmi, komentarz }`.
+     * Czyta `visit.data._raw['parametry.wzrost']` itd. (po refactor 2026-06-13
+     * sekcja `parametry` ma 4 pola: wzrost/masa/bmi/komentarz).
+     */
+    getParametersTimeline(patientId) {
+        const pid = patientId || (state.currentPatient && state.currentPatient.id);
+        if (!pid) return [];
+        const visits = state.visits
+            .filter((v) => v.patientId === pid)
+            .slice()
+            .sort((a, b) => (b.date + (b.time || '')).localeCompare(a.date + (a.time || '')));
+        const out = [];
+        for (const v of visits) {
+            const raw = (v.data && v.data._raw) || {};
+            const wz = raw['parametry.wzrost'];
+            const ma = raw['parametry.masa'];
+            const bmi = raw['parametry.bmi'];
+            const kom = raw['parametry.komentarz'];
+            const hasAny = (wz != null && String(wz).trim() !== '') ||
+                           (ma != null && String(ma).trim() !== '') ||
+                           (bmi != null && String(bmi).trim() !== '') ||
+                           (kom != null && String(kom).trim() !== '');
+            if (!hasAny) continue;
+            out.push({
+                visit: v,
+                wzrost: wz || '',
+                masa: ma || '',
+                bmi: bmi || '',
+                komentarz: kom || ''
+            });
+        }
+        return out;
+    },
+
+    /**
+     * Lista wpisów planu leczenia per wizyta — newest first.
+     * Czyta pole `oddzialywania.ustalenia` (Ustalenia i plan leczenia) z `visit.data._raw`.
+     * Plan leczenia = wspólnie z doktorem (klientka 2026-05-11), tworzony
+     * podczas wizyty w sekcji „Podjęte oddziaływania".
+     */
+    getTreatmentPlanTimeline(patientId) {
+        const pid = patientId || (state.currentPatient && state.currentPatient.id);
+        if (!pid) return [];
+        const visits = state.visits
+            .filter((v) => v.patientId === pid)
+            .slice()
+            .sort((a, b) => (b.date + (b.time || '')).localeCompare(a.date + (a.time || '')));
+        const out = [];
+        for (const v of visits) {
+            const raw = (v.data && v.data._raw) || {};
+            const ustalenia = raw['oddzialywania.ustalenia'];
+            const ewaluacja = raw['oddzialywania.ewaluacja'];
+            const kontrolna = raw['oddzialywania.kontrolna'];
+            const notesUstalenia = raw['oddzialywania.ustalenia.__notes'];
+            const hasAny = (ustalenia && String(ustalenia).trim() !== '') ||
+                           (ewaluacja && String(ewaluacja).trim() !== '') ||
+                           (kontrolna && String(kontrolna).trim() !== '');
+            if (!hasAny) continue;
+            out.push({
+                visit: v,
+                ustalenia: ustalenia || '',
+                ewaluacja: ewaluacja || '',
+                kontrolna: kontrolna || '',
+                notes: notesUstalenia || ''
+            });
+        }
+        return out;
+    },
+
     // ---- Tests --------------------------------------------------------------
 
     getTests(patientId) {

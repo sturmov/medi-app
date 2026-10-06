@@ -1,0 +1,43 @@
+PAcjent
+1. usunac tytul
+2. wiek z miesiacami
+3. jak najedziesz na top panel pacjenta to wyskakuje panel read only z detalami pacjenta
+zmniejszyc pola i font
+
+Wizyta cała na widoku listy - tylko pola wypelnione pola wypelnione 
+
+
+wizyty ktore sa juz wypelnione i zdefocusowant to ma wygladac jak gotowe read only pola bez innych do wyboru (tylko zaznaczone lub tekst)
+
+dopiero klikniecie w pole readonly danej sekcji wrzuca ja w forme edit tak jak teraz
+
+historia wizyt ma byc zrodlem danych i tam sie wszystko wypelnia
+
+element menu takie jak diagnoza, parameter, plan leczenia, zalecenia to akapity wizyty
+w tych elementach menu ma byc po prosty ekstrakt z tresci wizyt wg daty i kolejnosci 
+
+diagnoza:
+wszystkie f-ki do wyboru i  w jednym polu z opisem zamiast pola ops rozpoanania
+opis rozpoznania nie potrzeba
+bez statusu,
+data nadania, autor automatycznie 
+
+diagnozy w wizyty
+
+parametry somatyczne jako jedna sekcja
+wzrost, waga, bmi samo sie liczy a reszta niepotrzebna + pole komentarz
+
+dane wizyty w jednym oknie tak samo jak parametry
+
+doswiadczenie przemocy oddzielnie
+
+zamkniecie wuzyty i pola wymagane - ale to pozniej
+
+
+sekcja leki
+
+nazwa handlowa - sama bez nawiasu
+
+aktualna dawka ma ta sama jednostke jak max dawka
+max dawka tylko do odczytu
+ordynacji nie trzeba

@@ -1,0 +1,302 @@
+/* ============================================================================
+   visit-form-2026-06.css — style dla refaktoru wizyty 2026-06-13.
+
+   Klasy nowe (klientka „dane wizyty/parametry w 1 oknie + diagnozy/leki inline"):
+   • .psy-vf__compact-grid           — kompaktowy grid 2-kol (visitData/parametry)
+   • .psy-vf__compact-grid-cell      — pojedyncza komórka label+input
+   • .psy-vf__inline-diagnoses       — mini-CRUD ICD-10 w sekcji rozpoznanie
+   • .psy-vf__inline-meds            — mini-CRUD leków w sekcji farmakoterapia
+
+   Style współdziałają z `theme--compact` (css/compact-new.css) i z
+   `form-toolbar.css` (PR-J14).
+   ============================================================================ */
+
+/* ---------- COMPACT GRID (visitData, parametry — 1 okno) ------------------- */
+
+.psy-vf__compact-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 16px;
+    padding: 4px 2px 8px;
+}
+
+.psy-vf__compact-grid-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.psy-vf__compact-grid-cell--full {
+    grid-column: 1 / -1;
+}
+
+.psy-vf__compact-grid-label {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: #475569;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.psy-vf__compact-grid-input,
+.psy-vf__compact-grid-input-row {
+    width: 100%;
+    min-width: 0;
+}
+
+.psy-vf__compact-grid-input-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.psy-vf__compact-grid-input-row input,
+.psy-vf__compact-grid-input-row select,
+.psy-vf__compact-grid-input input,
+.psy-vf__compact-grid-input select,
+.psy-vf__compact-grid-input textarea {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.psy-vf__compact-grid-unit {
+    font-size: 11.5px;
+    color: #6B7280;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* Kompakt: zredukuj padding inputów w gridzie */
+.theme--compact .psy-vf__compact-grid {
+    gap: 8px 12px;
+}
+.theme--compact .psy-vf__compact-grid-label {
+    font-size: 11px;
+}
+
+/* ---------- INLINE DIAGNOSES (rozpoznanie) --------------------------------- */
+
+.psy-vf__inline-diagnoses {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 4px 2px;
+}
+
+.psy-vf__inline-diagnoses__list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.psy-vf__inline-diagnoses__empty {
+    font-size: 12px;
+    color: #94A3B8;
+    font-style: italic;
+    padding: 4px 8px;
+}
+
+.psy-vf__inline-diagnoses__chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    background: #EFF6FF;
+    border: 1px solid #BFDBFE;
+    border-radius: 6px;
+    font-size: 12.5px;
+    transition: background 0.12s;
+}
+
+.psy-vf__inline-diagnoses__chip:hover {
+    background: #DBEAFE;
+}
+
+.psy-vf__inline-diagnoses__chip-code {
+    font-family: monospace;
+    font-weight: 700;
+    color: #1D4ED8;
+    min-width: 60px;
+    flex-shrink: 0;
+}
+
+.psy-vf__inline-diagnoses__chip-desc {
+    flex: 1 1 auto;
+    color: #0F172A;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.psy-vf__inline-diagnoses__chip-remove {
+    background: transparent;
+    border: 0;
+    color: #94A3B8;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 0 4px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    transition: background 0.12s, color 0.12s;
+}
+
+.psy-vf__inline-diagnoses__chip-remove:hover {
+    background: #FEE2E2;
+    color: #B91C1C;
+}
+
+.psy-vf__inline-diagnoses__add {
+    position: relative;
+}
+
+.psy-vf__inline-diagnoses__add input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* ---------- INLINE MEDS (farmakoterapia) ----------------------------------- */
+
+.psy-vf__inline-meds {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 4px 2px;
+}
+
+.psy-vf__inline-meds__list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.psy-vf__inline-meds__empty {
+    font-size: 12px;
+    color: #94A3B8;
+    font-style: italic;
+    padding: 4px 8px;
+}
+
+.psy-vf__inline-meds__row {
+    display: grid;
+    grid-template-columns: minmax(180px, 1.5fr) minmax(140px, 1fr) minmax(110px, 0.8fr) 28px;
+    gap: 10px;
+    align-items: center;
+    padding: 6px 10px;
+    background: #FFFBEB;
+    border: 1px solid #FCD34D;
+    border-radius: 6px;
+    font-size: 12.5px;
+}
+
+.psy-vf__inline-meds__name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.psy-vf__inline-meds__name strong {
+    color: #92400E;
+    font-weight: 700;
+}
+
+.psy-vf__inline-meds__substance {
+    color: #78350F;
+    font-size: 11.5px;
+}
+
+.psy-vf__inline-meds__dose,
+.psy-vf__inline-meds__maxdose {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11.5px;
+}
+
+.psy-vf__inline-meds__dose label,
+.psy-vf__inline-meds__maxdose label {
+    color: #6B7280;
+    font-weight: 500;
+    white-space: nowrap;
+    margin: 0;
+}
+
+.psy-vf__inline-meds__dose-input {
+    width: 70px !important;
+    padding: 3px 6px !important;
+    font-size: 12.5px !important;
+    text-align: right;
+}
+
+.psy-vf__inline-meds__unit {
+    color: #475569;
+    font-size: 11.5px;
+    white-space: nowrap;
+}
+
+.psy-vf__inline-meds__maxdose-value {
+    color: #B91C1C;
+    font-weight: 600;
+    font-size: 12px;
+}
+
+.psy-vf__inline-meds__remove {
+    background: transparent;
+    border: 0;
+    color: #94A3B8;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 0;
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    transition: background 0.12s, color 0.12s;
+}
+
+.psy-vf__inline-meds__remove:hover {
+    background: #FEE2E2;
+    color: #B91C1C;
+}
+
+.psy-vf__inline-meds__add {
+    position: relative;
+}
+
+.psy-vf__inline-meds__add input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* Responsywne: mobile/wąskie ekrany — stack */
+@media (max-width: 768px) {
+    .psy-vf__compact-grid {
+        grid-template-columns: 1fr;
+    }
+    .psy-vf__inline-meds__row {
+        grid-template-columns: 1fr;
+        gap: 6px;
+    }
+}
+
+/* ---------- DELIKATNIEJSZE NAGŁÓWKI SEKCJI W TOOLBAR (klientka #1) ---------
+   Klientka: „nagłówek sekcji jako delikatna labelka — nie musi być wyróżniony
+   bardzo". Stonowanie obecnych section-titles w prawej kolumnie toolbara. */
+
+.psy-form-toolbar__journal-section-title {
+    font-size: 10.5px !important;
+    font-weight: 500 !important;
+    color: #94A3B8 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 1px dashed #E5E7EB !important;
+    padding: 3px 0 2px;
+    margin: 6px 0 1px 0 !important;
+}
+
+/* ---------- UKRYJ X w akapitach (klientka nie wspomina, mniej zaśmieconego UI) */
+
+.psy-form-toolbar__entry-close {
+    display: none !important;
+}

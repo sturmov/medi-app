@@ -528,7 +528,11 @@ export function createFormToolbar(opts) {
         _renderJournal();
     }
 
-    /** Klik pola w pasku w trybie journal — dodaje akapit + otwiera edit. */
+    /** Klik pola w pasku w trybie journal — dodaje akapit + otwiera edit.
+     *  2026-06-13 (klientka „dopiero kliknięcie w pole readonly wrzuca ją w
+     *  formę edit") — przed otwarciem nowego pola w edit, ZAMYKAMY wszystkie
+     *  inne (max 1 akapit w edit naraz, spójny model „klik = otwórz, klik
+     *  poza = zamknij"). */
     function _onNavClickJournal(uid) {
         const field = flat.find((f) => f._uid === uid);
         if (!field) return;
@@ -539,6 +543,9 @@ export function createFormToolbar(opts) {
             }
             return;
         }
+
+        // Max 1 akapit w edit naraz — zamknij wcześniej otwarte
+        editingSet.clear();
 
         let needsRender = false;
         if (hiddenSet.has(uid)) {
@@ -553,15 +560,11 @@ export function createFormToolbar(opts) {
             needsRender = true;
         }
 
-        // Otwórz akapit w edit-mode (PR-J16a — każdy niezależnie)
+        // Otwórz akapit w edit-mode
         editingSet.add(uid);
 
-        if (needsRender) {
-            _renderJournal();
-        } else {
-            // Akapit już widoczny — tylko toggle ten konkretny do edit
-            _toggleEntryToEdit(uid);
-        }
+        // Zawsze re-render — bo trzeba zamknąć stary edit i otworzyć nowy
+        _renderJournal();
 
         setTimeout(() => {
             const article = content.querySelector(`article[data-field-uid="${uid}"]`);
@@ -572,6 +575,26 @@ export function createFormToolbar(opts) {
         }, 0);
 
         if (typeof onSelect === 'function') onSelect(uid);
+    }
+
+    /** 2026-06-13 (klientka „po wyjściu focusu wraca do read") — focusout
+     *  poza prawą kolumną zamyka wszystkie edit-akapity. Sprawdzamy z opóźnieniem
+     *  (setTimeout 200 ms) bo focus przeskakuje między elementami sąsiadującymi
+     *  w tym samym akapicie (input → textarea uwag w tym samym polu). */
+    let _blurTimer = null;
+    function _onFocusout(ev) {
+        if (mode !== 'journal') return;
+        if (_blurTimer) clearTimeout(_blurTimer);
+        _blurTimer = setTimeout(() => {
+            // Sprawdź czy aktywny focus jest jeszcze w prawej kolumnie
+            const active = document.activeElement;
+            if (active && content.contains(active)) return;
+            // Focus opuścił prawą kolumnę → zamknij wszystkie edit-akapity
+            if (editingSet.size > 0) {
+                editingSet.clear();
+                _renderJournal();
+            }
+        }, 200);
     }
 
     /** Wymuszone przejście do edit (nie toggle) — używane przy kliku z paska. */
@@ -684,6 +707,9 @@ export function createFormToolbar(opts) {
 
     if (mode === 'journal') {
         _renderJournal();
+        // 2026-06-13 — focusout z prawej kolumny → wszystkie akapity wracają
+        // do read-mode (klientka „po wyjściu focusu wraca do read").
+        root.addEventListener('focusout', _onFocusout);
     } else {
         _renderContentTab(activeUid);
     }

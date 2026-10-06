@@ -1,30 +1,20 @@
 // ============================================================================
-// view-treatment-plan.js — sekcja „Plan leczenia" pacjenta.
+// view-treatment-plan.js — „Plan leczenia" (READ-ONLY OŚ CZASU).
 //
-// PR-J7 (2026-05-11): nowa pozycja w sidebarze (#6 wg z4.jpg).
-// Klientka (rozmowa 2026-05-11): „Zalecenia są do domu/samodzielnego działania
-// pacjenta. Plan leczenia jest wspólnie z doktorem — to inna sekcja."
-//
-// Model danych: `patient.treatmentPlan { goals: [...] }`, gdzie każdy cel ma:
-//   {
-//     id: 'G1', title: '', description: '',
-//     priority: 'low' | 'medium' | 'high',
-//     tasks: [ { id, text, done, dueDate } ]
-//   }
-//
-// CRUD:
-//   • + Dodaj cel        — pusty cel na początku listy
-//   • 🗑 Usuń cel        — z `openConfirm`
-//   • + Zadanie          — dorzuca pustą pozycję do `tasks[]`
-//   • ☐ → ✓ zadania      — toggle `done`
-//   • 🗑 Zadanie         — bez confirm (mała operacja)
-//
-// Autozapis: debounce 400 ms na wszystkich polach (title/description/tasks).
-// LIVE-VIEW: root ma `data-live="true"` — autozapis nie tłucze focus/scroll.
+// 2026-06-13 (refactor wg klientki):
+//   • Klientka: „plan leczenia to akapity wizyty — ekstrakt z treści wizyt
+//     wg daty i kolejności". Sekcja boczna „Plan leczenia" pokazuje read-only
+//     listę ustaleń + ewaluacji + terminów wizyty kontrolnej z każdej wizyty,
+//     posortowanych od najnowszej do najstarszej.
+//   • Plan leczenia powstaje w sekcji „Podjęte oddziaływania" formularza
+//     wizyty (pole `ustalenia` + `ewaluacja` + `kontrolna`).
+//   • Stary model `patient.treatmentPlan.goals[]` (drzewo celów L1 + zadań)
+//     zostaje jako LEGACY w danych, ale UI go nie pokazuje. Migracja
+//     do nowego modelu „akapity wizyty" — bez CRUD-a.
 // ============================================================================
 
 import { Store } from './_store.js';
-import { openConfirm } from './_modal.js';
+import { visitTypeById } from './_fake-data.js';
 
 // ---- helpers ----------------------------------------------------------------
 
@@ -40,8 +30,6 @@ function el(tag, props = {}, children = []) {
             node.addEventListener(k.slice(2).toLowerCase(), v);
         } else if (k === 'style' && typeof v === 'object') {
             for (const [sk, sv] of Object.entries(v)) node.style[sk] = sv;
-        } else if (k === 'checked') {
-            node.checked = !!v;
         } else if (typeof v === 'boolean') {
             if (v) node.setAttribute(k, '');
         } else {
@@ -60,172 +48,6 @@ function el(tag, props = {}, children = []) {
     return node;
 }
 
-function uid(prefix) {
-    return prefix + Math.random().toString(36).slice(2, 8).toUpperCase();
-}
-
-function toast(variant, title, message) {
-    if (window.PsyToast) {
-        window.PsyToast.notify({ variant, title, message }, 'psy-app-toasts');
-    }
-}
-
-// ---- model helpers ----------------------------------------------------------
-
-function getPlan(patient) {
-    return (patient && patient.treatmentPlan) || { goals: [] };
-}
-
-function savePlan(patient, plan) {
-    Store.updatePatient(patient.id, { treatmentPlan: plan });
-}
-
-const PRIORITY_LABEL = {
-    low:    'Niski',
-    medium: 'Średni',
-    high:   'Wysoki'
-};
-const PRIORITY_OPTIONS = ['low', 'medium', 'high'];
-
-// ---- pojedynczy cel (karta) ------------------------------------------------
-
-function renderGoal(goal, idx, patient, refresh) {
-    const tasks = Array.isArray(goal.tasks) ? goal.tasks : [];
-
-    // Header karty: numer + select priorytetu + 🗑
-    const header = el('div', { class: 'psy-tp__goal-header' }, [
-        el('span', { class: 'psy-tp__goal-num' }, ['Cel ' + (idx + 1)]),
-        el('select', {
-            class: 'psy-pdf__input psy-tp__goal-priority psy-tp__priority--' + (goal.priority || 'medium'),
-            'aria-label': 'Priorytet celu',
-            onchange: (e) => {
-                const plan = getPlan(patient);
-                const g = plan.goals.find((x) => x.id === goal.id);
-                if (g) g.priority = e.target.value;
-                savePlan(patient, plan);
-            }
-        }, PRIORITY_OPTIONS.map((p) =>
-            el('option', { value: p, selected: (goal.priority || 'medium') === p }, [
-                'Priorytet: ' + PRIORITY_LABEL[p]
-            ])
-        )),
-        el('button', {
-            class: 'btn btn--danger btn--sm psy-tp__goal-delete',
-            title: 'Usuń cel',
-            onclick: async () => {
-                const ok = await openConfirm({
-                    title: 'Usunąć cel?',
-                    message: 'Cel „' + (goal.title || '(bez tytułu)') + '" zostanie usunięty wraz z zadaniami.',
-                    confirmLabel: 'Usuń cel',
-                    variant: 'danger'
-                });
-                if (!ok) return;
-                const plan = getPlan(patient);
-                plan.goals = plan.goals.filter((g) => g.id !== goal.id);
-                savePlan(patient, plan);
-                toast('success', 'Usunięto cel', '');
-                refresh();
-            }
-        }, ['🗑'])
-    ]);
-
-    // Pole tytułu (input)
-    const titleInput = el('input', {
-        type: 'text',
-        class: 'psy-pdf__input psy-tp__goal-title-input',
-        placeholder: 'Tytuł celu (np. „Redukcja objawów depresyjnych do PHQ-9 < 5")',
-        value: goal.title || '',
-        oninput: (e) => {
-            goal.title = e.target.value;
-            // autozapis przez globalny scheduler — tu tylko aktualizujemy pamięć
-        }
-    });
-
-    // Pole opisu (textarea)
-    const descInput = el('textarea', {
-        class: 'psy-pdf__input psy-pdf__input--textarea',
-        rows: 2,
-        placeholder: 'Opis celu (kontekst, kryterium powodzenia, ramy czasowe…)',
-        oninput: (e) => { goal.description = e.target.value; }
-    });
-    descInput.value = goal.description || '';
-
-    // Lista zadań
-    const tasksWrap = el('div', { class: 'psy-tp__tasks' });
-    tasks.forEach((task, ti) => {
-        const taskRow = el('div', { class: 'psy-tp__task' + (task.done ? ' psy-tp__task--done' : '') }, [
-            el('input', {
-                type: 'checkbox',
-                class: 'psy-tp__task-check',
-                checked: !!task.done,
-                onchange: (e) => {
-                    const plan = getPlan(patient);
-                    const g = plan.goals.find((x) => x.id === goal.id);
-                    const t = g && g.tasks && g.tasks.find((x) => x.id === task.id);
-                    if (t) t.done = !!e.target.checked;
-                    savePlan(patient, plan);
-                    refresh();
-                }
-            }),
-            el('input', {
-                type: 'text',
-                class: 'psy-pdf__input psy-tp__task-text',
-                placeholder: 'Zadanie (np. „terapia CBT — sesja 6×/mc")',
-                value: task.text || '',
-                oninput: (e) => { task.text = e.target.value; }
-            }),
-            el('input', {
-                type: 'date',
-                class: 'psy-pdf__input psy-tp__task-date',
-                value: task.dueDate || '',
-                title: 'Termin (opcjonalnie)',
-                oninput: (e) => { task.dueDate = e.target.value; }
-            }),
-            el('button', {
-                class: 'btn btn--secondary btn--sm psy-tp__task-delete',
-                title: 'Usuń zadanie',
-                onclick: () => {
-                    const plan = getPlan(patient);
-                    const g = plan.goals.find((x) => x.id === goal.id);
-                    if (g) g.tasks = (g.tasks || []).filter((t) => t.id !== task.id);
-                    savePlan(patient, plan);
-                    refresh();
-                }
-            }, ['🗑'])
-        ]);
-        tasksWrap.appendChild(taskRow);
-    });
-
-    // Przycisk „+ Zadanie"
-    const addTaskBtn = el('button', {
-        class: 'btn btn--secondary btn--sm psy-tp__add-task',
-        onclick: () => {
-            const plan = getPlan(patient);
-            const g = plan.goals.find((x) => x.id === goal.id);
-            if (!g) return;
-            if (!Array.isArray(g.tasks)) g.tasks = [];
-            g.tasks.push({ id: uid('T-'), text: '', done: false, dueDate: '' });
-            savePlan(patient, plan);
-            refresh();
-        }
-    }, ['+ Zadanie']);
-
-    return el('article', { class: 'psy-tp__goal' }, [
-        header,
-        el('div', { class: 'psy-tp__goal-body' }, [
-            el('label', { class: 'psy-tp__field-label' }, ['Tytuł']),
-            titleInput,
-            el('label', { class: 'psy-tp__field-label' }, ['Opis']),
-            descInput,
-            el('label', { class: 'psy-tp__field-label' }, [
-                'Zadania (' + tasks.length + ')'
-            ]),
-            tasksWrap,
-            addTaskBtn
-        ])
-    ]);
-}
-
 // ---- VIEW -------------------------------------------------------------------
 
 export function renderTreatmentPlan() {
@@ -236,85 +58,143 @@ export function renderTreatmentPlan() {
             el('div', {}, [el('h1', { class: 'psy-new-view__title' }, ['Plan leczenia'])])
         ]));
         r.appendChild(el('div', { class: 'psy-new-view__body' }, [
-            el('div', { class: 'psy-new-hint' }, ['Wybierz pacjenta, aby zarządzać planem leczenia.'])
+            el('div', { class: 'psy-new-hint' }, ['Wybierz pacjenta, aby wyświetlić plan leczenia.'])
         ]));
         return r;
     }
 
-    const plan = getPlan(patient);
+    const timeline = Store.getTreatmentPlanTimeline(patient.id);
 
-    const root = el('div', {
-        class: 'psy-new-view psy-tp-view',
-        dataset: { live: 'true' }
-    });
-
-    function refresh() {
-        if (window.AppController) window.AppController._renderView(true);
-    }
+    const root = el('div', { class: 'psy-new-view' });
 
     // ---- nagłówek -----------------------------------------------------------
     root.appendChild(el('div', { class: 'psy-new-view__header' }, [
         el('div', {}, [
-            el('h1', { class: 'psy-new-view__title' }, ['🎯 Plan leczenia']),
+            el('h1', { class: 'psy-new-view__title' }, ['Plan leczenia']),
             el('div', { class: 'psy-new-view__subtitle' }, [
-                patient.imie + ' ' + patient.nazwisko +
-                ' · ' + (plan.goals.length === 0 ? 'brak celów' : plan.goals.length + ' celów') +
-                ' · drzewo celów L1 + zadania per cel'
+                patient.imie + ' ' + patient.nazwisko + ' · ' + timeline.length +
+                ' ' + (timeline.length === 1 ? 'wpis' : 'wpisów') +
+                ' · oś czasu z wizyt (read-only)'
             ])
-        ]),
-        el('div', { class: 'psy-new-view__actions' }, [
-            el('button', {
-                class: 'btn btn--primary',
-                onclick: () => {
-                    const planNow = getPlan(patient);
-                    planNow.goals = Array.isArray(planNow.goals) ? planNow.goals : [];
-                    planNow.goals.unshift({
-                        id: uid('G-'),
-                        title: '',
-                        description: '',
-                        priority: 'medium',
-                        tasks: []
-                    });
-                    savePlan(patient, planNow);
-                    refresh();
-                }
-            }, ['+ Dodaj cel'])
         ])
     ]));
 
     // ---- body ---------------------------------------------------------------
-    const body = el('div', { class: 'psy-new-view__body psy-new-view__body--plain psy-tp' });
+    const body = el('div', { class: 'psy-new-view__body psy-new-view__body--plain' });
 
-    if (!plan.goals || plan.goals.length === 0) {
+    if (!timeline.length) {
         body.appendChild(el('div', { class: 'psy-new-empty' }, [
             el('div', { class: 'psy-new-empty__icon' }, ['🎯']),
-            el('div', { class: 'psy-new-empty__title' }, ['Brak celów leczenia']),
+            el('div', { class: 'psy-new-empty__title' }, ['Brak ustaleń planu leczenia']),
             el('div', { class: 'psy-new-empty__description' }, [
-                'Plan leczenia tworzysz wspólnie z pacjentem na wizycie. Każdy cel '
-                + 'może mieć priorytet i własną listę zadań do realizacji w trakcie '
-                + 'terapii.'
+                'Pacjent nie ma jeszcze ustaleń planu leczenia. ' +
+                'Dodaj ustalenia w sekcji „Podjęte oddziaływania" formularza wizyty.'
+            ]),
+            el('div', { class: 'psy-new-empty__actions' }, [
+                el('button', {
+                    class: 'btn btn--primary',
+                    onclick: () => { window.location.hash = '#/history'; }
+                }, ['🗓️ Przejdź do wizyt'])
             ])
         ]));
     } else {
-        plan.goals.forEach((goal, idx) => {
-            body.appendChild(renderGoal(goal, idx, patient, refresh));
-        });
+        const stack = el('div', { class: 'psy-new-stack' });
+        for (const entry of timeline) {
+            const v = entry.visit;
+            const visitLabel = v.date + (v.time ? ' ' + v.time : '');
+            const typeObj = visitTypeById(v.type);
+            const typeLabel = typeObj ? typeObj.label : (v.type || '');
+            const rowClick = () => { window.location.hash = '#/visit/form/' + v.id; };
+
+            const card = el('article', {
+                title: 'Kliknij, aby otworzyć wizytę',
+                style: {
+                    padding: '12px 14px',
+                    background: '#FFFFFF',
+                    border: '1px solid #E5E7EB',
+                    borderLeft: '4px solid #10B981',
+                    borderRadius: '8px',
+                    cursor: 'pointer'
+                },
+                onclick: rowClick
+            }, [
+                // Header: data wizyty + typ
+                el('div', {
+                    style: {
+                        display: 'flex',
+                        gap: '10px',
+                        alignItems: 'baseline',
+                        marginBottom: '8px',
+                        fontSize: '12.5px'
+                    }
+                }, [
+                    el('strong', { style: { color: '#047857' } }, [visitLabel]),
+                    el('span', { class: 'psy-new-hint' }, ['· ' + typeLabel])
+                ]),
+
+                // Ustalenia (główne pole)
+                entry.ustalenia
+                    ? el('div', { style: { marginBottom: '6px' } }, [
+                        el('div', {
+                            style: {
+                                fontSize: '11px',
+                                color: '#64748B',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.04em',
+                                marginBottom: '2px'
+                            }
+                        }, ['Ustalenia']),
+                        el('div', { style: { whiteSpace: 'pre-wrap', fontSize: '13px' } }, [entry.ustalenia])
+                    ])
+                    : null,
+
+                // Ewaluacja (jeśli jest)
+                entry.ewaluacja
+                    ? el('div', { style: { marginTop: '6px', marginBottom: '6px' } }, [
+                        el('div', {
+                            style: {
+                                fontSize: '11px',
+                                color: '#64748B',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.04em',
+                                marginBottom: '2px'
+                            }
+                        }, ['Ewaluacja']),
+                        el('div', { style: { whiteSpace: 'pre-wrap', fontSize: '13px' } }, [entry.ewaluacja])
+                    ])
+                    : null,
+
+                // Wizyta kontrolna (jeśli jest)
+                entry.kontrolna
+                    ? el('div', {
+                        style: {
+                            marginTop: '6px',
+                            fontSize: '12.5px',
+                            color: '#075985'
+                        }
+                    }, [
+                        el('strong', {}, ['Wizyta kontrolna: ']),
+                        entry.kontrolna
+                    ])
+                    : null,
+
+                // Notatki do ustaleń
+                entry.notes
+                    ? el('div', {
+                        style: {
+                            marginTop: '6px',
+                            fontSize: '11.5px',
+                            color: '#64748B',
+                            fontStyle: 'italic'
+                        }
+                    }, ['↳ ' + entry.notes])
+                    : null
+            ].filter(Boolean));
+            stack.appendChild(card);
+        }
+        body.appendChild(stack);
     }
 
     root.appendChild(body);
-
-    // ---- autozapis tekstowy (title/description/task.text/task.dueDate) ------
-    // Cel: po debounce 400 ms zapisujemy aktualny `plan` z pamięci.
-    let _timer = null;
-    function scheduleSave() {
-        if (_timer) clearTimeout(_timer);
-        _timer = setTimeout(() => {
-            // `plan` jest referencją wewnątrz scope; już go aktualizowaliśmy
-            // przez `oninput` (mutacja goal.* / task.*). Persist:
-            savePlan(patient, plan);
-        }, 400);
-    }
-    body.addEventListener('input', scheduleSave);
-
     return root;
 }

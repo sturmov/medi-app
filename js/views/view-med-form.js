@@ -1,18 +1,21 @@
 // ============================================================================
 // view-med-form.js — formularz leku jako WIDOK INLINE.
 //
-// Zastępuje `modal-med.js`.
+// 2026-06-13 (klientka, refactor):
+//   • Lek = część wizyty (inline-meds w sekcji Farmakoterapia). Ten widok
+//     to legacy fallback dla URL-i `#/meds/new` i `#/meds/edit/:id`. Nowa
+//     edycja leku odbywa się INLINE w formularzu wizyty.
+//   • Nazwa handlowa — BEZ NAWIASÓW w dropdownie (sama nazwa).
+//   • Substancja czynna + grupa — READONLY (auto z bazy leków).
+//   • Aktualna dawka — number + jednostka dziedziczona z max dawki.
+//   • Max dawka — READONLY (auto z bazy).
+//   • Sekcja „Ordynacja" (data + przepisał + notatki) — USUNIĘTA.
 //
 // Hash:
-//   #/meds/new            – nowy lek, lazy create
-//   #/meds/edit/:id       – edycja
+//   #/meds/new            – nowy lek, lazy create (legacy)
+//   #/meds/edit/:id       – edycja (legacy)
 //
-// Cechy:
-//   • Brak „Zapisz" — autozapis 400 ms.
-//   • Lazy create.
-//   • Wybór nazwy z bazy `FAKE_MED_DICT` (auto-fill substancji + max dawki),
-//     z opcją „inne (wpisz ręcznie)".
-//   • 🗑 Usuń + ← Wróć.
+// Cechy: brak „Zapisz" — autozapis 400 ms.
 // ============================================================================
 
 import { Store } from './_store.js';
@@ -24,6 +27,21 @@ import {
 } from './_form-helpers.js';
 
 const CUSTOM_VALUE = '__custom__';
+
+/** Wyciąga jednostkę z max dawki (np. „200 mg/d" → „mg/d"). */
+function _extractUnit(maxDose) {
+    if (!maxDose) return '';
+    const m = String(maxDose).match(/[\d,.\s]+([a-zA-Z\u00C0-\u017F\/]+)(?:\s*\*+|$)/);
+    if (m && m[1]) return m[1].trim();
+    return '';
+}
+
+/** Wyciąga liczbę z dose („100 mg/d" → „100"). */
+function _extractDoseNumber(dose) {
+    if (!dose) return '';
+    const m = String(dose).match(/^[\d.,]+/);
+    return m ? m[0] : '';
+}
 
 export function renderMedForm(opts = {}) {
     const patient = Store.state.currentPatient;
@@ -94,7 +112,7 @@ export function renderMedForm(opts = {}) {
             ]),
             el('div', { class: 'psy-new-view__subtitle' }, [
                 patient.imie + ' ' + patient.nazwisko + ' · ',
-                el('span', { class: 'psy-new-hint' }, ['💾 autozapis aktywny'])
+                el('span', { class: 'psy-new-hint' }, ['💾 autozapis aktywny · widok legacy, leki edytuj w wizycie'])
             ])
         ]),
         el('div', { class: 'psy-new-view__actions' }, [
@@ -106,9 +124,10 @@ export function renderMedForm(opts = {}) {
     const form = el('form', { class: 'psy-form psy-form--med' });
     form.addEventListener('submit', (e) => e.preventDefault());
 
+    // 2026-06-13 (klientka) — dropdown BEZ NAWIASÓW (sama nazwa handlowa).
     const nameOptions = [
         { value: '', label: '— wybierz —' },
-        ...FAKE_MED_DICT.map((m) => ({ value: m.name, label: `${m.name}  (${m.substance})` })),
+        ...FAKE_MED_DICT.map((m) => ({ value: m.name, label: m.name })),
         { value: CUSTOM_VALUE, label: '— inne (wpisz ręcznie) —' }
     ];
 
@@ -131,61 +150,69 @@ export function renderMedForm(opts = {}) {
         placeholder: 'Np. Sertranor, inny preparat...'
     });
 
+    // 2026-06-13 (klientka) — substancja czynna READONLY (auto z bazy).
     const substanceField = field({
         name: 'substance',
         label: 'Substancja czynna',
         value: initial.substance || '',
-        cols: 6
+        cols: 6,
+        inputAttrs: { readonly: true },
+        help: 'Auto-uzupełniana z bazy leków (read-only).'
     });
 
+    // 2026-06-13 (klientka) — grupa READONLY (auto z bazy).
     const groupField = field({
         name: 'group',
         label: 'Grupa',
         value: initial.group || '',
         cols: 6,
-        placeholder: 'Np. SSRI, SNRI, Benzodiazepiny...'
+        inputAttrs: { readonly: true },
+        help: 'Auto-uzupełniana z bazy leków (read-only).'
     });
 
-    const doseField = field({
-        name: 'dose',
-        label: 'Aktualna dawka',
-        value: initial.dose || '',
-        cols: 6,
-        placeholder: 'Np. 100 mg/d'
-    });
+    // 2026-06-13 (klientka): aktualna dawka — NUMBER + jednostka z max dawki.
+    const initialUnit = _extractUnit(initial.maxDose);
+    const initialDoseNum = _extractDoseNumber(initial.dose);
 
+    const doseNumberInput = el('input', {
+        type: 'number',
+        class: 'psy-field__input',
+        id: 'psyf-doseNumber',
+        name: 'doseNumber',
+        value: initialDoseNum,
+        step: '0.5',
+        min: '0',
+        placeholder: 'np. 100'
+    });
+    const doseUnitSpan = el('span', {
+        class: 'psy-field__help',
+        style: { fontWeight: '600', color: '#475569', marginLeft: '8px' }
+    }, [initialUnit || '(jednostka z max dawki)']);
+
+    const doseField = el('div', {
+        class: 'psy-field psy-field--cols-6',
+        dataset: { field: 'doseNumber' }
+    }, [
+        el('label', { class: 'psy-field__label', for: 'psyf-doseNumber' }, [
+            'Aktualna dawka',
+            el('span', { class: 'psy-field__required', 'aria-hidden': 'true' }, [' '])
+        ]),
+        el('div', { style: { display: 'flex', alignItems: 'center', gap: '4px' } }, [
+            doseNumberInput,
+            doseUnitSpan
+        ]),
+        el('div', { class: 'psy-field__help' }, ['Liczba w jednostce dziedziczonej z max dawki.']),
+        el('div', { class: 'psy-field__error', hidden: true })
+    ]);
+
+    // 2026-06-13 (klientka) — max dawka READONLY (auto z bazy).
     const maxDoseField = field({
         name: 'maxDose',
         label: 'Max dawka',
         value: initial.maxDose || '',
         cols: 6,
-        help: 'Auto-uzupełniana z bazy. Można edytować.'
-    });
-
-    const dateField = field({
-        name: 'prescribedAt',
-        label: 'Data rozpoczęcia',
-        type: 'date',
-        value: initial.prescribedAt || todayISO(),
-        cols: 6
-    });
-
-    const prescribedByField = field({
-        name: 'prescribedBy',
-        label: 'Przepisał(a)',
-        value: initial.prescribedBy || '',
-        cols: 6,
-        placeholder: 'Np. psychiatra, lekarz rodzinny'
-    });
-
-    const notesField = field({
-        name: 'notes',
-        label: 'Notatki',
-        type: 'textarea',
-        value: initial.notes || '',
-        rows: 3,
-        cols: 12,
-        placeholder: 'Np. schemat dawkowania, uwagi dot. reakcji, interakcji...'
+        inputAttrs: { readonly: true },
+        help: 'Auto-uzupełniana z bazy leków (read-only).'
     });
 
     form.appendChild(section('Lek', [
@@ -193,9 +220,8 @@ export function renderMedForm(opts = {}) {
         doseField, maxDoseField
     ]));
 
-    form.appendChild(section('Ordynacja', [
-        dateField, prescribedByField, notesField
-    ]));
+    // 2026-06-13 (klientka „ordynacji nie trzeba") — sekcja Ordynacja USUNIĘTA
+    // (data rozpoczęcia + przepisał + notatki — wszystko out).
 
     root.appendChild(form);
 
@@ -208,6 +234,7 @@ export function renderMedForm(opts = {}) {
         } else if (v === '') {
             setCustomMode(false);
             setFields({ name: '', substance: '', maxDose: '', group: '' });
+            doseUnitSpan.textContent = '(jednostka z max dawki)';
         } else {
             setCustomMode(false);
             const hit = FAKE_MED_DICT.find((m) => m.name === v);
@@ -218,6 +245,8 @@ export function renderMedForm(opts = {}) {
                     maxDose: hit.maxDose,
                     group: hit.group
                 });
+                const unit = _extractUnit(hit.maxDose);
+                doseUnitSpan.textContent = unit || '(jednostka z max dawki)';
             }
         }
         scheduleAutosave();
@@ -258,10 +287,7 @@ export function renderMedForm(opts = {}) {
         if (_id) return Store.getMedById(_id);
         const created = Store.addMed({
             patientId: patient.id,
-            name: '', substance: '', dose: '', maxDose: '',
-            prescribedAt: todayISO(),
-            prescribedBy: '',
-            notes: ''
+            name: '', substance: '', dose: '', maxDose: ''
         });
         _id = created.id;
         try { history.replaceState(null, '', '#/meds/edit/' + _id); } catch (_) {}
@@ -281,22 +307,25 @@ export function renderMedForm(opts = {}) {
 
         if (!_id) {
             const hasAnything = !!effectiveName ||
-                                (data.notes && data.notes.trim()) ||
-                                (data.substance && data.substance.trim());
+                                (data.doseNumber && data.doseNumber.trim());
             if (!hasAnything) return;
             ensureExists();
         }
         if (!_id) return;
 
+        // Złóż dose: liczba + jednostka z max dawki
+        const maxDose = (data.maxDose || '').trim();
+        const unit = _extractUnit(maxDose);
+        const doseNum = (data.doseNumber || '').trim();
+        const dose = doseNum ? (doseNum + (unit ? ' ' + unit : '')) : '';
+
         Store.updateMed(_id, {
             name: effectiveName,
             substance: (data.substance || '').trim(),
             group: (data.group || '').trim(),
-            dose: (data.dose || '').trim(),
-            maxDose: (data.maxDose || '').trim(),
-            prescribedAt: data.prescribedAt || '',
-            prescribedBy: (data.prescribedBy || '').trim(),
-            notes: (data.notes || '').trim()
+            dose: dose,
+            maxDose: maxDose
+            // 2026-06-13: BEZ prescribedAt, prescribedBy, notes — sekcja Ordynacja usunięta.
         });
     }
 

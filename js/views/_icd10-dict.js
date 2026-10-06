@@ -1,12 +1,23 @@
 // ============================================================================
-// _icd10-dict.js — uproszczony słownik kodów ICD-10 (F, R, Z) używanych
-// najczęściej w psychologii/psychiatrii klinicznej.
+// _icd10-dict.js — słownik kodów ICD-10 dla autocomplete w wizycie.
+//
+// Stan obecny (2026-06-13): ~60 najczęściej używanych kodów (F00-F98 + Z03/Z63/Z73)
+// z psychologii/psychiatrii klinicznej. Architektura skalowalna — pełna lista
+// ICD-10 (10k+ kodów wraz z chorobami somatycznymi, urazami, kodami Z/R) może
+// być wstawiona BEZ ZMIAN W API. Konsumenci (formularz wizyty) wołają tylko
+// `searchIcd10()` i `findIcd10ByCode()`.
+//
+// Decyzja PO 2026-06-13: „wszystkie F-ki dostępne, ale aktualnie nie muszą być
+// wszystkie — trzeba to zrobić tak aby później łatwo było dodać wszystkie."
+//
+// Jak dorzucić więcej kodów:
+//   1. Dopisz wpisy do `ICD10_DICT` (format `{code, description}`).
+//   2. Albo zaimportuj z pliku zewnętrznego — patrz `extendIcd10Dict()` poniżej.
+//   3. Search działa identycznie (prefix-match kodu > opis-match).
 //
 // Źródło: Międzynarodowa Statystyczna Klasyfikacja Chorób i Problemów
-// Zdrowotnych ICD-10 (rozdział V: Zaburzenia psychiczne i zachowania).
-//
-// Używane przez `modal-diagnosis.js` jako źródło autocomplete.
-// W Fazie 5+ słownik zostanie zastąpiony pełną bazą ICD-10/ICD-11.
+// Zdrowotnych ICD-10 (rozdział V: Zaburzenia psychiczne i zachowania,
+// + kody Z/R do uzupełnienia w przyszłości).
 // ============================================================================
 
 export const ICD10_DICT = [
@@ -133,4 +144,34 @@ export function searchIcd10(query, limit = 10) {
 export function findIcd10ByCode(code) {
     if (!code) return null;
     return ICD10_DICT.find((e) => e.code.toLowerCase() === String(code).toLowerCase()) || null;
+}
+
+/**
+ * Rozszerza słownik o dodatkowe kody (np. pełna lista ICD-10 dorzucona
+ * w przyszłości z pliku zewnętrznego). Operacja idempotentna: duplikaty
+ * (po `code`) są pomijane.
+ *
+ * Użycie:
+ *   import { extendIcd10Dict } from './_icd10-dict.js';
+ *   extendIcd10Dict([
+ *     { code: 'A00', description: 'Cholera' },
+ *     { code: 'I10', description: 'Pierwotne (samoistne) nadciśnienie tętnicze' }
+ *   ]);
+ *
+ * @param {Array<{code: string, description: string}>} entries
+ * @returns {number} ile NOWYCH wpisów zostało dodanych
+ */
+export function extendIcd10Dict(entries) {
+    if (!Array.isArray(entries) || !entries.length) return 0;
+    const known = new Set(ICD10_DICT.map((e) => String(e.code).toUpperCase()));
+    let added = 0;
+    for (const e of entries) {
+        if (!e || !e.code) continue;
+        const code = String(e.code).toUpperCase();
+        if (known.has(code)) continue;
+        ICD10_DICT.push({ code, description: e.description || '' });
+        known.add(code);
+        added++;
+    }
+    return added;
 }

@@ -1,31 +1,47 @@
 // ============================================================================
 // _visit-form-schema.js — schema (data) formularza wizyty.
 //
+// PR-2026-06-13 (notatki klientki):
+//   • Sekcja `visitData` — wycięte pole `przemoc`, dodana flaga `compactGrid`
+//     (renderowana jako pojedynczy 1-okienny grid 2-kolumnowy, nie jako
+//     lista per-field na pasku narzędzi).
+//   • Nowa sekcja `przemoc` na pozycji 3 — „Doświadczenie przemocy"
+//     wydzielone z Danych wizyty (klientka „doswiadczenie przemocy oddzielnie").
+//     Zawsze widoczna (nie `onlyIn: 'first'`).
+//   • Sekcja `parametry` — zredukowana do 4 pól (wzrost / masa / BMI auto
+//     / komentarz) + flaga `compactGrid`. Wycięte: najniższa/najwyższa masa.
+//   • Sekcja `farmakoterapia` — pole `leki` zmienione z `link-view` na
+//     `inline-meds` (mini-CRUD inline w wizycie).
+//   • Sekcja `rozpoznanie` — pole `diagnozy` zmienione z `link-view` na
+//     `inline-diagnoses` (jedno pole „kod — opis" autocomplete ICD-10,
+//     data + autor automatycznie z kontekstu wizyty).
+//
 // Zgodnie z docs/VISIT_FORM_SPEC.md §2. Każdy rozdział to obiekt z listą
-// podpól (subfields). Widok `view-visit-form.js` iteruje i renderuje
-// schemat w 5-slotowym wzorcu akordeonu (1: belka, 2: sub-label,
-// 3: pole główne, 4: uwagi, 5: komentarz rozdziału).
+// podpól (subfields).
 //
 // Właściwości rozdziału:
 //   id             - stabilny klucz (używany w Store)
 //   title          - etykieta belki
 //   onlyIn         - 'first' | 'followup' | undefined (obydwa)
-//   defaultOpen    - true/false — czy rozwinięty na start
-//   sectionComment - czy slot (5) ma być widoczny
-//   sticky         - true = nie-collapsible (2.1 Dane wizyty)
-//   subfields      - lista podpól (puste → tylko slot 5)
+//   defaultOpen    - true/false — czy rozwinięty na start (legacy)
+//   sectionComment - czy slot komentarza sekcji ma być widoczny
+//   sticky         - true = legacy flaga (zostaje, ale renderer nie używa)
+//   compactGrid    - NOWE: true = sekcja renderowana jako 1-okienny grid
+//                    z wszystkimi subfields razem (Dane wizyty, Parametry)
+//   subfields      - lista podpól (puste → tylko slot komentarza)
 //
 // Właściwości subfieldu:
 //   id         - stabilny klucz
-//   label      - slot (2)
+//   label      - etykieta pola
 //   required   - true/false (gwiazdka)
 //   onlyIn     - 'first' | 'followup' | undefined
-//   fullWidth  - true = (4) zajmuje resztę (pole (3) = '—')
-//   input      - { type, options?, unit?, ref? } (slot 3)
+//   fullWidth  - true = pole zajmuje pełną szerokość gridu
+//   input      - { type, options?, unit?, ref? }
 //       type: 'text' | 'textarea' | 'number' | 'date' |
 //             'select' | 'multi-select' | 'radio' | 'checkbox-group' |
-//             'tag-input-icd10' | 'uzywki-special' | 'link-view'
-//   notes      - true/false — czy slot (4) widoczny (domyślnie true)
+//             'tag-input-icd10' | 'uzywki-special' | 'link-view' |
+//             'inline-diagnoses' | 'inline-meds'    (NOWE 2026-06-13)
+//   notes      - true/false — czy slot uwag widoczny (domyślnie true)
 // ============================================================================
 
 import { VISIT_DICT } from './_visit-dict.js';
@@ -33,18 +49,21 @@ import { VISIT_DICT } from './_visit-dict.js';
 export const VISIT_FORM_SCHEMA = [
 
     // ---------------------------------------------------------------------
-    // 2.1 Dane wizyty (sticky, brak collapsible)
+    // 2.1 Dane wizyty — kompaktowy 1-okienny grid (2026-06-13)
+    //     Bez pola „Doświadczenie przemocy" — przeniesione do osobnej sekcji.
     // ---------------------------------------------------------------------
     {
         id: 'visitData',
-        title: 'Dane wizyty',        sticky: true,
+        title: 'Dane wizyty',
+        sticky: true,            // legacy (nie używane przez nowy renderer)
+        compactGrid: true,       // 2026-06-13: 1-okienny grid 2-kolumnowy
+        defaultOpen: true,
         sectionComment: false,
         subfields: [
             { id: 'data',    label: 'Data wizyty',            required: true, input: { type: 'date' }, notes: false },
             { id: 'rodzaj',  label: 'Rodzaj wizyty',          required: true, input: { type: 'select', options: VISIT_DICT.RODZAJ_WIZYTY }, notes: false },
-            { id: 'osoby',   label: 'Osoby obecne',                           input: { type: 'multi-select', options: VISIT_DICT.OSOBY_OBECNE } },
-            { id: 'powod',   label: 'Powód zgłoszenia',                       input: { type: 'textarea' }, notes: false },
-            { id: 'przemoc', label: 'Doświadczenie przemocy',                 input: { type: 'radio', options: VISIT_DICT.PRZEMOC } }
+            { id: 'osoby',   label: 'Osoby obecne',                           input: { type: 'multi-select', options: VISIT_DICT.OSOBY_OBECNE }, notes: false },
+            { id: 'powod',   label: 'Powód zgłoszenia',       fullWidth: true, input: { type: 'textarea' }, notes: false }
         ]
     },
 
@@ -53,7 +72,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'wywiad',
-        title: 'Wywiad — aktualne objawy',        onlyIn: 'first',
+        title: 'Wywiad — aktualne objawy',        onlyIn: 'first',
         defaultOpen: true,
         sectionComment: true,
         subfields: [
@@ -67,11 +86,25 @@ export const VISIT_FORM_SCHEMA = [
     },
 
     // ---------------------------------------------------------------------
-    // 2.3 Aktualny problem zdrowotny (tylko (5))
+    // 2.3a Doświadczenie przemocy (NOWE 2026-06-13)
+    //      Wycięte z `visitData`, zawsze widoczne (kliniczna waga, może
+    //      wracać na kolejnych wizytach).
+    // ---------------------------------------------------------------------
+    {
+        id: 'przemoc',
+        title: 'Doświadczenie przemocy',
+        sectionComment: true,
+        subfields: [
+            { id: 'wynik', label: 'Doświadczenie przemocy', input: { type: 'radio', options: VISIT_DICT.PRZEMOC }, notes: true }
+        ]
+    },
+
+    // ---------------------------------------------------------------------
+    // 2.3 Aktualny problem zdrowotny (tylko komentarz sekcji)
     // ---------------------------------------------------------------------
     {
         id: 'problemZdrowotny',
-        title: 'Aktualny problem zdrowotny',        defaultOpen: true,
+        title: 'Aktualny problem zdrowotny',        defaultOpen: true,
         sectionComment: true,
         subfields: []
     },
@@ -81,7 +114,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'kontekst',
-        title: 'Tło / kontekst funkcjonowania',        sectionComment: true,
+        title: 'Tło / kontekst funkcjonowania',        sectionComment: true,
         subfields: [
             { id: 'rodzina',     label: 'Sytuacja rodzinna',      input: { type: 'multi-select', options: VISIT_DICT.SYTUACJA_RODZINNA } },
             { id: 'szkolaPraca', label: 'Szkoła / Praca',         input: { type: 'radio', options: VISIT_DICT.SZKOLA_PRACA } },
@@ -97,7 +130,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'somatyczne',
-        title: 'Funkcjonowanie somatyczne',        sectionComment: true,
+        title: 'Funkcjonowanie somatyczne',        sectionComment: true,
         subfields: [
             { id: 'apetyt',    label: 'Apetyt / jedzenie',   input: { type: 'radio', options: VISIT_DICT.APETYT } },
             { id: 'sen',       label: 'Sen',                 input: { type: 'radio', options: VISIT_DICT.SEN } },
@@ -107,11 +140,11 @@ export const VISIT_FORM_SCHEMA = [
     },
 
     // ---------------------------------------------------------------------
-    // 2.6 Aktualne problemy medyczne (⬆ first, tylko (5))
+    // 2.6 Aktualne problemy medyczne (⬆ first, tylko komentarz)
     // ---------------------------------------------------------------------
     {
         id: 'medyczne',
-        title: 'Aktualne problemy medyczne',        onlyIn: 'first',
+        title: 'Aktualne problemy medyczne',        onlyIn: 'first',
         sectionComment: true,
         subfields: []
     },
@@ -121,7 +154,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'leczenie',
-        title: 'Historia leczenia',        sectionComment: true,
+        title: 'Historia leczenia',        sectionComment: true,
         subfields: [
             { id: 'morfologia', label: 'Morfologia', onlyIn: 'first', input: { type: 'radio', options: VISIT_DICT.BADANIE_STATUS } },
             { id: 'ekg',        label: 'EKG',        onlyIn: 'first', input: { type: 'radio', options: VISIT_DICT.BADANIE_STATUS } }
@@ -129,13 +162,16 @@ export const VISIT_FORM_SCHEMA = [
     },
 
     // ---------------------------------------------------------------------
-    // 2.8 Ogólna farmakoterapia (i suplementy)
+    // 2.8 Ogólna farmakoterapia — inline-meds (2026-06-13)
+    //     Klientka: „diagnozy w wizyty" (analogicznie: leki w wizycie).
+    //     Lista leków pacjenta tej wizyty + autocomplete z FAKE_MED_DICT.
+    //     Nazwa handlowa BEZ nawiasów, dose=number+unit, maxDose=readonly.
     // ---------------------------------------------------------------------
     {
         id: 'farmakoterapia',
-        title: 'Ogólna farmakoterapia (i suplementy)',        sectionComment: true,
+        title: 'Ogólna farmakoterapia (i suplementy)',        sectionComment: true,
         subfields: [
-            { id: 'leki', label: 'Leki psychotropowe', input: { type: 'link-view', ref: '#/meds' } }
+            { id: 'leki', label: 'Leki psychotropowe', fullWidth: true, input: { type: 'inline-meds' }, notes: false }
         ]
     },
 
@@ -144,24 +180,27 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'uzywki',
-        title: 'Używki',        sectionComment: true,
+        title: 'Używki',        sectionComment: true,
         subfields: [
             { id: 'substancje', label: 'Substancje', fullWidth: true, input: { type: 'uzywki-special' }, notes: false }
         ]
     },
 
     // ---------------------------------------------------------------------
-    // 2.10 Parametry somatyczne (siatka 2 kolumn, bez uwag poza min/max)
+    // 2.10 Parametry somatyczne — kompaktowy 1-okienny grid (2026-06-13)
+    //      Zredukowane do 4 pól: wzrost / masa / BMI auto / komentarz.
+    //      Wycięte: najniższa masa, najwyższa masa.
     // ---------------------------------------------------------------------
     {
         id: 'parametry',
-        title: 'Parametry somatyczne',        sectionComment: false,
+        title: 'Parametry somatyczne',
+        compactGrid: true,           // 2026-06-13: 1-okienny grid
+        sectionComment: false,
         subfields: [
-            { id: 'wzrost',    label: 'Wzrost',             input: { type: 'number', unit: 'cm' }, notes: false },
-            { id: 'masa',      label: 'Masa ciała',         input: { type: 'number', unit: 'kg' }, notes: false },
-            { id: 'bmi',       label: 'BMI (auto)',         input: { type: 'number', readonly: true }, notes: false },
-            { id: 'min',       label: 'Najniższa masa ciała', input: { type: 'number', unit: 'kg' } },
-            { id: 'max',       label: 'Najwyższa masa ciała', input: { type: 'number', unit: 'kg' } }
+            { id: 'wzrost',    label: 'Wzrost',     input: { type: 'number', unit: 'cm' }, notes: false },
+            { id: 'masa',      label: 'Waga',       input: { type: 'number', unit: 'kg' }, notes: false },
+            { id: 'bmi',       label: 'BMI (auto)', input: { type: 'number', readonly: true, unit: 'kg/m²' }, notes: false },
+            { id: 'komentarz', label: 'Komentarz',  fullWidth: true, input: { type: 'textarea' }, notes: false }
         ]
     },
 
@@ -170,7 +209,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'status',
-        title: 'Status psychiczny',        defaultOpen: true,
+        title: 'Status psychiczny',        defaultOpen: true,
         sectionComment: true,
         subfields: [
             // Tryb mały (widoczny zawsze)
@@ -205,7 +244,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'ryzykoS',
-        title: 'Ocena ryzyka S (szczegółowa)',        onlyIn: 'first',
+        title: 'Ocena ryzyka S (szczegółowa)',        onlyIn: 'first',
         sectionComment: true,
         subfields: [
             { id: 'depresja',     label: 'Depresja / beznadzieja',      input: { type: 'select', options: VISIT_DICT.RYZYKO_DEPRESJA } },
@@ -234,7 +273,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'testy',
-        title: 'Testy przesiewowe',        onlyIn: 'first',
+        title: 'Testy przesiewowe',        onlyIn: 'first',
         sectionComment: true,
         subfields: [
             { id: 'testyLink', label: 'Wyniki testów', input: { type: 'link-view', ref: '#/tests' }, notes: false }
@@ -246,7 +285,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'ocenaKliniczna',
-        title: 'Ocena kliniczna',        defaultOpen: true,
+        title: 'Ocena kliniczna',        defaultOpen: true,
         sectionComment: true,
         subfields: [
             { id: 'hipoteza',        label: 'Hipoteza diagnostyczna', input: { type: 'tag-input-icd10' } },
@@ -257,13 +296,16 @@ export const VISIT_FORM_SCHEMA = [
     },
 
     // ---------------------------------------------------------------------
-    // 2.15 Rozpoznanie (ICD-10)
+    // 2.15 Rozpoznanie (ICD-10) — inline-diagnoses (2026-06-13)
+    //      Klientka: „diagnozy w wizyty" — mini-CRUD inline w sekcji wizyty.
+    //      Jedno pole „kod — opis" autocomplete ICD-10, data + autor auto
+    //      z kontekstu wizyty (assignedAt=visit.date, author='lek. prowadzący').
     // ---------------------------------------------------------------------
     {
         id: 'rozpoznanie',
-        title: 'Rozpoznanie (ICD-10)',        sectionComment: true,
+        title: 'Rozpoznanie (ICD-10)',        sectionComment: true,
         subfields: [
-            { id: 'diagnozy', label: 'Rozpoznania', input: { type: 'link-view', ref: '#/diagnoses' }, notes: false }
+            { id: 'diagnozy', label: 'Rozpoznania', fullWidth: true, input: { type: 'inline-diagnoses' }, notes: false }
         ]
     },
 
@@ -272,7 +314,7 @@ export const VISIT_FORM_SCHEMA = [
     // ---------------------------------------------------------------------
     {
         id: 'oddzialywania',
-        title: 'Podjęte oddziaływania podczas wizyty',        defaultOpen: true,
+        title: 'Podjęte oddziaływania podczas wizyty',        defaultOpen: true,
         sectionComment: true,
         subfields: [
             { id: 'rekomendacje',     label: 'Rekomendacje', onlyIn: 'first', input: { type: 'multi-select', options: VISIT_DICT.REKOMENDACJE_TYP } },

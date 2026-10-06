@@ -39,6 +39,7 @@ import { Store } from './_store.js';
 import { schemaForMode } from './_visit-form-schema.js';
 import { visitTypeById } from './_fake-data.js';
 import { searchIcd10, findIcd10ByCode } from './_icd10-dict.js';
+import { searchMeds, findMedByBrand } from './_meds-dict.js';
 import { openConfirm } from './_modal.js';
 import { createFormToolbar } from './_form-toolbar.js';
 
@@ -416,6 +417,428 @@ function renderLinkView(label, href) {
     ]);
 }
 
+/* --------------------------------------------------------------------------
+   renderCompactGrid (2026-06-13, klientka „dane wizyty w jednym oknie
+   tak samo jak parametry") — render WSZYSTKICH subpól sekcji w kompaktowym
+   gridzie 2-kolumnowym (label + input), zamiast jako oddzielne pozycje na
+   pasku narzędzi po lewej. Używane dla sekcji z `compactGrid: true`
+   (`visitData`, `parametry`).
+   -------------------------------------------------------------------------- */
+function renderCompactGrid(field, raw) {
+    const sectionId = field._groupId;
+    const subfields = field.subfields || [];
+
+    const wrap = el('div', {
+        class: 'psy-vf__compact-grid',
+        dataset: { section: sectionId }
+    });
+
+    for (const sf of subfields) {
+        if (sf.input && sf.input.type === 'header') continue;
+        const inputNode = renderInputForField(sectionId, sf, raw);
+        const labelTxt = sf.label + (sf.required ? ' *' : '');
+        const unit = sf.input && sf.input.unit;
+
+        const cellClasses = ['psy-vf__compact-grid-cell'];
+        if (sf.fullWidth) cellClasses.push('psy-vf__compact-grid-cell--full');
+
+        const inputWrap = unit
+            ? el('div', { class: 'psy-vf__compact-grid-input-row' }, [
+                inputNode,
+                el('span', { class: 'psy-vf__compact-grid-unit' }, [unit])
+            ])
+            : el('div', { class: 'psy-vf__compact-grid-input' }, [inputNode]);
+
+        const cell = el('div', { class: cellClasses.join(' ') }, [
+            el('div', { class: 'psy-vf__compact-grid-label' }, [labelTxt]),
+            inputWrap
+        ]);
+        wrap.appendChild(cell);
+    }
+
+    // BMI auto-compute (tylko dla sekcji `parametry`)
+    if (sectionId === 'parametry') {
+        const recomputeBmi = () => {
+            const wzInput = wrap.querySelector('input[name="parametry.wzrost"]');
+            const maInput = wrap.querySelector('input[name="parametry.masa"]');
+            const bmiInput = wrap.querySelector('input[name="parametry.bmi"]');
+            if (!wzInput || !maInput || !bmiInput) return;
+            const wz = parseFloat(wzInput.value);
+            const ma = parseFloat(maInput.value);
+            if (wz > 0 && ma > 0) {
+                const m = wz / 100;
+                const bmi = ma / (m * m);
+                if (isFinite(bmi)) bmiInput.value = bmi.toFixed(1);
+            } else {
+                bmiInput.value = '';
+            }
+        };
+        wrap.addEventListener('input', (ev) => {
+            const n = ev.target && ev.target.name;
+            if (n === 'parametry.wzrost' || n === 'parametry.masa') {
+                recomputeBmi();
+            }
+        });
+        // Initial compute (gdy pacjent ma już wzrost+wagę zapisane)
+        setTimeout(recomputeBmi, 0);
+    }
+
+    return wrap;
+}
+
+/* --------------------------------------------------------------------------
+   renderInlineDiagnoses (2026-06-13, klientka „diagnozy w wizyty") —
+   inline mini-CRUD ICD-10 rozpoznań tej wizyty. Klient nie chodzi do
+   osobnego widoku — dodaje rozpoznanie tu, w sekcji „Rozpoznanie" wizyty.
+   • Lista chipów (kod · opis · ✕).
+   • Autocomplete z `searchIcd10()` (wszystkie kody, decyzja PO 2026-06-13).
+   • Data + autor wypełniane automatycznie z kontekstu wizyty.
+   • Klient bez `_visitId` (lazy create) → najpierw woła ensureVisitId().
+   -------------------------------------------------------------------------- */
+function renderInlineDiagnoses(ctx) {
+    const { getVisitId, getPatientId } = ctx;
+
+    const wrap = el('div', { class: 'psy-vf__inline-diagnoses' });
+
+    function getList() {
+        const pid = getPatientId();
+        const vid = getVisitId(false);   // bez lazy-create — tylko odczyt
+        if (!pid || !vid) return [];
+        return Store.getDiagnoses(pid).filter((d) => d.linkedVisitId === vid);
+    }
+
+    function refresh() {
+        wrap.innerHTML = '';
+
+        // Lista chipów
+        const list = el('div', { class: 'psy-vf__inline-diagnoses__list' });
+        const items = getList();
+        if (!items.length) {
+            list.appendChild(el('div', { class: 'psy-vf__inline-diagnoses__empty' }, [
+                'Brak rozpoznań w tej wizycie. Wpisz kod ICD-10 poniżej.'
+            ]));
+        }
+        for (const d of items) {
+            list.appendChild(el('div', { class: 'psy-vf__inline-diagnoses__chip' }, [
+                el('span', { class: 'psy-vf__inline-diagnoses__chip-code' }, [d.code || '?']),
+                el('span', { class: 'psy-vf__inline-diagnoses__chip-desc' }, [
+                    d.description || '(brak opisu)'
+                ]),
+                el('button', {
+                    type: 'button',
+                    class: 'psy-vf__inline-diagnoses__chip-remove',
+                    title: 'Usuń rozpoznanie',
+                    onclick: () => {
+                        Store.removeDiagnosis(d.id);
+                        refresh();
+                    }
+                }, ['✕'])
+            ]));
+        }
+        wrap.appendChild(list);
+
+        // Autocomplete input
+        const acWrap = el('div', { class: 'psy-vf__inline-diagnoses__add psy-autocomplete' });
+        const input = el('input', {
+            type: 'text',
+            class: 'psy-vf__input',
+            placeholder: 'Dodaj rozpoznanie ICD-10 (kod lub fragment opisu)…',
+            autocomplete: 'off'
+        });
+        let popover = null;
+        let matches = [];
+        let activeIdx = -1;
+
+        function closePop() {
+            if (popover && popover.parentNode) popover.remove();
+            popover = null;
+            activeIdx = -1;
+        }
+        function renderPop() {
+            closePop();
+            if (!matches.length) return;
+            popover = el('div', { class: 'psy-autocomplete__popover' });
+            matches.forEach((m, i) => {
+                popover.appendChild(el('div', {
+                    class: 'psy-autocomplete__item' +
+                        (i === activeIdx ? ' psy-autocomplete__item--active' : ''),
+                    onmousedown: (ev) => { ev.preventDefault(); pickMatch(m); }
+                }, [
+                    el('span', { class: 'psy-autocomplete__code' }, [m.code]),
+                    el('span', { class: 'psy-autocomplete__desc' }, [m.description])
+                ]));
+            });
+            acWrap.appendChild(popover);
+        }
+        function pickMatch(m) {
+            const pid = getPatientId();
+            const vid = getVisitId(true);   // lazy create OK
+            if (!pid || !vid) return;
+            const existing = Store.getDiagnoses(pid).find(
+                (d) => d.linkedVisitId === vid && d.code === m.code
+            );
+            if (existing) {
+                input.value = '';
+                matches = [];
+                closePop();
+                return;
+            }
+            const v = Store.getVisitById(vid);
+            const visitDate = (v && v.date) || '';
+            Store.addDiagnosis({
+                patientId: pid,
+                linkedVisitId: vid,
+                code: m.code,
+                description: m.description,
+                assignedAt: visitDate,
+                author: 'lek. prowadzący',
+                status: 'aktualne'
+            });
+            input.value = '';
+            matches = [];
+            closePop();
+            refresh();
+        }
+
+        input.addEventListener('input', () => {
+            const q = input.value.trim();
+            matches = q ? searchIcd10(q, 8) : [];
+            activeIdx = -1;
+            renderPop();
+        });
+        input.addEventListener('focus', () => {
+            const q = input.value.trim();
+            if (q) {
+                matches = searchIcd10(q, 8);
+                renderPop();
+            }
+        });
+        input.addEventListener('blur', () => setTimeout(closePop, 180));
+        input.addEventListener('keydown', (ev) => {
+            if (ev.key === 'ArrowDown') {
+                ev.preventDefault();
+                if (!matches.length) {
+                    matches = searchIcd10('', 8);
+                }
+                activeIdx = Math.min(activeIdx + 1, matches.length - 1);
+                renderPop();
+            } else if (ev.key === 'ArrowUp') {
+                ev.preventDefault();
+                activeIdx = Math.max(activeIdx - 1, -1);
+                renderPop();
+            } else if (ev.key === 'Enter') {
+                ev.preventDefault();
+                if (activeIdx >= 0 && matches[activeIdx]) pickMatch(matches[activeIdx]);
+                else if (input.value.trim()) {
+                    // Manualny kod (nie ze słownika)
+                    const code = input.value.trim().toUpperCase();
+                    const hit = findIcd10ByCode(code);
+                    pickMatch({ code, description: hit ? hit.description : '' });
+                }
+            } else if (ev.key === 'Escape') {
+                closePop();
+            }
+        });
+        acWrap.appendChild(input);
+        wrap.appendChild(acWrap);
+    }
+
+    refresh();
+    return wrap;
+}
+
+/* --------------------------------------------------------------------------
+   renderInlineMeds (2026-06-13, klientka „leki w wizycie") — inline
+   mini-CRUD leków tej wizyty.
+   • Lista wierszy: nazwa handlowa + substancja (auto, r/o) + aktualna dawka
+     (number+jednostka z max dawki) + max dawka (auto, r/o) + ✕.
+   • Autocomplete z `searchMeds()` — nazwa BEZ NAWIASÓW (decyzja PO 2026-06-13).
+   • Dodanie leku natychmiast wpisuje do Store z linkedVisitId.
+   -------------------------------------------------------------------------- */
+function _extractUnit(maxDose) {
+    // „200 mg/d" → „mg/d";  „60–72 mg/d*" → „mg/d";  „wg litemii…" → ''
+    if (!maxDose) return '';
+    const m = String(maxDose).match(/[\d,.\s]+([a-zA-Z\u00C0-\u017F\/]+)(?:\s*\*+|$)/);
+    if (m && m[1]) return m[1].trim();
+    return '';
+}
+
+function renderInlineMeds(ctx) {
+    const { getVisitId, getPatientId } = ctx;
+
+    const wrap = el('div', { class: 'psy-vf__inline-meds' });
+
+    function getList() {
+        const pid = getPatientId();
+        const vid = getVisitId(false);
+        if (!pid || !vid) return [];
+        return Store.getMeds(pid).filter((m) => m.linkedVisitId === vid);
+    }
+
+    function refresh() {
+        wrap.innerHTML = '';
+        const items = getList();
+
+        // Lista wierszy
+        const list = el('div', { class: 'psy-vf__inline-meds__list' });
+        if (!items.length) {
+            list.appendChild(el('div', { class: 'psy-vf__inline-meds__empty' }, [
+                'Brak leków w tej wizycie. Wpisz nazwę handlową poniżej.'
+            ]));
+        }
+        for (const m of items) {
+            const unit = _extractUnit(m.maxDose);
+            const doseInput = el('input', {
+                type: 'number',
+                class: 'psy-vf__input psy-vf__inline-meds__dose-input',
+                value: m.dose ? String(m.dose).replace(/[^\d.,]/g, '') : '',
+                step: '0.5',
+                min: '0',
+                placeholder: 'dawka',
+                oninput: (ev) => {
+                    const v = ev.target.value.trim();
+                    Store.updateMed(m.id, { dose: v ? v + (unit ? ' ' + unit : '') : '' });
+                }
+            });
+            const row = el('div', { class: 'psy-vf__inline-meds__row' }, [
+                el('div', { class: 'psy-vf__inline-meds__name' }, [
+                    el('strong', {}, [m.name || '(bez nazwy)']),
+                    m.substance
+                        ? el('span', { class: 'psy-vf__inline-meds__substance' }, [' · ' + m.substance])
+                        : null
+                ].filter(Boolean)),
+                el('div', { class: 'psy-vf__inline-meds__dose' }, [
+                    el('label', {}, ['Aktualna: ']),
+                    doseInput,
+                    unit ? el('span', { class: 'psy-vf__inline-meds__unit' }, [unit]) : null
+                ]),
+                el('div', { class: 'psy-vf__inline-meds__maxdose', title: 'Max dawka (z bazy leków)' }, [
+                    el('label', {}, ['Max: ']),
+                    el('span', { class: 'psy-vf__inline-meds__maxdose-value' }, [m.maxDose || '—'])
+                ]),
+                el('button', {
+                    type: 'button',
+                    class: 'psy-vf__inline-meds__remove',
+                    title: 'Usuń lek',
+                    onclick: () => {
+                        Store.removeMed(m.id);
+                        refresh();
+                    }
+                }, ['✕'])
+            ]);
+            list.appendChild(row);
+        }
+        wrap.appendChild(list);
+
+        // Autocomplete input
+        const acWrap = el('div', { class: 'psy-vf__inline-meds__add psy-autocomplete' });
+        const input = el('input', {
+            type: 'text',
+            class: 'psy-vf__input',
+            placeholder: 'Dodaj lek — nazwa handlowa (np. Sertralina, Xanax, Lerivon…)',
+            autocomplete: 'off'
+        });
+        let popover = null;
+        let matches = [];
+        let activeIdx = -1;
+
+        function closePop() {
+            if (popover && popover.parentNode) popover.remove();
+            popover = null;
+            activeIdx = -1;
+        }
+        function renderPop() {
+            closePop();
+            if (!matches.length) return;
+            popover = el('div', { class: 'psy-autocomplete__popover' });
+            matches.forEach((m, i) => {
+                popover.appendChild(el('div', {
+                    class: 'psy-autocomplete__item' +
+                        (i === activeIdx ? ' psy-autocomplete__item--active' : ''),
+                    onmousedown: (ev) => { ev.preventDefault(); pickMatch(m); }
+                }, [
+                    // BEZ NAWIASÓW (decyzja PO 2026-06-13: „nazwa handlowa sama")
+                    el('span', { class: 'psy-autocomplete__code' }, [m.name]),
+                    el('span', { class: 'psy-autocomplete__desc' }, [
+                        m.substance + ' · max ' + m.maxDose
+                    ])
+                ]));
+            });
+            acWrap.appendChild(popover);
+        }
+        function pickMatch(m) {
+            const pid = getPatientId();
+            const vid = getVisitId(true);
+            if (!pid || !vid) return;
+            // Sprawdź duplikat
+            const existing = Store.getMeds(pid).find(
+                (x) => x.linkedVisitId === vid && x.name === m.name
+            );
+            if (existing) {
+                input.value = '';
+                matches = [];
+                closePop();
+                return;
+            }
+            const v = Store.getVisitById(vid);
+            const visitDate = (v && v.date) || '';
+            Store.addMed({
+                patientId: pid,
+                linkedVisitId: vid,
+                name: m.name,
+                substance: m.substance || '',
+                group: m.group || '',
+                dose: '',
+                maxDose: m.maxDose || '',
+                prescribedAt: visitDate,
+                prescribedBy: '',
+                notes: ''
+            });
+            input.value = '';
+            matches = [];
+            closePop();
+            refresh();
+        }
+
+        input.addEventListener('input', () => {
+            const q = input.value.trim();
+            matches = q ? searchMeds(q, 8) : [];
+            activeIdx = -1;
+            renderPop();
+        });
+        input.addEventListener('focus', () => {
+            const q = input.value.trim();
+            if (q) {
+                matches = searchMeds(q, 8);
+                renderPop();
+            }
+        });
+        input.addEventListener('blur', () => setTimeout(closePop, 180));
+        input.addEventListener('keydown', (ev) => {
+            if (ev.key === 'ArrowDown') {
+                ev.preventDefault();
+                if (!matches.length) matches = searchMeds('', 8);
+                activeIdx = Math.min(activeIdx + 1, matches.length - 1);
+                renderPop();
+            } else if (ev.key === 'ArrowUp') {
+                ev.preventDefault();
+                activeIdx = Math.max(activeIdx - 1, -1);
+                renderPop();
+            } else if (ev.key === 'Enter') {
+                ev.preventDefault();
+                if (activeIdx >= 0 && matches[activeIdx]) pickMatch(matches[activeIdx]);
+            } else if (ev.key === 'Escape') {
+                closePop();
+            }
+        });
+        acWrap.appendChild(input);
+        wrap.appendChild(acWrap);
+    }
+
+    refresh();
+    return wrap;
+}
+
 /** Ruter typu pola (slot 3) → właściwy renderer. */
 function renderInputForField(sectionId, field, raw) {
     const name = sectionId + '.' + field.id;
@@ -445,6 +868,19 @@ function renderInputForField(sectionId, field, raw) {
     if (type === 'tag-input-icd10') return renderTagIcd10(name, flatVal || []);
     if (type === 'link-view')      return renderLinkView(field.label, field.input.ref || '#');
     if (type === 'uzywki-special') return renderUzywkiSpecial(sectionId, raw);
+
+    // 2026-06-13 — kompaktowy grid dla sekcji 1-okienowych (visitData, parametry)
+    if (type === 'compact-grid') return renderCompactGrid(field, raw);
+
+    // 2026-06-13 — inline diagnozy i leki (mini-CRUD w wizycie)
+    if (type === 'inline-diagnoses') {
+        if (field._inlineCtx) return renderInlineDiagnoses(field._inlineCtx);
+        return el('div', { class: 'psy-new-hint' }, ['(brak kontekstu wizyty)']);
+    }
+    if (type === 'inline-meds') {
+        if (field._inlineCtx) return renderInlineMeds(field._inlineCtx);
+        return el('div', { class: 'psy-new-hint' }, ['(brak kontekstu wizyty)']);
+    }
 
     return el('div', { class: 'psy-new-hint' }, ['(nieznany typ: ' + type + ')']);
 }
@@ -869,10 +1305,54 @@ export function renderVisitForm(opts = {}) {
      * wypełnienie. Wszystkie pola spłaszczone do jednej listy z grupowaniem
      * po sekcjach (etap przejściowy — klientka dostarczy hierarchię 1/2).
      */
+    // 2026-06-13 — Kontekst dla inline-diagnoses/inline-meds (closure).
+    // Renderery te potrzebują dostępu do bieżącego visitId i ensureVisitExists
+    // (lazy-create), więc opakowujemy w gettery przekazywane przez `_inlineCtx`.
+    const inlineCtx = {
+        getPatientId: () => patient.id,
+        getVisitId: (allowLazyCreate) => {
+            if (_visitId) return _visitId;
+            if (allowLazyCreate) {
+                ensureVisitExists();
+                return _visitId;
+            }
+            return null;
+        }
+    };
+
     const groups = schema.map((section) => {
+        // 2026-06-13 — sekcje `compactGrid: true` (visitData, parametry):
+        // zamiast listy per-field na pasku po lewej, jedno wirtualne pole
+        // `__grid` które wyrenderuje WSZYSTKIE subfields w 1-okiennym
+        // kompaktowym gridzie (klientka „w jednym oknie tak jak parametry").
+        if (section.compactGrid) {
+            return {
+                id: section.id,
+                title: section.title,
+                fields: [{
+                    id: '__grid',
+                    label: section.title,
+                    input: { type: 'compact-grid' },
+                    subfields: (section.subfields || []).filter(
+                        (f) => !(f.input && f.input.type === 'header')
+                    ),
+                    fullWidth: true,
+                    notes: false
+                }]
+            };
+        }
+
         const fields = (section.subfields || [])
             .filter((f) => !(f.input && f.input.type === 'header'))
-            .map((f) => ({ ...f }));
+            .map((f) => {
+                const out = { ...f };
+                // 2026-06-13 — wstrzyknij kontekst dla inline-diagnoses/inline-meds
+                const t = f.input && f.input.type;
+                if (t === 'inline-diagnoses' || t === 'inline-meds') {
+                    out._inlineCtx = inlineCtx;
+                }
+                return out;
+            });
         // Komentarz sekcji jako wirtualne pole (dawny slot 5 — textarea).
         if (section.sectionComment) {
             fields.push({
@@ -890,8 +1370,38 @@ export function renderVisitForm(opts = {}) {
     }
 
     function _fieldIsFilled(field, raw) {
-        const key = field._groupId + '.' + field.id;
         if (!raw) return false;
+        const t = field.input && field.input.type;
+
+        // 2026-06-13 — compact-grid wypełniony gdy KTÓRYKOLWIEK subfield ma wartość
+        if (t === 'compact-grid') {
+            const subfields = field.subfields || [];
+            for (const sf of subfields) {
+                const k = field._groupId + '.' + sf.id;
+                const sv = raw[k];
+                if (sv == null) continue;
+                if (typeof sv === 'string' && sv.trim()) return true;
+                if (Array.isArray(sv) && sv.length) return true;
+                if (typeof sv === 'boolean' && sv) return true;
+                if (typeof sv === 'number' && sv !== 0) return true;
+            }
+            return false;
+        }
+
+        // 2026-06-13 — inline-diagnoses/inline-meds: sprawdź czy są rekordy w Store
+        // z linkedVisitId == bieżąca wizyta
+        if (t === 'inline-diagnoses' || t === 'inline-meds') {
+            if (!field._inlineCtx) return false;
+            const pid = field._inlineCtx.getPatientId();
+            const vid = field._inlineCtx.getVisitId(false);
+            if (!pid || !vid) return false;
+            const list = t === 'inline-diagnoses'
+                ? Store.getDiagnoses(pid)
+                : Store.getMeds(pid);
+            return list.some((x) => x.linkedVisitId === vid);
+        }
+
+        const key = field._groupId + '.' + field.id;
         const v = raw[key];
         if (v == null) return false;
         if (typeof v === 'string') return v.trim() !== '';
@@ -928,6 +1438,50 @@ export function renderVisitForm(opts = {}) {
         if (t === 'header' || t === 'link-view' || t === 'uzywki-special') {
             return '';
         }
+
+        // 2026-06-13 — compact-grid: pierwsze 2 wypełnione subfields
+        if (t === 'compact-grid') {
+            const subfields = field.subfields || [];
+            const parts = [];
+            for (const sf of subfields) {
+                const k = field._groupId + '.' + sf.id;
+                const sv = raw[k];
+                if (sv == null) continue;
+                let display = '';
+                if (Array.isArray(sv)) display = sv.length ? sv.join(', ') : '';
+                else if (typeof sv === 'boolean') display = sv ? 'tak' : 'nie';
+                else display = String(sv).trim();
+                if (!display) continue;
+                parts.push(display.length > 30 ? display.slice(0, 27) + '…' : display);
+                if (parts.length >= 2) break;
+            }
+            return parts.join(' · ');
+        }
+
+        // 2026-06-13 — inline-diagnoses: lista kodów ICD-10
+        if (t === 'inline-diagnoses') {
+            if (!field._inlineCtx) return '';
+            const pid = field._inlineCtx.getPatientId();
+            const vid = field._inlineCtx.getVisitId(false);
+            if (!pid || !vid) return '';
+            const list = Store.getDiagnoses(pid).filter((d) => d.linkedVisitId === vid);
+            if (!list.length) return '';
+            const codes = list.slice(0, 3).map((d) => d.code || '?');
+            return codes.join(', ') + (list.length > 3 ? ` (+${list.length - 3})` : '');
+        }
+
+        // 2026-06-13 — inline-meds: lista nazw handlowych
+        if (t === 'inline-meds') {
+            if (!field._inlineCtx) return '';
+            const pid = field._inlineCtx.getPatientId();
+            const vid = field._inlineCtx.getVisitId(false);
+            if (!pid || !vid) return '';
+            const list = Store.getMeds(pid).filter((m) => m.linkedVisitId === vid);
+            if (!list.length) return '';
+            const names = list.slice(0, 3).map((m) => m.name || '(?)');
+            return names.join(', ') + (list.length > 3 ? ` (+${list.length - 3})` : '');
+        }
+
         const key = field._groupId + '.' + field.id;
         const v = raw[key];
         if (v == null) return '';
@@ -952,8 +1506,14 @@ export function renderVisitForm(opts = {}) {
     function _fieldReadRenderer(field, raw) {
         if (!field) return null;
         const t = field.input && field.input.type;
-        // Special types — fallback do edit-mode (toolbar pokaże input)
-        if (t === 'tag-input-icd10' || t === 'uzywki-special' || t === 'link-view') {
+        // Special types — fallback do edit-mode (toolbar pokaże input).
+        // 2026-06-13 — compact-grid + inline-diagnoses + inline-meds:
+        //   te typy mają już z natury kompaktowy widok (grid label:value /
+        //   lista chipów z autocomplete). Read=edit, więc null żeby toolbar
+        //   pokazał edit (klientka klikiem w sekcję otwiera edit — tutaj
+        //   sekcja zawsze jest „edit-ready").
+        if (t === 'tag-input-icd10' || t === 'uzywki-special' || t === 'link-view' ||
+            t === 'compact-grid' || t === 'inline-diagnoses' || t === 'inline-meds') {
             return null;
         }
         const key = field._groupId + '.' + field.id;

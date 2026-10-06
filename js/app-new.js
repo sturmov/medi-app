@@ -31,10 +31,14 @@ import {
     visitTypeById,
     FAKE_MED_DICT
 } from './views/_fake-data.js';
+import { schemaForMode, VISIT_FORM_SCHEMA } from './views/_visit-form-schema.js';
+import { VISIT_DICT } from './views/_visit-dict.js';
 
 import { openConfirm } from './views/_modal.js';
 import { renderVisitForm } from './views/view-visit-form.js';
-import { renderDiagnosisForm } from './views/view-diagnosis-form.js';
+// 2026-06-13: view-diagnosis-form.js USUNIĘTE — diagnoza edytowana INLINE
+// w sekcji wizyty (sekcja `rozpoznanie` typu `inline-diagnoses`). Routes
+// `#/diagnoses/new` i `#/diagnoses/edit/:id` redirectują do historii wizyt.
 import { renderRecommendationForm } from './views/view-recommendation-form.js';
 import { renderMedForm } from './views/view-med-form.js';
 import { renderPatientForm } from './views/view-patient-form.js';
@@ -484,7 +488,10 @@ function _prettyVisitFieldLabel(rawKey) {
 }
 
 /** Zwróć tablicę `{label, value}` z `_raw` — w kolejności wstawienia,
- *  pomijając puste, techniczne, etykiety bez wartości. */
+ *  pomijając puste, techniczne, etykiety bez wartości.
+ *  LEGACY — używane jako fallback dla wizyt bez `_raw` (PR-J5).
+ *  Od PR-J15 (2026-05-30) główny widok historii używa
+ *  `_extractVisitGroupedContent` — grupowanie po sekcjach formularza. */
 function _extractVisitContent(raw) {
     if (!raw || typeof raw !== 'object') return [];
     const out = [];
@@ -506,6 +513,220 @@ function _extractVisitContent(raw) {
         out.push({ label, value: display });
     }
     return out;
+}
+
+// ============================================================================
+// PR-J15 (2026-05-30) — pełna treść wizyty na liście historii (klientka).
+//
+// Decyzje PO:
+//   • na liście wizyt zamiast streszczenia chcemy wyświetlone wszystkie
+//     wypełnione pola — by terapeuta mógł szybko przejrzeć wszystkie wizyty;
+//   • grupowanie lekko zaznaczone (sub-headery sekcji w stylu kapitalików,
+//     bez ramek/tła);
+//   • sekcje puste pomijać (jak wizyta to tylko 3 wypełnione pola — widzisz
+//     tylko te 3, bez 13 pustych sekcji);
+//   • wszystkie sekcje zawsze rozwinięte, bez toggle „zwiń/rozwiń";
+//   • layout kompaktowy (theme--compact).
+//
+// Funkcje:
+//   - `_resolveVisitModeFromType(type)` → 'first' | 'followup'
+//   - `_formatVisitFieldValue(field, primary, arrayAlt)` — wartości słownikowe
+//     na polskie label-e + specjalne formattery (ICD-10, używki w extractor)
+//   - `_extractVisitGroupedContent(raw, mode)` → struktura grupowana
+// ============================================================================
+
+/** Mapowanie typu wizyty na tryb formularza (zgodne z `view-visit-form.js`). */
+function _resolveVisitModeFromType(visitType) {
+    const t = String(visitType || '').toLowerCase();
+    const FIRST_TYPES = new Set([
+        'first_meeting', 'interview', 'diagnosis',
+        'first', 'first-visit'
+    ]);
+    if (FIRST_TYPES.has(t)) return 'first';
+    if (/wywiad|first/.test(t)) return 'first';
+    return 'followup';
+}
+
+/** Formatowanie wartości dla pojedynczego pola schemy — czytelny string.
+ *  Zwraca '' gdy puste. Słowniki `VISIT_DICT.*` w bieżącej apce to
+ *  flat array stringów, więc value === label (nie ma mapy klucz→label). */
+function _formatVisitFieldValue(field, primary, arrayAlt) {
+    const type = field && field.input && field.input.type;
+
+    // tag-input-icd10 — kod + opis (per tag)
+    if (type === 'tag-input-icd10') {
+        let arr = [];
+        if (Array.isArray(primary)) {
+            arr = primary;
+        } else if (typeof primary === 'string' && primary.trim()) {
+            arr = primary.split(',').map((s) => s.trim()).filter(Boolean);
+        }
+        const parts = [];
+        for (const item of arr) {
+            if (typeof item === 'string') {
+                parts.push(item.toUpperCase());
+            } else if (item && typeof item === 'object' && item.code) {
+                const code = String(item.code).toUpperCase();
+                const desc = item.description ? ' · ' + item.description : '';
+                parts.push(code + desc);
+            }
+        }
+        return parts.join('; ');
+    }
+
+    // multi-select / checkbox-group → array of values, połącz przecinkami
+    if (type === 'multi-select' || type === 'checkbox-group') {
+        let arr = [];
+        if (Array.isArray(primary)) arr = primary;
+        else if (Array.isArray(arrayAlt)) arr = arrayAlt;
+        else if (typeof primary === 'string' && primary.trim()) {
+            arr = primary.split(',').map((s) => s.trim()).filter(Boolean);
+        }
+        return arr.filter(Boolean).join(', ');
+    }
+
+    // select / radio / text / textarea / number / date — wartość jako string
+    if (primary == null) return '';
+    if (Array.isArray(primary)) return primary.length ? primary.join(', ') : '';
+    if (typeof primary === 'boolean') return primary ? 'tak' : 'nie';
+    return String(primary).trim();
+}
+
+/** Specjalny extractor dla sekcji „Używki" (uzywki-special).
+ *  Klucze w `_raw`: `<sectionId>_u_<idx>` (checkbox), `_i` (intensywność), `_n` (notatka).
+ *  Zwraca tablicę `{label, value, notes}` dla wszystkich pozycji z czymkolwiek
+ *  niepustym. Wpisuje wszystkie odwiedzone klucze do `usedKeys`. */
+function _extractUzywkiEntries(raw, sectionId, usedKeys) {
+    const out = [];
+    const LIST = (VISIT_DICT && VISIT_DICT.UZYWKI_11) || [];
+    LIST.forEach((label, idx) => {
+        const checkKey = sectionId + '_u_' + idx;
+        const intKey   = sectionId + '_u_' + idx + '_i';
+        const noteKey  = sectionId + '_u_' + idx + '_n';
+
+        usedKeys.add(checkKey);
+        usedKeys.add(intKey);
+        usedKeys.add(noteKey);
+
+        const checked = !!(raw[checkKey] === true || raw[checkKey] === '1' || raw[checkKey] === 1 || raw[checkKey] === 'true');
+        const intVal  = raw[intKey] && String(raw[intKey]).trim();
+        const noteVal = raw[noteKey] && String(raw[noteKey]).trim();
+
+        // Pomiń pozycje bez żadnej informacji
+        if (!checked && !intVal && !noteVal) return;
+
+        const parts = [];
+        if (checked) parts.push('✓ TAK');
+        if (intVal)  parts.push(intVal);
+        const value = parts.join(' · ');
+
+        out.push({
+            label: label,
+            value: value || (noteVal ? '(tylko notatka)' : ''),
+            notes: noteVal || ''
+        });
+    });
+    return out;
+}
+
+/** Wyciągnij treść wizyty pogrupowaną po sekcjach formularza.
+ *  Zwraca:
+ *    { sections: [{ sectionId, sectionTitle, comment, fields:[{label,value,notes}] }],
+ *      otherFields: [{label, value}] } (klucze nie pasujące do schemy).
+ *  Sekcje puste są pomijane. */
+function _extractVisitGroupedContent(raw, mode) {
+    if (!raw || typeof raw !== 'object') return { sections: [], otherFields: [] };
+
+    const schema = schemaForMode(mode);
+    const usedKeys = new Set();
+    const sections = [];
+
+    for (const section of schema) {
+        const sectionId = section.id;
+        const block = {
+            sectionId,
+            sectionTitle: section.title,
+            comment: '',
+            fields: []
+        };
+
+        // Komentarz sekcji
+        const commentKey = sectionId + '.__comment';
+        const commentVal = raw[commentKey];
+        if (commentVal != null && String(commentVal).trim()) {
+            block.comment = String(commentVal).trim();
+            usedKeys.add(commentKey);
+        }
+
+        // Subfieldy
+        for (const field of (section.subfields || [])) {
+            const fieldId = field.id;
+            const fieldType = field.input && field.input.type;
+
+            // Pomiń pola dekoracyjne / linki
+            if (fieldType === 'header' || fieldType === 'link-view') continue;
+
+            // Używki — special extractor
+            if (fieldType === 'uzywki-special') {
+                const uzywkiItems = _extractUzywkiEntries(raw, sectionId, usedKeys);
+                for (const u of uzywkiItems) block.fields.push(u);
+                continue;
+            }
+
+            const fullKey   = sectionId + '.' + fieldId;
+            const altKey    = fullKey + '[]';
+            const notesKey  = fullKey + '.__notes';
+
+            const rawValue = raw[fullKey];
+            const rawArray = raw[altKey];
+            const value = _formatVisitFieldValue(field, rawValue, rawArray);
+            const notesVal = raw[notesKey] && String(raw[notesKey]).trim();
+
+            if (value || notesVal) {
+                block.fields.push({
+                    label: field.label,
+                    value: value,
+                    notes: notesVal || ''
+                });
+                usedKeys.add(fullKey);
+                if (rawArray !== undefined) usedKeys.add(altKey);
+                if (notesVal) usedKeys.add(notesKey);
+            }
+        }
+
+        // Sekcja niepusta → dodaj
+        if (block.comment || block.fields.length) {
+            sections.push(block);
+        }
+    }
+
+    // Pozostałe klucze (np. legacy fake-data z flat keyami typu `rodzajWizyty`)
+    const otherFields = [];
+    for (const [k, v] of Object.entries(raw)) {
+        if (usedKeys.has(k)) continue;
+        if (k === '__comment' || k === '__notes') continue;
+        if (k.endsWith('.__comment') || k.endsWith('.__notes')) continue;
+        // Technical używki keys (gdy sekcja `uzywki` nie była w schemie dla tego trybu)
+        if (/_u_\d+(_[in])?$/.test(k)) continue;
+
+        const label = _prettyVisitFieldLabel(k);
+        if (!label) continue;
+
+        let display = '';
+        if (v == null) continue;
+        if (Array.isArray(v)) {
+            if (!v.length) continue;
+            display = v.join(', ');
+        } else if (typeof v === 'boolean') {
+            display = v ? 'tak' : 'nie';
+        } else {
+            display = String(v).trim();
+            if (!display) continue;
+        }
+        otherFields.push({ label, value: display });
+    }
+
+    return { sections, otherFields };
 }
 
 function viewHistory() {
@@ -582,18 +803,79 @@ function viewHistory() {
             ])
         ]);
 
-        // Body: pełna treść (wszystkie pola z `_raw`), bez skrótu `summary`.
+        // Body: PR-J15 (2026-05-30) — pełna treść pogrupowana po sekcjach
+        // formularza. Sekcje puste pomijane, sub-headery delikatne, gęsty grid.
         const raw = v.data && v.data._raw;
-        const entries = _extractVisitContent(raw);
+        const mode = _resolveVisitModeFromType(v.type);
+        const grouped = _extractVisitGroupedContent(raw, mode);
+
+        const hasContent = (grouped.sections.length > 0 || grouped.otherFields.length > 0);
 
         let bodyNode;
-        if (entries.length) {
-            const dl = el('dl', {});
-            for (const { label, value } of entries) {
-                dl.appendChild(el('dt', {}, [label]));
-                dl.appendChild(el('dd', {}, [value]));
+        if (hasContent) {
+            bodyNode = el('div', { class: 'psy-history-paragraph__body' });
+
+            // Sekcje pogrupowane (schema-driven)
+            for (const section of grouped.sections) {
+                const sectionEl = el('div', { class: 'psy-history-paragraph__section' });
+
+                // Sub-header sekcji — delikatny, lekko zaznacza grupę
+                sectionEl.appendChild(el('div', {
+                    class: 'psy-history-paragraph__section-title'
+                }, [section.sectionTitle]));
+
+                // Komentarz sekcji (jeśli jest) — pełna szerokość
+                if (section.comment) {
+                    sectionEl.appendChild(el('div', {
+                        class: 'psy-history-paragraph__section-comment'
+                    }, [section.comment]));
+                }
+
+                // Grid pól (label / value) + ewentualne notatki pól
+                if (section.fields.length) {
+                    const fieldsGrid = el('div', { class: 'psy-history-paragraph__fields' });
+                    for (const f of section.fields) {
+                        fieldsGrid.appendChild(el('div', {
+                            class: 'psy-history-paragraph__field-label'
+                        }, [f.label + ':']));
+                        fieldsGrid.appendChild(el('div', {
+                            class: 'psy-history-paragraph__field-value'
+                        }, [f.value || '—']));
+                        if (f.notes) {
+                            fieldsGrid.appendChild(el('div', {
+                                class: 'psy-history-paragraph__field-notes'
+                            }, ['↳ ' + f.notes]));
+                        }
+                    }
+                    sectionEl.appendChild(fieldsGrid);
+                }
+
+                bodyNode.appendChild(sectionEl);
             }
-            bodyNode = el('div', { class: 'psy-history-paragraph__body' }, [dl]);
+
+            // Pozostałe pola (legacy fake-data z płaskimi kluczami) — pokaż
+            // jako osobną sekcję „Treść notatki" bez sub-headera, w gridzie.
+            if (grouped.otherFields.length) {
+                const sectionEl = el('div', { class: 'psy-history-paragraph__section' });
+                // Nagłówek tylko jeśli powyżej były inne sekcje (inaczej ten
+                // jeden blok bez nazwy = naturalne, bez decoration)
+                if (grouped.sections.length) {
+                    sectionEl.appendChild(el('div', {
+                        class: 'psy-history-paragraph__section-title'
+                    }, ['Pozostałe pola']));
+                }
+                const fieldsGrid = el('div', { class: 'psy-history-paragraph__fields' });
+                for (const f of grouped.otherFields) {
+                    fieldsGrid.appendChild(el('div', {
+                        class: 'psy-history-paragraph__field-label'
+                    }, [f.label + ':']));
+                    fieldsGrid.appendChild(el('div', {
+                        class: 'psy-history-paragraph__field-value'
+                    }, [f.value || '—']));
+                }
+                sectionEl.appendChild(fieldsGrid);
+                bodyNode.appendChild(sectionEl);
+            }
         } else if (v.summary && v.summary.trim()) {
             // Fallback dla starych wizyt bez `_raw`
             bodyNode = el('div', { class: 'psy-history-paragraph__body' }, [v.summary]);
@@ -618,81 +900,70 @@ function viewHistory() {
 }
 
 
-// ----- Meds ----------------------------------------------------------------
+// ----- Meds (2026-06-13 — read-only oś czasu z wizyt) -----------------------
+//
+// Klientka: „leki w wizycie" — sekcja boczna „Leki" pokazuje ekstrakt
+// z treści wizyt wg daty i kolejności. Brak akcji „+ Dodaj/✎ Edytuj/🗑 Usuń"
+// — leki edytuje się INLINE w sekcji „Farmakoterapia" formularza wizyty.
+// Klik wiersza → otwiera wizytę powiązaną.
 
 function viewMeds() {
     const patient = Store.state.currentPatient;
     if (!patient) return noPatientView('Leki', '💊');
-    const meds = Store.getMeds(patient.id);
+    const timeline = Store.getMedsTimeline(patient.id);
 
     const root = el('div', { class: 'psy-new-view' });
     root.appendChild(el('div', { class: 'psy-new-view__header' }, [
         el('div', {}, [
             el('h1', { class: 'psy-new-view__title' }, ['Leki']),
             el('div', { class: 'psy-new-view__subtitle' }, [
-                patient.imie + ' ' + patient.nazwisko + ' · ' + meds.length +
-                ' ' + (meds.length === 1 ? 'lek' : 'leków')
+                patient.imie + ' ' + patient.nazwisko + ' · ' + timeline.length +
+                ' ' + (timeline.length === 1 ? 'lek' : 'leków') +
+                ' · oś czasu z wizyt (read-only)'
             ])
-        ]),
-        el('div', { class: 'psy-new-view__actions' }, [
-            el('button', {
-                class: 'btn btn--primary',
-                onclick: () => { window.location.hash = '#/meds/new'; }
-            }, ['+ Dodaj lek'])
         ])
     ]));
 
     const body = el('div', { class: 'psy-new-view__body psy-new-view__body--plain' });
-    if (!meds.length) {
+    if (!timeline.length) {
         body.appendChild(emptyState('💊', 'Brak leków',
-            'Pacjent nie ma przypisanych leków.', [
-            { label: '+ Pierwszy lek', variant: 'primary', onClick: () => (window.location.hash = '#/meds/new') }
+            'Pacjent nie ma przypisanych leków. Dodaj lek w sekcji „Farmakoterapia" wizyty.', [
+            { label: '🗓️ Przejdź do wizyt', variant: 'primary', onClick: () => (window.location.hash = '#/history') }
         ]));
     } else {
         const table = el('table', { class: 'psy-new-table' });
         table.appendChild(el('thead', {}, [
             el('tr', {}, [
+                el('th', { style: { width: '120px' } }, ['Data wizyty']),
                 el('th', {}, ['Nazwa handlowa']),
                 el('th', {}, ['Substancja']),
-                el('th', { style: { width: '160px' } }, ['Aktualna dawka']),
-                el('th', { style: { width: '140px' } }, ['Max dawka']),
-                el('th', { style: { width: '120px' } }, ['Od kiedy']),
-                el('th', {}, ['Notatki']),
-                el('th', { style: { width: '100px', textAlign: 'right' } }, ['Akcje'])
+                el('th', { style: { width: '140px' } }, ['Aktualna dawka']),
+                el('th', { style: { width: '120px' } }, ['Max dawka']),
+                el('th', {}, ['Typ wizyty'])
             ])
         ]));
         const tbody = el('tbody', {});
-        for (const m of meds) {
-            tbody.appendChild(el('tr', {}, [
+        for (const entry of timeline) {
+            const m = entry.med;
+            const v = entry.visit;
+            const visitLabel = v
+                ? (v.date + (v.time ? ' ' + v.time : ''))
+                : (m.prescribedAt || '—');
+            const typeLabel = v ? (visitTypeLabel(v.type) || '—') : '(bez wizyty)';
+            const rowClick = v
+                ? () => { window.location.hash = '#/visit/form/' + v.id; }
+                : null;
+            tbody.appendChild(el('tr', {
+                title: v ? 'Kliknij, aby otworzyć wizytę' : 'Lek bez przypisanej wizyty',
+                style: { cursor: rowClick ? 'pointer' : 'default' },
+                onclick: rowClick
+            }, [
+                el('td', {}, [visitLabel]),
                 el('td', {}, [el('strong', {}, [m.name || '(bez nazwy)'])]),
                 el('td', {}, [m.substance || '—']),
                 el('td', {}, [m.dose || '—']),
                 el('td', { style: { color: '#B91C1C', fontWeight: '600' } }, [m.maxDose || '—']),
-                el('td', {}, [m.prescribedAt || '—']),
-                el('td', { style: { color: '#475569' } }, [m.notes || '']),
-                el('td', { class: 'psy-row-actions', style: { textAlign: 'right' } }, [
-                    el('button', {
-                        class: 'btn btn--secondary btn--sm btn--icon',
-                        title: 'Edytuj',
-                        onclick: () => { window.location.hash = '#/meds/edit/' + m.id; }
-                    }, ['✎']),
-                    el('button', {
-                        class: 'btn btn--danger btn--sm btn--icon',
-                        title: 'Usuń lek',
-                        onclick: async () => {
-                            const ok = await openConfirm({
-                                title: 'Usunąć lek?',
-                                message: `Czy na pewno usunąć „${m.name || '(bez nazwy)'}" z listy leków pacjenta?`,
-                                confirmLabel: 'Usuń',
-                                variant: 'danger'
-                            });
-                            if (ok) {
-                                Store.removeMed(m.id);
-                                toast('info', 'Usunięto lek', m.name || '');
-                            }
-                        }
-                    }, ['🗑'])
-                ])
+                el('td', { style: { color: '#475569' } }, [typeLabel])
             ]));
         }
         table.appendChild(tbody);
@@ -702,89 +973,71 @@ function viewMeds() {
     return root;
 }
 
-// ----- Diagnoses -----------------------------------------------------------
+// ----- Diagnoses (2026-06-13 — read-only oś czasu z wizyt) -----------------
+//
+// Klientka: „diagnozy w wizyty" + „element menu jak diagnoza to akapity
+// wizyty". Sekcja boczna „Diagnozy" pokazuje ekstrakt z wizyt — wszystkie
+// rozpoznania ICD-10 powiązane z wizytami (linkedVisitId), posortowane
+// chronologicznie. Brak akcji „+ Dodaj/✎ Edytuj/🗑 Usuń" — rozpoznania
+// dodaje/usuwa się INLINE w sekcji „Rozpoznanie" formularza wizyty.
 
 function viewDiagnoses() {
     const patient = Store.state.currentPatient;
     if (!patient) return noPatientView('Diagnozy', '🏥');
-    const diagnoses = Store.getDiagnoses(patient.id);
+    const timeline = Store.getDiagnosesTimeline(patient.id);
 
     const root = el('div', { class: 'psy-new-view' });
     root.appendChild(el('div', { class: 'psy-new-view__header' }, [
         el('div', {}, [
             el('h1', { class: 'psy-new-view__title' }, ['Diagnozy']),
             el('div', { class: 'psy-new-view__subtitle' }, [
-                patient.imie + ' ' + patient.nazwisko + ' · ' + diagnoses.length +
-                ' ' + (diagnoses.length === 1 ? 'rozpoznanie' : 'rozpoznań') + ' (ICD-10)'
+                patient.imie + ' ' + patient.nazwisko + ' · ' + timeline.length +
+                ' ' + (timeline.length === 1 ? 'rozpoznanie' : 'rozpoznań') +
+                ' · oś czasu z wizyt (read-only)'
             ])
-        ]),
-        el('div', { class: 'psy-new-view__actions' }, [
-            el('button', {
-                class: 'btn btn--primary',
-                onclick: () => { window.location.hash = '#/diagnoses/new'; }
-            }, ['+ Dodaj diagnozę'])
         ])
     ]));
 
-    const body = el('div', { class: 'psy-new-view__body' });
-    if (!diagnoses.length) {
+    const body = el('div', { class: 'psy-new-view__body psy-new-view__body--plain' });
+    if (!timeline.length) {
         body.appendChild(emptyState('🏥', 'Brak diagnoz',
-            'Pacjent nie ma przypisanych rozpoznań.', [
-            { label: '+ Pierwsza diagnoza', variant: 'primary', onClick: () => (window.location.hash = '#/diagnoses/new') }
+            'Pacjent nie ma rozpoznań ICD-10. Dodaj rozpoznanie w sekcji „Rozpoznanie" wizyty.', [
+            { label: '🗓️ Przejdź do wizyt', variant: 'primary', onClick: () => (window.location.hash = '#/history') }
         ]));
     } else {
         const stack = el('div', { class: 'psy-new-stack' });
-        for (const d of diagnoses) {
-            const statusVariant = d.status === 'aktualne' ? 'success'
-                : d.status === 'w remisji' ? 'info'
-                : 'neutral';
+        for (const entry of timeline) {
+            const d = entry.diagnosis;
+            const v = entry.visit;
+            const visitLabel = v
+                ? (v.date + (v.time ? ' ' + v.time : ''))
+                : (d.assignedAt || '—');
+            const typeLabel = v ? (visitTypeLabel(v.type) || '') : '(bez wizyty)';
+            const rowClick = v
+                ? () => { window.location.hash = '#/visit/form/' + v.id; }
+                : null;
             const card = el('div', {
+                title: v ? 'Kliknij, aby otworzyć wizytę' : '',
                 style: {
-                    padding: '12px 14px',
+                    padding: '10px 14px',
                     background: '#FFFFFF',
                     border: '1px solid #E5E7EB',
                     borderLeft: '4px solid #2563EB',
-                    borderRadius: '8px'
-                }
+                    borderRadius: '8px',
+                    cursor: rowClick ? 'pointer' : 'default'
+                },
+                onclick: rowClick
             }, [
                 el('div', { class: 'psy-new-row' }, [
+                    el('span', { style: { color: '#475569', minWidth: '110px', fontSize: '12.5px' } }, [visitLabel]),
                     el('strong', {
-                        style: { fontFamily: 'monospace', fontSize: '15px', color: '#1D4ED8', minWidth: '70px' }
+                        style: { fontFamily: 'monospace', fontSize: '14px', color: '#1D4ED8', minWidth: '70px' }
                     }, [d.code || '—']),
                     el('span', { style: { flex: '1' } }, [d.description || '(brak opisu)']),
-                    el('span', { class: 'psy-new-badge psy-new-badge--' + statusVariant }, [d.status || 'aktualne']),
-                    el('span', { class: 'psy-new-hint' }, ['od ' + (d.assignedAt || '—')]),
-                    el('div', { class: 'psy-row-actions' }, [
-                        el('button', {
-                            class: 'btn btn--secondary btn--sm btn--icon',
-                            title: 'Edytuj',
-                            onclick: () => { window.location.hash = '#/diagnoses/edit/' + d.id; }
-                        }, ['✎']),
-                        el('button', {
-                            class: 'btn btn--danger btn--sm btn--icon',
-                            title: 'Usuń diagnozę',
-                            onclick: async () => {
-                                const ok = await openConfirm({
-                                    title: 'Usunąć diagnozę?',
-                                    message: `Czy na pewno usunąć rozpoznanie „${d.code || ''} — ${d.description || ''}"?`,
-                                    confirmLabel: 'Usuń',
-                                    variant: 'danger'
-                                });
-                                if (ok) {
-                                    Store.removeDiagnosis(d.id);
-                                    toast('info', 'Usunięto diagnozę', d.code || '');
-                                }
-                            }
-                        }, ['🗑'])
-                    ])
-                ]),
-                d.author || d.notes
-                    ? el('div', { class: 'psy-new-hint', style: { marginTop: '6px' } }, [
-                        d.author ? 'Autor: ' + d.author : '',
-                        d.author && d.notes ? ' · ' : '',
-                        d.notes || ''
-                    ])
-                    : null
+                    typeLabel
+                        ? el('span', { class: 'psy-new-hint' }, [typeLabel])
+                        : null
+                ].filter(Boolean))
             ]);
             stack.appendChild(card);
         }
@@ -794,41 +1047,52 @@ function viewDiagnoses() {
     return root;
 }
 
-// ----- Recommendations -----------------------------------------------------
+// ----- Recommendations (2026-06-13 — read-only oś czasu z wizyt) -----------
+//
+// Klientka: „zalecenia to akapity wizyty". Lista zaleceń pacjenta z osi
+// czasu wizyt. Edytuje się INLINE w wizycie (sekcja „Podjęte oddziaływania"
+// → ustalenia/rekomendacje) lub przez `#/recommendations/edit/:id` (legacy
+// pojedynczy formularz, zostawiony jako fallback).
 
 function viewRecommendations() {
     const patient = Store.state.currentPatient;
     if (!patient) return noPatientView('Zalecenia', '📋');
-    const recs = Store.getRecommendations(patient.id);
+    const timeline = Store.getRecommendationsTimeline(patient.id);
 
     const root = el('div', { class: 'psy-new-view' });
     root.appendChild(el('div', { class: 'psy-new-view__header' }, [
         el('div', {}, [
             el('h1', { class: 'psy-new-view__title' }, ['Zalecenia']),
             el('div', { class: 'psy-new-view__subtitle' }, [
-                patient.imie + ' ' + patient.nazwisko + ' · ' + recs.length +
-                ' ' + (recs.length === 1 ? 'zalecenie' : 'zaleceń')
+                patient.imie + ' ' + patient.nazwisko + ' · ' + timeline.length +
+                ' ' + (timeline.length === 1 ? 'zalecenie' : 'zaleceń') +
+                ' · oś czasu z wizyt (read-only)'
             ])
-        ]),
-        el('div', { class: 'psy-new-view__actions' }, [
-            el('button', {
-                class: 'btn btn--primary',
-                onclick: () => { window.location.hash = '#/recommendations/new'; }
-            }, ['+ Nowe zalecenie'])
         ])
     ]));
 
-    const body = el('div', { class: 'psy-new-view__body' });
-    if (!recs.length) {
+    const body = el('div', { class: 'psy-new-view__body psy-new-view__body--plain' });
+    if (!timeline.length) {
         body.appendChild(emptyState('📋', 'Brak zaleceń',
-            'Brak zapisanych zaleceń dla tego pacjenta.', [
-            { label: '+ Pierwsze zalecenie', variant: 'primary', onClick: () => (window.location.hash = '#/recommendations/new') }
+            'Brak zapisanych zaleceń dla tego pacjenta. Dodaj zalecenie w wizycie.', [
+            { label: '🗓️ Przejdź do wizyt', variant: 'primary', onClick: () => (window.location.hash = '#/history') }
         ]));
     } else {
         const stack = el('div', { class: 'psy-new-stack' });
-        for (const r of recs) {
+        for (const entry of timeline) {
+            const r = entry.recommendation;
+            const v = entry.visit;
+            const visitLabel = v
+                ? (v.date + (v.time ? ' ' + v.time : ''))
+                : (r.createdAt || '—');
+            const rowClick = v
+                ? () => { window.location.hash = '#/visit/form/' + v.id; }
+                : null;
             const card = el('div', {
-                class: 'psy-recommendation' + (r.done ? ' psy-recommendation--done' : '')
+                class: 'psy-recommendation' + (r.done ? ' psy-recommendation--done' : ''),
+                title: v ? 'Kliknij, aby otworzyć wizytę' : '',
+                style: { cursor: rowClick ? 'pointer' : 'default' },
+                onclick: rowClick
             }, [
                 el('div', { class: 'psy-recommendation__header' }, [
                     el('input', {
@@ -836,33 +1100,14 @@ function viewRecommendations() {
                         class: 'psy-recommendation__toggle',
                         checked: !!r.done,
                         title: r.done ? 'Oznacz jako niewykonane' : 'Oznacz jako zrealizowane',
-                        onchange: () => Store.toggleRecommendationDone(r.id)
+                        onclick: (ev) => ev.stopPropagation(),
+                        onchange: (ev) => {
+                            ev.stopPropagation();
+                            Store.toggleRecommendationDone(r.id);
+                        }
                     }),
                     el('span', { class: 'psy-recommendation__title' }, [r.title || '(bez tytułu)']),
-                    el('span', { class: 'psy-new-hint' }, [r.createdAt || '—']),
-                    el('div', { class: 'psy-recommendation__actions' }, [
-                        el('button', {
-                            class: 'btn btn--secondary btn--sm btn--icon',
-                            title: 'Edytuj',
-                            onclick: () => { window.location.hash = '#/recommendations/edit/' + r.id; }
-                        }, ['✎']),
-                        el('button', {
-                            class: 'btn btn--danger btn--sm btn--icon',
-                            title: 'Usuń zalecenie',
-                            onclick: async () => {
-                                const ok = await openConfirm({
-                                    title: 'Usunąć zalecenie?',
-                                    message: `Czy na pewno usunąć zalecenie „${r.title || ''}"?`,
-                                    confirmLabel: 'Usuń',
-                                    variant: 'danger'
-                                });
-                                if (ok) {
-                                    Store.removeRecommendation(r.id);
-                                    toast('info', 'Usunięto zalecenie', r.title || '');
-                                }
-                            }
-                        }, ['🗑'])
-                    ])
+                    el('span', { class: 'psy-new-hint' }, [visitLabel])
                 ]),
                 el('div', { class: 'psy-recommendation__content' }, [r.content || ''])
             ]);
@@ -1090,10 +1335,36 @@ function viewVisitForm() {
 
 // ----- Diagnosis / Recommendation / Med / Patient / Test runner (delegaty) -
 
+// 2026-06-13: viewDiagnosisForm jest tylko REDIRECTEM. Klientka: „diagnoza
+// edytowana INLINE w sekcji wizyty". Stare URL-e `#/diagnoses/new` i
+// `#/diagnoses/edit/:id` przekierowują do historii wizyt lub do wizyty
+// powiązanej (gdy mamy linkedVisitId).
 function viewDiagnosisForm() {
     const hash = window.location.hash || '';
     const m = hash.match(/^#\/diagnoses\/edit\/([^/?]+)/);
-    return renderDiagnosisForm({ id: m ? decodeURIComponent(m[1]) : null });
+    const id = m ? decodeURIComponent(m[1]) : null;
+    let targetHash = '#/history';
+    if (id) {
+        const diag = Store.getDiagnosisById(id);
+        if (diag && diag.linkedVisitId) {
+            targetHash = '#/visit/form/' + diag.linkedVisitId;
+        }
+    }
+    setTimeout(() => {
+        toast('info', 'Diagnoza w wizycie',
+            'Edycja rozpoznania ICD-10 odbywa się teraz w sekcji „Rozpoznanie" wizyty.');
+        window.location.hash = targetHash;
+    }, 0);
+    return el('div', { class: 'psy-new-view' }, [
+        el('div', { class: 'psy-new-view__header' }, [
+            el('div', {}, [
+                el('h1', { class: 'psy-new-view__title' }, ['Przekierowanie…']),
+                el('div', { class: 'psy-new-view__subtitle' }, [
+                    'Diagnoza jest częścią wizyty — przekierowuję do ' + targetHash
+                ])
+            ])
+        ])
+    ]);
 }
 
 function viewRecommendationForm() {
