@@ -1234,6 +1234,8 @@ const AppController = {
         });
 
         window.addEventListener('hashchange', () => this._onHashChange());
+        // Obrót tabletu / zmiana szerokości okna.
+        window.matchMedia('(max-width: 900px)').addEventListener('change', () => this._applyFormMode());
 
         // Po zamknięciu okna potwierdzenia: odśwież widoki list (formularze „live"
         // zostają nietknięte — same pilnują swojego stanu).
@@ -1482,8 +1484,15 @@ const AppController = {
         }
         this.mainEl.appendChild(node);
 
-        // Formularz wizyty zwęża menu boczne do ikon.
-        this.shellEl.classList.toggle('psy-new-shell--form-mode', !!this.mainEl.querySelector('.psy-form-toolbar'));
+        this._applyFormMode();
+    },
+
+    /** Formularz wizyty zwęża menu boczne do ikon — ale nie na wąskim ekranie,
+     *  gdzie menu jest wysuwane i ma pokazywać pełne nazwy. */
+    _applyFormMode() {
+        const narrow = window.matchMedia('(max-width: 900px)').matches;
+        this.shellEl.classList.toggle('psy-new-shell--form-mode',
+            !narrow && !!this.mainEl.querySelector('.psy-form-toolbar'));
     },
 
     /** Dane pacjenta jeszcze nie pobrane z magazynu: pobierz i pokaż stan. */

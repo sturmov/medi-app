@@ -1,0 +1,77 @@
+/* ============================================================================
+   responsive.css — tablet i wąskie ekrany. Ładowany JAKO OSTATNI, żeby wygrywał
+   z regułami trybu kompaktowego i zwężonego menu formularza.
+
+   Progi:
+     ≤ 1100 px  tablet poziomo      — pasek pacjenta bez e-maila, bez miejsca na logo
+     ≤  900 px  tablet pionowo      — menu boczne wysuwane (☰), jedna kolumna
+     ≤  600 px  telefon             — pasek pacjenta ograniczony do nazwiska
+   ============================================================================ */
+
+/* Pasek górny: stan zapisu i magazyn danych (prawa strona) muszą być zawsze
+   widoczne. Gdy brakuje miejsca, skraca się nazwisko pacjenta, a nie one. */
+.psy-new-patient-tag-wrap,
+.psy-new-patient-tag {
+    min-width: 0;
+    max-width: 100%;
+}
+.psy-new-patient-tag > * {
+    flex-shrink: 0;
+}
+.psy-new-patient-tag > .psy-new-patient-tag__name {
+    flex-shrink: 1;
+    min-width: 60px;
+}
+
+@media (max-width: 1100px) {
+    .psy-new-patient-tag__field--mail,
+    .psy-new-brand--placeholder {
+        display: none;
+    }
+}
+
+@media (max-width: 900px) {
+    /* Jedna kolumna: tryb kompaktowy i tryb formularza wymuszają dwie kolumny,
+       przez co treść lądowała w wąskiej kolumnie menu. */
+    :root.theme--compact .psy-new-shell,
+    .psy-new-shell.psy-new-shell--form-mode {
+        grid-template-columns: 1fr !important;
+    }
+
+    /* Wysuwane menu zaczyna się pod (niższym w trybie kompaktowym) paskiem górnym. */
+    :root.theme--compact .psy-new-sidebar {
+        top: 40px;
+    }
+
+    /* Pacjent ma być widoczny zawsze — także na tablecie trzymanym pionowo. */
+    .psy-new-topbar__center {
+        display: flex;
+    }
+    .psy-new-patient-tag__field--tel,
+    .psy-new-patient-tag__field--pesel,
+    .psy-new-patient-tag__change {
+        display: none;
+    }
+
+    /* Formularz wizyty: lista pól nad dziennikiem (zamiast obok). */
+    .psy-form-toolbar {
+        grid-template-rows: auto minmax(0, 1fr);
+        height: calc(100vh - 150px);
+    }
+    .psy-form-toolbar__nav {
+        max-height: 30vh;
+    }
+
+    /* Większe cele dotyku na liście pól i w akapitach. */
+    .psy-form-toolbar__field {
+        padding-top: 7px;
+        padding-bottom: 7px;
+    }
+}
+
+@media (max-width: 600px) {
+    .psy-new-patient-tag__badge,
+    .psy-new-patient-tag__field {
+        display: none;
+    }
+}
