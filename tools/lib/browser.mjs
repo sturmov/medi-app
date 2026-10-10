@@ -126,15 +126,21 @@ export async function launchBrowser({ width = 1366, height = 768 } = {}) {
             const node = ${expr};
             if (!node) return null;
             node.scrollIntoView({ block: 'center', inline: 'nearest' });
-            // Czekamy, aż element przestanie się ruszać (np. animacja wejścia okna),
-            // inaczej kliknięcie trafiłoby w miejsce, którego już tam nie ma.
+            // Czekamy, aż element przestanie się ruszać — animacja wejścia okna albo
+            // doładowanie czcionek potrafi przesunąć przycisk tuż po pierwszym
+            // wyrysowaniu, a kliknięcie trafiłoby wtedy obok. Wymagamy kilku
+            // kolejnych klatek bez ruchu i tego, żeby pod punktem był właśnie ten element.
+            try { await document.fonts.ready; } catch (_) { /* */ }
             let b = node.getBoundingClientRect();
-            for (let i = 0; i < 40; i++) {
+            let calm = 0;
+            for (let i = 0; i < 90 && calm < 6; i++) {
                 await new Promise((r) => requestAnimationFrame(() => r()));
                 const next = node.getBoundingClientRect();
-                const still = Math.abs(next.left - b.left) < 0.5 && Math.abs(next.top - b.top) < 0.5;
+                const still = Math.abs(next.left - b.left) < 0.5 && Math.abs(next.top - b.top) < 0.5
+                    && Math.abs(next.height - b.height) < 0.5;
                 b = next;
-                if (still && i > 0) break;
+                const hit = document.elementFromPoint(b.left + Math.min(b.width / 2, 40), b.top + b.height / 2);
+                calm = still && hit && (hit === node || node.contains(hit) || hit.contains(node)) ? calm + 1 : 0;
             }
             return { x: b.left + Math.min(b.width / 2, 40), y: b.top + b.height / 2 };`);
         if (!pt) throw new Error('Brak elementu do kliknięcia: ' + selectorOrExpr);

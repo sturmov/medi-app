@@ -764,7 +764,12 @@ async function scenarioLocal(origin) {
 
         await step('połączenie z folderem, pacjent i wizyta zapisane do pacjent.xlsx', async () => {
             await b.click(`[...document.querySelectorAll('.psy-folder-gate__btn')].find((x) => x.innerText.includes('Folder na tym komputerze'))`);
-            await waitFor(b, `PsyStore.state.storageConnected && PsyStore.state.storageKind === 'local'`);
+            try {
+                await waitFor(b, `PsyStore.state.storageConnected && PsyStore.state.storageKind === 'local'`);
+            } catch (e) {
+                const gate = await b.evaluate(`const g = document.querySelector('.psy-folder-gate'); return g ? g.innerText.replace(/\\s+/g, ' ') : '(ekran startowy zamknięty)';`);
+                throw new Error(e.message + '\nEkran startowy: ' + gate + '\nKonsola: ' + JSON.stringify(b.problems));
+            }
             await b.evaluate(`
                 const p = PsyStore.addPatient({ imie: 'Jan', nazwisko: 'Żółć', pesel: '44051401359', miasto: 'Łódź' });
                 PsyStore.selectPatient(p.id);
