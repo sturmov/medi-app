@@ -22,7 +22,8 @@
 //   downloadDocument(rootHandle, folderName, fileName)   → void (triggers download)
 //
 // Czyste funkcje — bez Store. Używa ich magazyn lokalny (`_storage-local.js`);
-// widok „Dokumenty" korzysta też z pomocników nazw / ikon / rozmiaru z tego pliku.
+// z pomocników nazw / ikon / rozmiaru korzystają też `_attachments.js`, formularz
+// wizyty i wyciąg „Dokumenty" (`view-extracts.js`).
 // ============================================================================
 
 import {
@@ -253,7 +254,7 @@ function _mimeFromName(name) {
 
 /**
  * Zwraca ikonę emoji odpowiednią dla pliku na podstawie nazwy/MIME.
- * Używane w `view-documents.js`.
+ * Używane w wizycie (pole „Dokumenty") i w wyciągu „Dokumenty".
  */
 export function iconForFile(name) {
     const ext = String(name || '').toLowerCase().split('.').pop();
