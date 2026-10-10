@@ -33,7 +33,56 @@
     overflow-y: auto;
     min-height: 0;          /* PR-J16b: pozwala grid item scroll w środku */
     max-height: 100%;
-    padding: 6px 0 12px;
+    padding: 0 0 12px;
+}
+
+/* Przełącznik „zwiń do listy sekcji / rozwiń wszystkie" — zawsze widoczny nad listą. */
+.psy-form-toolbar__nav-tools {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    justify-content: flex-end;
+    padding: 3px 8px;
+    background: #F9FAFB;
+    border-bottom: 1px solid #E5E7EB;
+}
+.psy-form-toolbar__nav-toggle {
+    border: 0;
+    background: transparent;
+    color: #2563EB;
+    font: inherit;
+    font-size: 11.5px;
+    padding: 3px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.psy-form-toolbar__nav-toggle:hover {
+    background: #EFF6FF;
+}
+
+/* Po „Zwiń do listy sekcji" cały formularz ma się zmieścić na ekranie 1366×768
+   (19 sekcji pierwszej wizyty): ciaśniejsze wiersze, bez podglądu pod nazwą. */
+.psy-form-toolbar__nav--sections-only .psy-form-toolbar__group-title {
+    padding: 6px 12px 5px;
+    margin-top: 0;
+    line-height: 1.25;
+}
+.psy-form-toolbar__nav--sections-only .psy-form-toolbar__group-preview {
+    display: none;
+}
+
+/* Licznik „wypełnione / wszystkie" w nagłówku sekcji. */
+.psy-form-toolbar__group-count {
+    flex-shrink: 0;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0;
+    color: #9CA3AF;
+    font-variant-numeric: tabular-nums;
+}
+.psy-form-toolbar__group-count--some {
+    color: #047857;
 }
 
 
@@ -79,8 +128,10 @@
     color: #6B7280;
 }
 
+/* `flex-basis: 0`: długa nazwa łamie się wewnątrz siebie, a licznik zostaje
+   w pierwszej linii (przy `auto` zawijanie nagłówka zrzucało go pod nazwę). */
 .psy-form-toolbar__group-name {
-    flex: 1 1 auto;
+    flex: 1 1 0;
     min-width: 0;
 }
 
@@ -320,13 +371,12 @@
 }
 
 /* ============================================================================
-   Tryb form-mode głównego shell'a — zwężenie sidebara aplikacji gdy jesteśmy
-   w którymkolwiek formularzu (visit/form, patient/detail, …). Sidebar ma
-   wtedy tylko skróty literowe (data-short), pełne etykiety w tooltipach.
+   Tryb form-mode głównego shell'a — w formularzu wizyty menu boczne zwęża się,
+   żeby oddać szerokość notatce, a sam formularz wypełnia okno do dołu.
    ============================================================================ */
 
 .psy-new-shell--form-mode {
-    grid-template-columns: 56px 1fr !important;
+    grid-template-columns: 84px 1fr !important;
 }
 
 .psy-new-shell--form-mode .psy-new-sidebar {
@@ -341,35 +391,78 @@
     display: none;
 }
 
-/* PR-J14c (klientka 2026-05-14): w trybie wąskim form-mode pokazujemy
-   IKONY (emoji) zamiast skrótów tekstowych — skróty `HW`/`Leki`/`Param`
-   są mało czytelne, ikony rozpoznajemy szybciej. Pełne etykiety w trybie
-   normalnym (220px) zostają jako tekst (zgodnie z .clinerules §18). */
+/* 2026-10 (decyzja właściciela): w wąskim menu krótkie SŁOWA małą czcionką
+   (`data-short` z `_menu.js`) zamiast kolorowych ikon — dwie z nich (Historia
+   i Kalendarz) były nie do odróżnienia. Historia: skróty „HW" / „Zal" / „Param"
+   klientka odrzuciła jako nieczytelne (2026-05), stąd pełne słowa. Pełna nazwa
+   pozycji jest w podpowiedzi po najechaniu. */
 .psy-new-shell--form-mode .psy-new-sidebar__item {
-    justify-content: center;
-    padding: 6px 4px !important;
-    text-align: center;
-    font-size: 18px !important;     /* większa czcionka — emoji są kompaktowe */
-    line-height: 1;
+    justify-content: flex-start;
+    padding: 6px 6px !important;
+    margin: 1px 4px !important;
+    font-size: 11px !important;
+    line-height: 1.25;
+    white-space: nowrap;
     color: #4B5563;
     position: relative;
 }
 
 .psy-new-shell--form-mode .psy-new-sidebar__item::before {
-    content: attr(data-icon);
+    content: attr(data-short);
     display: block;
-    /* fallback: gdy data-icon pusty (legacy), renderuj jako pusty string —
-       w przyszłości można dodać `attr(data-short)` jako drugie miejsce. */
 }
 
-.psy-new-shell--form-mode .psy-new-sidebar__item--cta {
+.psy-new-shell--form-mode .psy-new-sidebar__item.active {
+    color: #1D4ED8;
+    font-weight: 600;
+}
+
+.psy-new-shell--form-mode .psy-new-sidebar__item--cta,
+.psy-new-shell--form-mode .psy-new-sidebar__item--cta.active {
+    justify-content: center;
     color: #FFFFFF;
+    font-weight: 700;
+    text-transform: none;
+    letter-spacing: 0;
 }
 
-.psy-new-shell--form-mode .psy-new-sidebar__item--cta::before {
-    content: attr(data-icon);       /* '➕' z _menu.js dla pozycji visit-new */
-    font-size: 20px;
-    font-weight: 700;
+/* Formularz wizyty wypełnia obszar roboczy do dolnej krawędzi okna — bez stałej
+   liczby pikseli w wysokości. Nagłówek zajmuje jedną linię, reszta należy do
+   listy pól i notatki. W bardzo niskim oknie przewija się cały obszar roboczy. */
+.psy-new-shell--form-mode .psy-new-main {
+    display: flex;
+    flex-direction: column;
+}
+.psy-new-shell--form-mode .psy-visit-form-view {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    min-height: 420px;
+    box-sizing: border-box;
+}
+.psy-new-shell--form-mode .psy-visit-form-view .psy-form-toolbar {
+    flex: 1 1 0;
+    height: auto;
+    min-height: 0;
+}
+
+/* Nagłówek wizyty w jednej linii: tytuł po lewej, akcje po prawej.
+   (`:root` wyrównuje wagę selektora z regułami motywu kompaktowego.) */
+:root .psy-visit-form-view .psy-visit-form-view__header {
+    align-items: center;
+    margin-bottom: 6px;
+    padding-bottom: 5px;
+}
+.psy-visit-form-view__header .psy-new-view__title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.psy-visit-form-view__header .btn {
+    padding: 5px 10px;
+    font-size: 12.5px;
 }
 
 /* Submenu „+ Nowa wizyta" — w trybie form-mode zwinięte do tooltipa */

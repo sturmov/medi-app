@@ -1045,20 +1045,10 @@ export function renderVisitForm(opts = {}) {
         class: 'psy-new-view psy-visit-form-view',
         dataset: { live: 'true' }       // kontroler nie przerysowuje tego widoku przy zmianach Store
     }, [
-        el('div', { class: 'psy-new-view__header' }, [
-            el('div', {}, [
-                el('nav', { class: 'psy-new-breadcrumb' }, [
-                    el('a', { href: '#/history', class: 'psy-new-breadcrumb__link' }, ['🗓️ Historia wizyt']),
-                    el('span', { class: 'psy-new-breadcrumb__sep' }, ['›']),
-                    el('span', { class: 'psy-new-breadcrumb__current' }, [title])
-                ]),
-                el('h1', { class: 'psy-new-view__title' }, [title]),
-                el('div', { class: 'psy-new-view__subtitle' }, [
-                    (patient.imie || '') + ' ' + (patient.nazwisko || '') + ' · '
-                    + (mode === 'first' ? 'pełny wywiad (pierwsza wizyta)' : 'notatka z wizyty')
-                    + ' · 💾 zapis automatyczny'
-                ])
-            ]),
+        // Jedna linia: każdy piksel wysokości idzie na listę pól i notatkę. Pacjent
+        // i stan zapisu są już na górnym pasku, więc nie powtarzamy ich tutaj.
+        el('div', { class: 'psy-new-view__header psy-visit-form-view__header' }, [
+            el('h1', { class: 'psy-new-view__title' }, [title]),
             el('div', { class: 'psy-new-view__actions' }, [
                 el('button', {
                     class: 'btn btn--secondary',

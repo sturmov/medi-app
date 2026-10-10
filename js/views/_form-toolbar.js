@@ -3,7 +3,9 @@
 //
 // LEWA kolumna: wszystkie pola pogrupowane w sekcje, z kropką wypełnienia
 //   i podglądem wartości. Klik pola → akapit pojawia się po prawej w trybie
-//   edycji (w kolejności schematu, nie na końcu).
+//   edycji (w kolejności schematu, nie na końcu). Sekcje są domyślnie
+//   rozwinięte; nagłówek sekcji pokazuje „wypełnione / wszystkie", a przełącznik
+//   u góry zwija wszystko do samej listy sekcji (i z powrotem).
 //
 // PRAWA kolumna: dziennik — tylko pola, które mają treść (plus to, które
 //   właśnie jest edytowane). Każdy akapit ma dwa stany:
@@ -86,10 +88,35 @@ export function createFormToolbar(opts) {
        --------------------------------------------------------------------- */
     const itemEls = new Map();
 
+    const countEls = new Map();     // sekcja → licznik „wypełnione / wszystkie" w jej nagłówku
+    const navGroups = groups.filter((g) => flat.some((f) => f._groupId === g.id));
+
     function renderNav() {
         const scrollTop = nav.scrollTop;
         nav.innerHTML = '';
         itemEls.clear();
+        countEls.clear();
+
+        // Sekcje są domyślnie ROZWINIĘTE (wymaganie klientki). Ten przełącznik zwija je
+        // na żądanie do samej listy sekcji — cały formularz mieści się wtedy na ekranie.
+        const allCollapsed = navGroups.every((g) => collapsedSections.has(g.id));
+        nav.classList.toggle('psy-form-toolbar__nav--sections-only', allCollapsed);
+        nav.appendChild(el('div', { class: 'psy-form-toolbar__nav-tools' }, [
+            el('button', {
+                type: 'button',
+                class: 'psy-form-toolbar__nav-toggle',
+                dataset: { action: 'toggle-sections' },
+                title: allCollapsed
+                    ? 'Pokaż pola wszystkich sekcji'
+                    : 'Pokaż same nazwy sekcji (z liczbą wypełnionych pól)',
+                onclick: () => {
+                    if (allCollapsed) collapsedSections.clear();
+                    else for (const g of navGroups) collapsedSections.add(g.id);
+                    renderNav();
+                    nav.scrollTop = 0;
+                }
+            }, [allCollapsed ? '▾ Rozwiń wszystkie sekcje' : '▸ Zwiń do listy sekcji'])
+        ]));
 
         for (const g of groups) {
             const fields = flat.filter((f) => f._groupId === g.id);
@@ -116,6 +143,9 @@ export function createFormToolbar(opts) {
                     [collapsed ? '▸' : '▾']),
                 el('span', { class: 'psy-form-toolbar__group-name' }, [g.title || ''])
             ]);
+            const count = el('span', { class: 'psy-form-toolbar__group-count' });
+            title.appendChild(count);
+            countEls.set(g.id, count);
             if (collapsed && typeof groupPreview === 'function') {
                 const txt = groupPreview(g, values) || '';
                 if (txt) title.appendChild(el('div', { class: 'psy-form-toolbar__group-preview' }, [txt]));
@@ -151,8 +181,17 @@ export function createFormToolbar(opts) {
         nav.scrollTop = scrollTop;
     }
 
-    /** Kropki, podglądy i podświetlenie edytowanego pola — bez przebudowy listy. */
+    /** Kropki, podglądy, liczniki sekcji i podświetlenie edytowanego pola — bez przebudowy listy. */
     function paintNav() {
+        for (const g of navGroups) {
+            const count = countEls.get(g.id);
+            if (!count) continue;
+            const fields = flat.filter((f) => f._groupId === g.id);
+            const filled = fields.filter((f) => isFilled(f, values)).length;
+            count.textContent = filled + '/' + fields.length;
+            count.title = 'Wypełnione pola: ' + filled + ' z ' + fields.length;
+            count.classList.toggle('psy-form-toolbar__group-count--some', filled > 0);
+        }
         for (const f of flat) {
             const item = itemEls.get(f._uid);
             if (!item) continue;

@@ -112,13 +112,15 @@ The access token (valid about an hour) is kept in the tab's `sessionStorage` (`p
 ## Product decisions in force
 
 - Home page is the calendar; the patient list is the tab next to it. The topbar 📅 button returns home.
-- Sidebar, text only (icons only when it narrows in the visit form): "+ Nowa wizyta", Historia wizyt, Kalendarz, then the seven visit extracts in the client's order. The extracts are read-only: data is entered only in a visit (owner's decision, October 2026).
+- Sidebar, text only: "+ Nowa wizyta", Historia wizyt, Kalendarz, then the seven visit extracts in the client's order. The extracts are read-only: data is entered only in a visit (owner's decision, October 2026).
+- In the visit form the sidebar narrows to short whole words in small type (`short` in `_menu.js`), with the full name as a tooltip. No icons: the client rejected abbreviations ("HW", "Zal") as unreadable in May 2026, and the owner rejected the emoji icons that replaced them as too loud in October 2026.
 - "Dane identyfikacyjne" is not in the sidebar. Clicking the patient's name on the top bar opens it (`#/patient-data`).
 - Tests and files always belong to a visit. Something that arrives between appointments (a scan by email) goes into a "Kontakt mailowy" or "Notatka administracyjna" visit.
 - Notifications appear bottom-right, so they never cover the top bar.
 - Six visit types; only `first_meeting` opens the full interview form.
 - No "Save" buttons; autosave everywhere. Modals only for confirmations. The one exception is booking: an appointment is created by an explicit "Umów wizytę".
 - Visit form: filled fields read as a finished note; click to edit; one entry in edit at a time; leaving returns it to read mode. Section headings stay visually quiet.
+- Visit form on a small screen: the header is one line and the form fills the window to the bottom (flex layout under `.psy-new-shell--form-mode`, no pixel offsets). In the field list all sections are expanded by default (the client's requirement). Each section title shows filled / total, and "Zwiń do listy sekcji" collapses the list on demand so all 19 sections of a first visit fit on 1366×768. The smoke test asserts both.
 - Meds are entered fresh on every visit (no carry-over from the previous one). Brand name without brackets; substance, group and max dose read-only from the dictionary; dose is a number in the max dose's unit.
 - Diagnosis is one `code — description` field; date and author come from the visit.
 - Appointments show full name, visit type, phone and paid / not paid (owner's choice). No email invitations to patients.

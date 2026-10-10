@@ -1070,12 +1070,9 @@ const AppController = {
                     + (isSubmenu ? ' psy-new-sidebar__item--has-submenu' : '')
                     + (expanded ? ' psy-new-sidebar__item--expanded' : ''),
                 'data-menu-id': item.id,
-                // PR-J14: krótka etykieta + pełna etykieta w trybie compact-sidebar
-                // (form-mode). CSS w `form-toolbar.css` używa `attr(data-icon)` jako
-                // główny wskaźnik (PR-J14c, klientka 2026-05-14: ikony zamiast tekstu),
-                // z fallbackiem `data-short` gdy ikony brak. `data-label` = tooltip.
-                'data-short': item.short || item.label.slice(0, 4),
-                'data-icon': item.icon || '',
+                // Wąskie menu (formularz wizyty): CSS w `form-toolbar.css` pokazuje
+                // krótki napis `data-short`; `data-label` jest podpowiedzią po najechaniu.
+                'data-short': item.short || item.label,
                 'data-label': item.label,
                 title: item.label,
                 onclick: () => this._onMenuClick(item)
@@ -1195,8 +1192,8 @@ const AppController = {
         this._applyFormMode();
     },
 
-    /** Formularz wizyty zwęża menu boczne do ikon — ale nie na wąskim ekranie,
-     *  gdzie menu jest wysuwane i ma pokazywać pełne nazwy. */
+    /** Formularz wizyty zwęża menu boczne do krótkich napisów i wypełnia okno do dołu —
+     *  ale nie na wąskim ekranie, gdzie menu jest wysuwane i ma pokazywać pełne nazwy. */
     _applyFormMode() {
         const narrow = window.matchMedia('(max-width: 900px)').matches;
         this.shellEl.classList.toggle('psy-new-shell--form-mode',

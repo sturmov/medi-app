@@ -62,10 +62,11 @@
         display: none;
     }
 
-    /* Formularz wizyty: lista pól nad dziennikiem (zamiast obok). */
+    /* Formularz wizyty: lista pól nad dziennikiem (zamiast obok). Wysokość do dołu
+       okna: 40 px paska + jednoliniowy nagłówek wizyty + marginesy = 104 px. */
     .psy-form-toolbar {
         grid-template-rows: auto minmax(0, 1fr);
-        height: calc(100vh - 150px);
+        height: calc(100vh - 104px);
     }
     .psy-form-toolbar__nav {
         max-height: 30vh;

@@ -297,6 +297,71 @@ async function scenarioDemo(origin) {
             await b.screenshot(path.join(SHOTS, 'demo-02-wizyta-odczyt.png'));
         });
 
+        await step('mały ekran (1366×768): formularz do dołu okna, nagłówek w jednej linii, menu boczne z napisów', async () => {
+            const r = await b.evaluate(`
+                const box = (n) => { const x = n.getBoundingClientRect(); return { top: Math.round(x.top), bottom: Math.round(x.bottom), h: Math.round(x.height) }; };
+                const main = document.getElementById('psy-new-main');
+                return {
+                    viewport: innerWidth + 'x' + innerHeight,
+                    header: box(document.querySelector('.psy-visit-form-view .psy-new-view__header')),
+                    subtitle: !!document.querySelector('.psy-visit-form-view .psy-new-view__subtitle'),
+                    toolbar: box(document.querySelector('.psy-form-toolbar')),
+                    scroll: [document.documentElement.scrollHeight - innerHeight, main.scrollHeight - main.clientHeight],
+                    menu: [...document.querySelectorAll('.psy-new-sidebar__item')].map((li) => ({
+                        shown: getComputedStyle(li, '::before').content.replace(/"/g, ''),
+                        hint: li.dataset.label,
+                        clipped: li.scrollWidth > li.clientWidth })) };`);
+            assert.equal(r.viewport, '1366x768');
+            assert.ok(r.header.h <= 40, 'nagłówek wizyty w jednej linii (wysokość ' + r.header.h + ' px)');
+            assert.equal(r.subtitle, false, 'bez powtórzonego podtytułu');
+            assert.ok(r.toolbar.h >= 650, 'lista pól i notatka dostają wysokość okna (' + r.toolbar.h + ' px)');
+            assert.ok(768 - r.toolbar.bottom <= 16, 'formularz sięga dołu okna');
+            assert.deepEqual(r.scroll, [0, 0], 'strona się nie przewija — przewijają się tylko lista pól i notatka');
+            assert.deepEqual(r.menu.map((m) => m.shown), ['+ Wizyta', 'Historia', 'Kalendarz', 'Leki', 'Testy', 'Zalecenia',
+                'Plan', 'Diagnozy', 'Parametry', 'Dokumenty'], 'wąskie menu: krótkie słowa zamiast ikon');
+            assert.deepEqual(r.menu.filter((m) => m.clipped), [], 'żaden napis nie jest ucięty');
+            assert.equal(r.menu[1].hint, 'Historia wizyt', 'pełna nazwa w podpowiedzi');
+        });
+
+        await step('lista pól: sekcje domyślnie rozwinięte, z licznikiem; „Zwiń do listy sekcji" mieści cały formularz na ekranie', async () => {
+            const state = () => b.evaluate(`
+                const nav = document.querySelector('.psy-form-toolbar__nav');
+                const titles = [...nav.querySelectorAll('.psy-form-toolbar__group-title')];
+                return {
+                    toggle: nav.querySelector('[data-action="toggle-sections"]').innerText.trim(),
+                    sections: titles.length,
+                    fields: nav.querySelectorAll('.psy-form-toolbar__field').length,
+                    counts: Object.fromEntries(titles.map((t) => [
+                        t.querySelector('.psy-form-toolbar__group-name').textContent,
+                        t.querySelector('.psy-form-toolbar__group-count').textContent])),
+                    fits: nav.scrollHeight <= nav.clientHeight };`);
+            const open = await state();
+            assert.match(open.toggle, /Zwiń do listy sekcji/);
+            assert.equal(open.sections, 19);
+            assert.equal(open.fields, 86, 'wszystkie pola widoczne od razu (wymaganie klientki)');
+            assert.equal(open.counts['Wywiad — aktualne objawy'], '1/7');
+            assert.equal(open.counts['Dane wizyty'], '1/1');
+            assert.equal(open.counts['Status psychiczny'], '0/22');
+            assert.equal(open.fits, false);
+
+            await b.click('[data-action="toggle-sections"]');
+            const closed = await state();
+            assert.match(closed.toggle, /Rozwiń wszystkie sekcje/);
+            assert.deepEqual([closed.sections, closed.fields], [19, 0]);
+            assert.equal(closed.fits, true, 'cała lista sekcji mieści się bez przewijania');
+            assert.deepEqual(closed.counts, open.counts);
+            await b.screenshot(path.join(SHOTS, 'demo-07-lista-sekcji.png'));
+
+            // jedna sekcja rozwinięta ręcznie, potem wszystko z powrotem
+            await b.click(`[...document.querySelectorAll('.psy-form-toolbar__group-title')].find((t) => t.innerText.includes('ICD-10'))`);
+            const one = await state();
+            assert.equal(one.fields, 2, 'pola tylko klikniętej sekcji');
+            assert.match(one.toggle, /Zwiń do listy sekcji/);
+            await b.click('[data-action="toggle-sections"]');
+            await b.click('[data-action="toggle-sections"]');
+            assert.equal((await state()).fields, 86);
+        });
+
         await step('klik w akapit → edycja z zachowanymi wartościami; Esc → odczyt', async () => {
             await b.click(`__t.ent('somatyczne::sen')`);
             const r = await b.evaluate(`return {
