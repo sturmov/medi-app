@@ -567,23 +567,24 @@
 .psy-form-toolbar__journal {
     display: flex;
     flex-direction: column;
-    gap: 14px;
-    padding: 12px 14px 28px;
+    gap: 0;                     /* zwarty odczyt: linie notatki jedna pod drugą */
+    padding: 8px 12px 20px;
     box-sizing: border-box;
 }
 
 
 
-/* Nagłówki sekcji w dzienniku */
+/* Nagłówki sekcji w dzienniku — drobne, żeby nie zabierały miejsca notatce */
 .psy-form-toolbar__journal-section-title {
-    margin: 8px 0 2px 0;
-    padding: 4px 0;
-    font-size: 11px;
+    margin: 7px 0 1px 0;
+    padding: 0 6px 1px;
+    font-size: 10px;
     font-weight: 700;
-    color: #6B7280;
+    line-height: 1.3;
+    color: #94A3B8;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    border-bottom: 1px solid #E5E7EB;
+    border-bottom: 1px solid #EEF2F6;
 }
 .psy-form-toolbar__journal-section-title:first-child {
     margin-top: 0;
@@ -798,6 +799,116 @@
 /* Tryb journal — content nie ma własnych margin/padding (journal je ma) */
 .psy-form-toolbar--journal .psy-form-toolbar__content {
     padding: 0;
+}
+
+/* ============================================================================
+   2026-10 — ZWARTY ODCZYT. Klientka: w czasie rozmowy z pacjentem chce widzieć
+   jak najwięcej notatki naraz. Akapit w trybie odczytu to jedna linia
+   „nazwa pola | treść (uwagi)" — bez ramki, nagłówka i odstępów. Karta
+   z nagłówkiem zostaje tylko dla akapitu, który jest właśnie edytowany.
+   Nazwy pól stoją w jednej kolumnie, żeby dało się po nich szybko przejechać
+   wzrokiem.
+   ============================================================================ */
+.psy-form-toolbar__entry--read {
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    overflow: visible;
+}
+.psy-form-toolbar__entry--read:hover,
+.psy-form-toolbar__entry--read:focus-visible {
+    background: #EEF4FF;
+    outline: none;
+}
+.psy-form-toolbar__entry-line {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    column-gap: 10px;
+    align-items: baseline;
+    padding: 1px 6px;
+    cursor: pointer;
+}
+.psy-form-toolbar__entry--read .psy-form-toolbar__entry-label {
+    font-size: 11.5px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: #64748B;
+    white-space: normal;        /* długa nazwa łamie się, zamiast się ucinać */
+    overflow: visible;
+}
+.psy-form-toolbar__entry--read .psy-form-toolbar__entry-body--read {
+    padding: 0;
+    min-height: 0;
+    min-width: 0;
+    font-size: 12.5px;
+    line-height: 1.4;
+    color: #0F172A;
+}
+.psy-form-toolbar__entry--read .psy-form-toolbar__entry-body--read:hover {
+    background: transparent;
+}
+.psy-form-toolbar__entry--read .psy-form-toolbar__entry-text {
+    display: inline;
+    font-size: 12.5px;
+    line-height: 1.4;
+}
+.psy-form-toolbar__entry--read .psy-form-toolbar__entry-tags {
+    display: inline;
+}
+.psy-form-toolbar__entry--read .psy-form-toolbar__entry-tag {
+    padding: 0 6px;
+    margin-right: 3px;
+    border: 0;
+    background: #E3E9FB;
+    font-size: 11.5px;
+    line-height: 1.45;
+}
+.psy-form-toolbar__entry--read .psy-form-toolbar__entry-notes-read {
+    display: inline;
+    margin: 0 0 0 6px;
+    padding: 0;
+    border: 0;
+    font-size: 11.5px;
+    line-height: 1.4;
+    font-style: italic;
+    color: #64748B;
+}
+.psy-form-toolbar__entry--read .psy-form-toolbar__entry-notes-read .psy-form-toolbar__notes-label {
+    display: inline;
+    margin: 0;
+    font-size: inherit;
+    font-weight: 600;
+    color: inherit;
+}
+.psy-form-toolbar__entry--read .psy-form-toolbar__entry-empty {
+    font-size: 11.5px;
+}
+/* Sekcja z jednym polem nie ma własnego nagłówka (pole samo się podpisuje) —
+   kreska nad linią oddziela ją od poprzedniej sekcji, żeby do niej nie „należała". */
+.psy-form-toolbar__entry--standalone.psy-form-toolbar__entry--read {
+    margin-top: 5px;
+    padding-top: 3px;
+    border-top: 1px solid #EEF2F6;
+    border-radius: 0 0 4px 4px;
+}
+.psy-form-toolbar__entry--standalone:first-child {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+}
+.psy-form-toolbar__entry--standalone.psy-form-toolbar__entry--read .psy-form-toolbar__entry-label {
+    color: #475569;
+}
+/* akapit w edycji: karta, odsunięta od sąsiednich linii */
+.psy-form-toolbar__entry--edit {
+    margin: 6px 0;
+}
+
+@media (max-width: 600px) {
+    /* bardzo wąski ekran: nazwa pola nad treścią */
+    .psy-form-toolbar__entry-line {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }
 
 

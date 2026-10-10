@@ -13,8 +13,9 @@
 //
 // PRAWA kolumna: dziennik — tylko pola, które mają treść (plus to, które
 //   właśnie jest edytowane). Każdy akapit ma dwa stany:
-//     • odczyt  — gotowa notatka (same wybrane wartości / tekst),
-//     • edycja  — kontrolki; naraz edytowany jest JEDEN akapit.
+//     • odczyt  — gotowa notatka: jedna zwarta linia „nazwa pola | treść"
+//                 (same wybrane wartości / tekst), bez ramki i nagłówka,
+//     • edycja  — karta z kontrolkami; naraz edytowany jest JEDEN akapit.
 //   Klik w akapit → edycja. Klik gdziekolwiek poza nim / Tab poza / Esc →
 //   powrót do odczytu. Pusty akapit po wyjściu z edycji znika z dziennika.
 //
@@ -341,16 +342,15 @@ export function createFormToolbar(opts) {
             title: editing ? null : 'Kliknij, aby edytować'
         });
 
-        article.appendChild(el('header', { class: 'psy-form-toolbar__entry-header' }, [
-            el('span', { class: 'psy-form-toolbar__entry-chevron', 'aria-hidden': 'true' },
-                [editing ? '▾' : '▸']),
-            el('span', { class: 'psy-form-toolbar__entry-label' },
-                [field.label + (field.required ? ' *' : '')])
-        ]));
-
         const notes = showNotes(field) ? (notesValue(field, values) || '') : '';
 
         if (editing) {
+            // Edycja = karta z nagłówkiem: widać, co jest właśnie zmieniane.
+            article.appendChild(el('header', { class: 'psy-form-toolbar__entry-header' }, [
+                el('span', { class: 'psy-form-toolbar__entry-chevron', 'aria-hidden': 'true' }, ['▾']),
+                el('span', { class: 'psy-form-toolbar__entry-label' },
+                    [field.label + (field.required ? ' *' : '')])
+            ]));
             const body = el('div', {
                 class: 'psy-form-toolbar__entry-body psy-form-toolbar__entry-body--edit'
             }, [renderEdit(field, values)]);
@@ -369,15 +369,22 @@ export function createFormToolbar(opts) {
             }
             article.appendChild(body);
         } else {
+            // Odczyt = jedna zwarta linia „nazwa pola | treść (uwagi)", bez ramki i nagłówka:
+            // podczas rozmowy z pacjentem na ekranie ma się mieścić jak najwięcej notatki.
             const body = el('div', {
                 class: 'psy-form-toolbar__entry-body psy-form-toolbar__entry-body--read'
             }, [renderRead(field, values)]);
             if (notes.trim()) {
-                body.appendChild(el('div', { class: 'psy-form-toolbar__entry-notes-read' }, [
-                    el('span', { class: 'psy-form-toolbar__notes-label' }, ['Uwagi:']), ' ', notes
+                // spacja w treści (nie tylko odstęp w CSS): po skopiowaniu notatki słowa się nie sklejają
+                body.appendChild(document.createTextNode(' '));
+                body.appendChild(el('span', { class: 'psy-form-toolbar__entry-notes-read' }, [
+                    el('span', { class: 'psy-form-toolbar__notes-label' }, ['uwagi:']), ' ', notes
                 ]));
             }
-            article.appendChild(body);
+            article.appendChild(el('div', { class: 'psy-form-toolbar__entry-line' }, [
+                el('span', { class: 'psy-form-toolbar__entry-label' }, [field.label]),
+                body
+            ]));
         }
         return article;
     }
@@ -394,10 +401,17 @@ export function createFormToolbar(opts) {
             // Sekcja z jednym polem o tej samej nazwie (np. „Dane wizyty") nie potrzebuje
             // osobnego nagłówka — akapit sam się podpisuje.
             const all = flat.filter((f) => f._groupId === g.id);
-            if (!(all.length === 1 && all[0].label === g.title)) {
+            const standalone = all.length === 1 && all[0].label === g.title;
+            if (!standalone) {
                 journal.appendChild(el('h3', { class: 'psy-form-toolbar__journal-section-title' }, [g.title || '']));
             }
-            for (const f of fields) journal.appendChild(renderEntry(f));
+            for (const f of fields) {
+                const entry = renderEntry(f);
+                // W zwartym odczycie linia bez nagłówka wyglądałaby na część poprzedniej sekcji —
+                // oddzielamy ją kreską, jak osobną sekcję.
+                if (standalone) entry.classList.add('psy-form-toolbar__entry--standalone');
+                journal.appendChild(entry);
+            }
             any = true;
         }
         if (!any) {

@@ -797,17 +797,18 @@ function readField(sectionId, field, raw, data, ctx) {
     return text ? readText(text) : readEmpty();
 }
 
+/** Sekcja „w jednym oknie" w odczycie: pary „etykieta: wartość" jedna za drugą, w linii. */
 function readGrid(section, raw, data) {
-    const rows = [];
+    const pairs = [];
     for (const sf of (section.subfields || [])) {
         const text = fieldText(section.id, sf, raw, data);
         if (!text) continue;
-        rows.push(el('div', { class: 'psy-vf__read-grid-label' }, [sf.label.replace(/\s*\(auto\)$/, '') + ':']));
-        const val = el('div', { class: 'psy-vf__read-grid-value' }, [text]);
-        val.style.whiteSpace = 'pre-wrap';
-        rows.push(val);
+        pairs.push(el('span', { class: 'psy-vf__read-pair' }, [
+            el('span', { class: 'psy-vf__read-pair-label' }, [sf.label.replace(/\s*\(auto\)$/, '') + ': ']),
+            el('span', { class: 'psy-vf__read-pair-value' }, [text])
+        ]));
     }
-    return rows.length ? el('div', { class: 'psy-vf__read-grid' }, rows) : readEmpty();
+    return pairs.length ? el('div', { class: 'psy-vf__read-pairs' }, pairs) : readEmpty();
 }
 
 /* ==========================================================================

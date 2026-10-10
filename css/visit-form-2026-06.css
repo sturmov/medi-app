@@ -322,14 +322,17 @@
    Klientka: „nagłówek sekcji jako delikatna labelka — nie musi być wyróżniony
    bardzo". Stonowanie obecnych section-titles w prawej kolumnie toolbara. */
 
+/* 2026-10: jeszcze drobniejsze i ciaśniejsze (zwarty odczyt notatki) — te reguły
+   mają pierwszeństwo przed bazowymi w form-toolbar.css. */
 .psy-form-toolbar__journal-section-title {
-    font-size: 10.5px !important;
+    font-size: 10px !important;
     font-weight: 500 !important;
+    line-height: 1.3;
     color: #94A3B8 !important;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     border-bottom: 1px dashed #E5E7EB !important;
-    padding: 3px 0 2px;
+    padding: 0 6px 1px;
     margin: 6px 0 1px 0 !important;
 }
 
@@ -344,21 +347,25 @@
     outline-offset: 1px;
 }
 
-/* Sekcja „w jednym oknie" (Dane wizyty, Parametry) w trybie odczytu:
-   etykieta : wartość, tylko wypełnione pola. */
-.psy-vf__read-grid {
-    display: grid;
-    grid-template-columns: minmax(120px, max-content) 1fr;
-    gap: 2px 12px;
-    font-size: 13px;
-    line-height: 1.5;
+/* Sekcja „w jednym oknie" (Dane wizyty, Parametry) w trybie odczytu: pary
+   „etykieta: wartość" jedna za drugą w linii (tylko wypełnione pola), zawijane
+   w razie potrzeby — zamiast osobnego wiersza na każde pole. */
+.psy-vf__read-pairs {
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: 14px;
+    row-gap: 0;
 }
-.psy-vf__read-grid-label {
+.psy-vf__read-pair {
+    min-width: 0;
+}
+.psy-vf__read-pair-label {
     color: #64748B;
-    font-size: 12px;
+    font-size: 11.5px;
 }
-.psy-vf__read-grid-value {
+.psy-vf__read-pair-value {
     color: #0F172A;
+    white-space: pre-wrap;
     word-break: break-word;
 }
 

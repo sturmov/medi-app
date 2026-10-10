@@ -298,6 +298,37 @@ async function scenarioDemo(origin) {
             await b.screenshot(path.join(SHOTS, 'demo-02-wizyta-odczyt.png'));
         });
 
+        await step('zwarty odczyt: wpis to jedna linia „nazwa pola | treść", cała notatka mieści się na ekranie 1366×768', async () => {
+            const r = await b.evaluate(`
+                const c = document.querySelector('.psy-form-toolbar__content');
+                const entry = (uid) => {
+                    const a = __t.ent(uid);
+                    const label = a.querySelector('.psy-form-toolbar__entry-label').getBoundingClientRect();
+                    const body = a.querySelector('.psy-form-toolbar__entry-body--read').getBoundingClientRect();
+                    return { height: Math.round(a.getBoundingClientRect().height), header: !!a.querySelector('header'),
+                             sameLine: Math.abs(label.top - body.top) < 6 && body.left > label.right - 1,
+                             text: a.innerText.replace(/\\s+/g, ' ').trim() };
+                };
+                return {
+                    sen: entry('somatyczne::sen'), ustalenia: entry('oddzialywania::ustalenia'), leki: entry('farmakoterapia::leki'),
+                    labelColumns: [...new Set([...c.querySelectorAll('.psy-form-toolbar__entry-body--read')].map((n) => Math.round(n.getBoundingClientRect().left)))],
+                    sectionTitle: Math.round(c.querySelector('.psy-form-toolbar__journal-section-title').getBoundingClientRect().height),
+                    // wysokość samej notatki (nie okna, w którym się przewija)
+                    noteHeight: Math.round(c.querySelector('.psy-form-toolbar__journal').getBoundingClientRect().height),
+                    windowHeight: c.clientHeight };`);
+            for (const [name, e] of [['Sen', r.sen], ['Ustalenia', r.ustalenia], ['Leki', r.leki]]) {
+                assert.equal(e.header, false, name + ': w odczycie nie ma nagłówka-belki');
+                assert.equal(e.sameLine, true, name + ': nazwa pola i treść w jednej linii');
+                assert.ok(e.height <= 24, name + ': wysokość jednej linii (' + e.height + ' px)');
+            }
+            assert.equal(r.sen.text, 'Sen wybudzenia nocne uwagi: budzi się o 3:00', 'uwagi w tej samej linii co wartość');
+            assert.equal(r.labelColumns.length, 1, 'treść wszystkich wpisów zaczyna się w jednej kolumnie');
+            assert.ok(r.sectionTitle <= 16, 'drobny nagłówek sekcji (' + r.sectionTitle + ' px)');
+            // Ta notatka (10 wpisów w 8 sekcjach) w układzie z kartami miała ponad 1000 px; zwarta ma ok. 400.
+            assert.ok(r.noteHeight <= 420 && r.noteHeight < r.windowHeight,
+                'notatka z 10 wpisami mieści się na ekranie z zapasem (' + r.noteHeight + ' z ' + r.windowHeight + ' px)');
+        });
+
         await step('mały ekran (1366×768): formularz do dołu okna, nagłówek w jednej linii, menu boczne z napisów', async () => {
             const r = await b.evaluate(`
                 const box = (n) => { const x = n.getBoundingClientRect(); return { top: Math.round(x.top), bottom: Math.round(x.bottom), h: Math.round(x.height) }; };
