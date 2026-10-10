@@ -760,6 +760,17 @@ export const Store = {
         return _refs.get(id) || null;
     },
 
+    /** Drobne ustawienia aplikacji. Na Dysku Google są wspólne dla urządzeń; w pozostałych
+     *  trybach żyją w tej przeglądarce. */
+    async getSetting(key) {
+        if (_backend && _backend.getSetting) return _backend.getSetting(key);
+        return ls.get('psy-new:setting:' + key) || '';
+    },
+    async setSetting(key, value) {
+        if (_backend && _backend.setSetting) return _backend.setSetting(key, value);
+        ls.set('psy-new:setting:' + key, value);
+    },
+
     // ---- Tryb demo ----------------------------------------------------------
 
     /** Dane przykładowe trzymane wyłącznie w tej przeglądarce. */

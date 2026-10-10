@@ -187,4 +187,22 @@ check('duży dokument: cięcie na komórki nie psuje emoji ani spacji', () => {
     assert.deepEqual(readPatientWorkbook(writePatientWorkbook(big)), parsePatientDoc(big));
 });
 
+console.log('\nŚwięta (dni wolne od pracy)');
+const H = await import('../js/views/_holidays-pl.js');
+check('Wielkanoc i święta ruchome wypadają we właściwe dni', () => {
+    const day = (y) => H.easterSunday(y).toISOString().slice(0, 10);
+    assert.deepEqual([day(2024), day(2025), day(2026), day(2027)], ['2024-03-31', '2025-04-20', '2026-04-05', '2027-03-28']);
+    const y26 = Object.fromEntries(H.polishHolidays(2026).map((h) => [h.name, h.date]));
+    assert.equal(y26['Poniedziałek Wielkanocny'], '2026-04-06');
+    assert.equal(y26['Zielone Świątki'], '2026-05-24');
+    assert.equal(y26['Boże Ciało'], '2026-06-04');
+    assert.equal(y26['Święto Niepodległości'], '2026-11-11');
+});
+check('14 dni wolnych w roku (13 przed 2025 — bez Wigilii); wyszukiwanie w zakresie dat', () => {
+    assert.equal(H.polishHolidays(2026).length, 14);
+    assert.equal(H.polishHolidays(2024).length, 13);
+    assert.deepEqual(H.holidaysBetween('2026-12-20', '2027-01-07').map((h) => h.date),
+        ['2026-12-24', '2026-12-25', '2026-12-26', '2027-01-01', '2027-01-06']);
+});
+
 console.log('\n' + (process.exitCode ? '❌ Są błędy.' : '✅ Wszystkie testy przeszły (' + passed + ').'));

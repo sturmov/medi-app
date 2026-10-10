@@ -2,13 +2,15 @@
 // tools/smoke-test.mjs — test aplikacji w prawdziwej przeglądarce (headless).
 //
 //   node tools/smoke-test.mjs            (wszystkie scenariusze)
-//   node tools/smoke-test.mjs demo       (tylko wybrany: demo | gdrive | local)
+//   node tools/smoke-test.mjs demo       (tylko wybrany: demo | calendar | gdrive | local)
 //
 // Klika i pisze jak użytkownik (zdarzenia myszy i klawiatury przez DevTools),
 // po czym sprawdza stan aplikacji i zawartość magazynu.
 //
 //   demo   — formularz wizyty: każdy typ pola, szybkie przełączanie pól,
 //            tryb odczyt/edycja, historia, osie czasu, usuwanie wizyty.
+//   calendar — kalendarz: umawianie, przeciąganie terminu, notatka z terminu,
+//            płatność w obu kierunkach, kalendarz pacjenta, święta.
 //   gdrive — Dysk Google na lokalnej atrapie API: zakładanie pacjenta,
 //            zawartość arkusza, wczytanie po odświeżeniu strony (bezstratność),
 //            zmiana nazwiska, błędy sieci / wygasła sesja, załączniki.
@@ -38,7 +40,7 @@ async function step(name, fn) {
         console.log('  ✓ ' + name);
     } catch (e) {
         failed++;
-        console.error('  ✗ ' + name + '\n      ' + String(e && e.message || e).split('\n').slice(0, 3).join('\n      '));
+        console.error('  ✗ ' + name + '\n      ' + String(e && e.message || e).split('\n').slice(0, 14).join('\n      '));
     }
 }
 
@@ -61,8 +63,30 @@ window.__t = {
     ctl: (uid, sel) => { const a = window.__t.ent(uid); return a ? a.querySelector(sel) : null; },
     mode: (uid) => { const a = window.__t.ent(uid); return !a ? 'absent' : (a.classList.contains('psy-form-toolbar__entry--edit') ? 'edit' : 'read'); },
     setSelect: (node, value) => { node.value = value; node.dispatchEvent(new Event('change', { bubbles: true })); },
-    main: () => document.getElementById('psy-new-main').innerText
+    main: () => document.getElementById('psy-new-main').innerText,
+    cal: () => document.querySelector('.psy-cal-view').psyCalendar,
+    setInput: (sel, value) => { const n = document.querySelector(sel); n.value = value; n.dispatchEvent(new Event('input', { bubbles: true })); },
+    calApi: async () => (await import('/js/views/_calendar-api.js')).getCalendarApi(),
+    // wszystkie terminy z szerokiego zakresu (do asercji)
+    appointments: async () => (await window.__t.calApi()).list('2020-01-01T00:00:00Z', '2035-01-01T00:00:00Z')
 };`;
+
+/** Środa przyszłego tygodnia (zawsze w przyszłości, więc „najbliższy termin" jest przewidywalny). */
+function nextWeekWednesday() {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7) + 9);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+/** Otwiera stronę z kalendarzem i ustawia tydzień zawierający `date`. */
+async function openCalendar(b, hash, date, view = 'timeGridWeek') {
+    await go(b, '#/settings');
+    await go(b, hash);
+    await waitFor(b, `location.hash === '${hash}' && document.querySelector('.psy-cal-view') && document.querySelector('.psy-cal-view').psyCalendar`, 10000, 'kalendarz (' + hash + ')');
+    await b.evaluate(`__t.cal().changeView('${view}', '${date}');`);
+    await sleep(500);
+}
 
 function noPageProblems(b) {
     assert.deepEqual(b.problems, [], 'błędy w konsoli strony');
@@ -315,6 +339,166 @@ async function scenarioDemo(origin) {
 }
 
 /* ==========================================================================
+   SCENARIUSZ: kalendarz (tryb demo — terminy w przeglądarce)
+   ========================================================================== */
+async function scenarioCalendar(origin) {
+    console.log('\nKalendarz');
+    const b = await launchBrowser();
+    const day = nextWeekWednesday();
+    const visitEvent = `[...document.querySelectorAll('.psy-cal-ev--unpaid, .psy-cal-ev--paid')].find((x) => x.innerText.includes('Anna Nowak'))`;
+    try {
+        await b.onNewDocument(`try { localStorage.setItem('psy-new:devMode', '1'); } catch (e) {} ${PAGE_HELPERS}`);
+        await b.navigate(origin + '/index.html');
+        await waitFor(b, `window.PsyStore && document.querySelector('.psy-cal__host .fc-timegrid')`, 10000, 'kalendarz jako strona główna');
+
+        await step('strona główna to kalendarz; lista pacjentów jest w zakładce obok', async () => {
+            const r = await b.evaluate(`return { hash: location.hash, tabs: [...document.querySelectorAll('.psy-home-tabs__tab')].map((t) => t.innerText.trim()) };`);
+            assert.equal(r.hash, '#/calendar');
+            assert.equal(r.tabs.length, 2);
+            await b.click(`document.querySelectorAll('.psy-home-tabs__tab')[1]`);
+            await waitFor(b, `location.hash === '#/patients' && document.querySelector('.psy-new-table') && document.querySelector('.psy-home-tabs__tab--active').innerText.includes('Pacjenci')`);
+            await b.click('#btn-home');
+            await waitFor(b, `location.hash === '#/calendar' && document.querySelector('.psy-cal__host .fc-timegrid')`);
+        });
+
+        await openCalendar(b, '#/calendar', day);
+
+        await step('umówienie wizyty: pacjent z wyszukiwarki, rodzaj, data, godzina', async () => {
+            await b.click('[data-action="book"]');
+            await waitFor(b, `document.querySelector('input[name="cal-patient-search"]')`);
+            await b.click('input[name="cal-patient-search"]');
+            await b.type('now');
+            await waitFor(b, `document.querySelectorAll('.psy-cal__patient-option').length === 1`);
+            await b.click('.psy-cal__patient-option[data-patient-id="P003"]');
+            // pacjentka ma już wizytę w historii → domyślnie „Kolejne spotkanie"
+            assert.equal(await b.evaluate(`return document.querySelector('select[name="cal-visitType"]').value;`), 'next_meeting');
+            await b.evaluate(`__t.setInput('input[name="cal-date"]', '${day}'); __t.setInput('input[name="cal-time"]', '10:00');`);
+            await b.click('[data-action="save"]');
+            await waitFor(b, visitEvent, 6000, 'termin na kalendarzu');
+            const r = await b.evaluate(`const e = ${visitEvent}; return { text: e.innerText, tip: e.title, unpaid: e.classList.contains('psy-cal-ev--unpaid') };`);
+            assert.match(r.text, /10:00/);
+            assert.match(r.text, /nie zapł\./);
+            assert.equal(r.tip, 'Anna Nowak · Kolejne spotkanie · tel. +48 600 200 300 · nie zapłacono');
+            assert.equal(r.unpaid, true);
+            await b.screenshot(path.join(SHOTS, 'kalendarz-01-tydzien.png'));
+        });
+
+        await step('klik w godzinę: czas i 50 minut ustawione; pacjent bez wizyt → „1sze spotkanie"', async () => {
+            // górna połowa wiersza 12:00 → 12:00 (dolna dałaby 12:15)
+            const slot = await b.evaluate(`
+                const r = document.querySelector('.psy-cal__host td.fc-timegrid-slot-lane[data-time="12:00:00"]').getBoundingClientRect();
+                return { x: r.left + 60, y: r.top + 3 };`);
+            await b.clickAt(slot);
+            await waitFor(b, `document.querySelector('input[name="cal-time"]')`);
+            const r = await b.evaluate(`return { time: document.querySelector('input[name="cal-time"]').value, minutes: document.querySelector('input[name="cal-minutes"]').value };`);
+            assert.deepEqual(r, { time: '12:00', minutes: '50' });
+            await b.click('input[name="cal-patient-search"]');
+            await b.type('lewand');
+            await b.click('.psy-cal__patient-option[data-patient-id="P005"]');
+            assert.equal(await b.evaluate(`return document.querySelector('select[name="cal-visitType"]').value;`), 'first_meeting');
+            await b.screenshot(path.join(SHOTS, 'kalendarz-02-panel.png'));
+            await b.click('.psy-cal__panel-actions .btn--secondary');
+            assert.equal(await b.evaluate(`return document.querySelector('.psy-cal__panel').style.display;`), 'none');
+            assert.equal((await b.evaluate(`return (await __t.appointments()).length;`)), 1, 'anulowanie niczego nie zapisuje');
+        });
+
+        await step('przeciągnięcie terminu na 14:00 zapisuje nową godzinę (długość bez zmian)', async () => {
+            const pts = await b.evaluate(`
+                const e = ${visitEvent}.getBoundingClientRect();
+                const row = document.querySelector('.psy-cal__host td.fc-timegrid-slot-lane[data-time="14:00:00"]').getBoundingClientRect();
+                return { from: { x: e.left + e.width / 2, y: e.top + 6 }, to: { x: e.left + e.width / 2, y: row.top + 3 } };`);
+            await b.drag(pts.from, pts.to);
+            await waitFor(b, `(await __t.appointments())[0].start.includes('T') && new Date((await __t.appointments())[0].start).getHours() === 14`, 6000, 'termin o 14:00');
+            const a = (await b.evaluate(`return await __t.appointments();`))[0];
+            assert.equal((new Date(a.end) - new Date(a.start)) / 60000, 50);
+        });
+
+        await step('święto jest opisane; wpis całodniowy (urlop) da się dodać', async () => {
+            await b.evaluate(`__t.cal().changeView('dayGridMonth', '2026-11-11');`);
+            await waitFor(b, `[...document.querySelectorAll('.psy-cal-holiday')].some((x) => x.innerText.includes('Święto Niepodległości'))`, 4000, 'święto 11 listopada');
+            await b.evaluate(`__t.cal().changeView('timeGridWeek', '${day}');`);
+            await b.click('[data-action="book"]');
+            await b.click('.psy-cal__kind[data-kind="other"]');
+            await b.click('input[name="cal-title"]');
+            await b.type('Urlop');
+            await b.click('input[name="cal-allDay"]');
+            await b.evaluate(`__t.setInput('input[name="cal-date"]', '${day}'); __t.setInput('input[name="cal-lastDay"]', '${day}');`);
+            await b.click('[data-action="save"]');
+            await waitFor(b, `[...document.querySelectorAll('.psy-cal-ev--other')].some((x) => x.innerText.includes('Urlop'))`, 6000, 'urlop na kalendarzu');
+        });
+
+        let visitId = '';
+        await step('z terminu do notatki: data, godzina i rodzaj przeniesione; termin dostaje znaczek 📝', async () => {
+            await b.click(visitEvent);
+            await waitFor(b, `document.querySelector('[data-action="note"]')`);
+            await b.click('[data-action="note"]');
+            await waitFor(b, `document.querySelector('.psy-visit-form-view') && __t.ent('visitData::__grid')`);
+            const r = await b.evaluate(`return { title: document.querySelector('.psy-new-view__title').innerText, grid: __t.ent('visitData::__grid').innerText, patient: PsyStore.state.currentPatient.id };`);
+            assert.match(r.title, /Kolejne spotkanie/);
+            assert.ok(r.grid.includes(day), 'data wizyty z terminu');
+            assert.equal(r.patient, 'P003');
+            await b.click(`__t.nav('oddzialywania::ustalenia')`);
+            await b.type('Plan po wizycie z kalendarza');
+            await openCalendar(b, '#/calendar', day);
+            await waitFor(b, `${visitEvent} && ${visitEvent}.innerText.includes('📝')`, 6000, 'znaczek notatki na terminie');
+            const v = await b.evaluate(`return PsyStore.getVisits('P003')[0];`);
+            const a = (await b.evaluate(`return await __t.appointments();`)).find((x) => x.kind === 'visit');
+            visitId = v.id;
+            assert.deepEqual([v.date, v.time, v.type, v.calendarEventId], [day, '14:00', 'next_meeting', a.id]);
+            assert.equal(a.visitId, v.id);
+        });
+
+        await step('płatność: zmiana w historii zmienia termin, zmiana przy terminie zmienia notatkę', async () => {
+            await go(b, '#/history');
+            await waitFor(b, `document.querySelector('.psy-history-paragraph .psy-new-badge--clickable')`);
+            await b.click('.psy-history-paragraph .psy-new-badge--clickable');
+            await waitFor(b, `(await __t.appointments()).find((x) => x.kind === 'visit').paid === true`, 6000, 'termin oznaczony jako zapłacony');
+            await openCalendar(b, '#/calendar', day);
+            await waitFor(b, `document.querySelector('.psy-cal-ev--paid')`);
+            await b.click('.psy-cal-ev--paid');
+            await waitFor(b, `document.querySelector('input[name="cal-paid"]')`);
+            assert.equal(await b.evaluate(`return document.querySelector('input[name="cal-paid"]').checked;`), true);
+            await b.click('input[name="cal-paid"]');
+            await b.click('[data-action="save"]');
+            await waitFor(b, `PsyStore.getVisitById('${visitId}').paid === false && document.querySelector('.psy-cal-ev--unpaid')`, 6000, 'notatka znów niezapłacona');
+        });
+
+        await step('kalendarz pacjenta: na liście tylko jego terminy; u innego pacjenta ten czas to „zajęte"', async () => {
+            await openCalendar(b, '#/patient-calendar', day, 'listHalf');
+            await waitFor(b, `document.querySelector('.psy-cal__host .fc-list')`);
+            const mine = await b.evaluate(`return { list: document.querySelector('.psy-cal__host .fc-list').innerText, subtitle: document.querySelector('.psy-new-view__subtitle').innerText };`);
+            assert.match(mine.list, /Anna Nowak/);
+            assert.ok(!/Urlop|Wigilia|Wszystkich/.test(mine.list), 'na liście pacjenta nie ma urlopów ani świąt');
+            await waitFor(b, `document.querySelector('.psy-new-view__subtitle').innerText.includes('najbliższy termin: ${day} 14:00')`, 5000, 'najbliższy termin w podtytule');
+            await b.screenshot(path.join(SHOTS, 'kalendarz-03-pacjent.png'));
+
+            await b.evaluate(`PsyStore.selectPatient('P001');`);
+            await openCalendar(b, '#/patient-calendar', day);
+            await waitFor(b, `document.querySelector('.psy-cal__host .psy-cal-busy')`, 6000, 'blok „zajęte"');
+            const other = await b.evaluate(`return document.querySelector('.psy-cal__host').innerText;`);
+            assert.ok(!other.includes('Anna Nowak'), 'u innego pacjenta nie widać cudzego nazwiska');
+            assert.match(other, /zajęte/);
+        });
+
+        await step('usunięcie terminu nie usuwa notatki', async () => {
+            await openCalendar(b, '#/calendar', day);
+            await waitFor(b, visitEvent);
+            await b.click(visitEvent);
+            await waitFor(b, `document.querySelector('[data-action="delete"]')`);
+            await b.click('[data-action="delete"]');
+            await waitFor(b, `document.querySelector('.psy-modal__footer .btn--danger')`);
+            await b.click('.psy-modal__footer .btn--danger');
+            await waitFor(b, `!(await __t.appointments()).some((x) => x.kind === 'visit')`, 6000, 'termin usunięty');
+            assert.equal(await b.evaluate(`return !!PsyStore.getVisitById('${visitId}');`), true);
+        });
+
+        await step('brak błędów w konsoli', async () => noPageProblems(b));
+    } finally {
+        await b.close();
+    }
+}
+
+/* ==========================================================================
    SCENARIUSZ: Dysk Google (na atrapie API)
    ========================================================================== */
 async function scenarioGDrive(origin, mock) {
@@ -335,6 +519,8 @@ async function scenarioGDrive(origin, mock) {
             const roots = mock.find((f) => f.mimeType === FOLDER_MIME && f.appProperties.psyKind === 'root');
             assert.equal(roots.length, 1);
             assert.equal(roots[0].name, 'pacjenci');
+            await go(b, '#/patients');
+            await waitFor(b, `location.hash === '#/patients' && document.querySelector('.psy-new-empty')`);
             const r = await b.evaluate(`return { badge: document.getElementById('btn-storage').innerText, main: __t.main(), n: PsyStore.state.patients.length };`);
             assert.match(r.badge, /Dysk Google/);
             assert.equal(r.n, 0, 'po połączeniu nie ma danych demo');
@@ -396,6 +582,45 @@ async function scenarioGDrive(origin, mock) {
             assert.equal(sheet().appProperties.n, '1');
         });
 
+        const day = nextWeekWednesday();
+        await step('Kalendarz Google: osobny kalendarz aplikacji, termin z danymi pacjenta, prywatne terminy jako „zajęte"', async () => {
+            const at = (h) => new Date(day + 'T' + String(h).padStart(2, '0') + ':00:00');
+            mock.setPrimaryBusy([{ start: at(16).toISOString(), end: at(17).toISOString() }]);
+            await openCalendar(b, '#/calendar', day);
+            assert.equal(mock.calendars.size, 1, 'jeden kalendarz aplikacji');
+            const cal = Array.from(mock.calendars.values())[0];
+            assert.equal(cal.summary, 'PsychoApp — wizyty');
+            const root = mock.find((f) => f.appProperties.psyKind === 'root')[0];
+            assert.equal(root.appProperties.cfg_calendarId, cal.id, 'identyfikator kalendarza zapamiętany na Dysku');
+            await waitFor(b, `document.querySelector('.psy-cal__host .psy-cal-busy')`, 6000, 'prywatny termin jako „zajęte"');
+
+            await b.click('[data-action="book"]');
+            await b.click('input[name="cal-patient-search"]');
+            await b.type('kowal');
+            await b.click('.psy-cal__patient-option[data-patient-id="P001"]');
+            await b.evaluate(`__t.setInput('input[name="cal-date"]', '${day}'); __t.setInput('input[name="cal-time"]', '10:00');`);
+            await b.click('[data-action="save"]');
+            await waitFor(b, `document.querySelector('.psy-cal-ev--unpaid')`, 8000, 'termin na kalendarzu');
+            const events = mock.events();
+            assert.equal(events.length, 1);
+            assert.equal(events[0].summary, 'Anna Kowalska · Kolejne spotkanie · nie zapłacono');
+            assert.equal(new Date(events[0].start.dateTime).getTime(), at(10).getTime());
+            assert.equal((new Date(events[0].end.dateTime) - new Date(events[0].start.dateTime)) / 60000, 50);
+            const p = events[0].extendedProperties.private;
+            assert.deepEqual([p.psy, p.kind, p.patientId, p.visitType, p.paid], ['1', 'visit', 'P001', 'next_meeting', '0']);
+            await b.screenshot(path.join(SHOTS, 'gdrive-04-kalendarz.png'));
+        });
+
+        await step('bez zgody na kalendarz reszta aplikacji działa, a kalendarz prosi o dostęp', async () => {
+            await b.evaluate(`window.__PSY_TEST_GDRIVE__.scopes = ['https://www.googleapis.com/auth/drive.file']; await PsyStore.reconnectStorage();`);
+            await openCalendar(b, '#/calendar', day);
+            await waitFor(b, `document.querySelector('.psy-cal__notice').innerText.includes('nie ma zgody')`, 6000, 'prośba o zgodę');
+            assert.equal(await b.evaluate(`return document.querySelectorAll('.psy-cal-ev--unpaid').length;`), 0);
+            await b.evaluate(`delete window.__PSY_TEST_GDRIVE__.scopes;`);
+            await b.click('.psy-cal__notice .btn');
+            await waitFor(b, `document.querySelector('.psy-cal-ev--unpaid')`, 8000, 'terminy po nadaniu dostępu');
+        });
+
         await step('dane pacjentów nie są kopiowane do pamięci przeglądarki', async () => {
             const dump = await b.evaluate(`return JSON.stringify(Object.assign({}, localStorage));`);
             assert.ok(!/Kowalska|Kontrola za 2 tygodnie/.test(dump), dump.slice(0, 200));
@@ -425,6 +650,11 @@ async function scenarioGDrive(origin, mock) {
             assert.deepEqual(after, before, 'po odświeżeniu dane identyczne');
             assert.match(await b.evaluate(`return document.querySelector('.psy-history-paragraph').innerText;`), /Setal.*100 mg\/d/s);
             await b.screenshot(path.join(SHOTS, 'gdrive-02-historia-po-odswiezeniu.png'));
+
+            // kalendarz po odświeżeniu: ten sam (bez duplikatu), termin nadal jest
+            await openCalendar(b, '#/calendar', day);
+            await waitFor(b, `document.querySelector('.psy-cal-ev--unpaid')`, 8000, 'termin po odświeżeniu');
+            assert.equal(mock.calendars.size, 1, 'nadal jeden kalendarz aplikacji');
         });
 
         await step('zmiana nazwiska zmienia nazwę folderu i arkusza (bez duplikatu)', async () => {
@@ -594,6 +824,7 @@ const mock = createGoogleMock();
 const { server, origin } = await startServer(ROOT, (req, res) => mock.routes(req, res));
 try {
     if (!only || only === 'demo') await scenarioDemo(origin);
+    if (!only || only === 'calendar') await scenarioCalendar(origin);
     if (!only || only === 'gdrive') await scenarioGDrive(origin, mock);
     if (!only || only === 'local') await scenarioLocal(origin);
 } finally {

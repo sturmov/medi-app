@@ -14,10 +14,19 @@ export const DEFAULT_GOOGLE_CLIENT_ID =
     '1063412397649-vkie8h726ckit3hcdbhk8ce8bfc8dor5.apps.googleusercontent.com';
 
 /**
- * Zakres `drive.file`: aplikacja widzi WYŁĄCZNIE pliki, które sama utworzyła
- * (folder pacjentów, arkusze, załączniki) — nie ma wglądu w resztę Dysku.
+ * Zgody Google, o które prosi aplikacja:
+ *   drive     — `drive.file`: WYŁĄCZNIE pliki utworzone przez tę aplikację
+ *               (folder pacjentów, arkusze, załączniki); bez wglądu w resztę Dysku.
+ *   calendar  — `calendar.app.created`: WYŁĄCZNIE kalendarz założony przez tę
+ *               aplikację („PsychoApp — wizyty"); bez wglądu w prywatne kalendarze.
+ *   freebusy  — `calendar.freebusy`: tylko informacja zajęte / wolne w głównym
+ *               kalendarzu terapeuty (bez tytułów wydarzeń).
  */
-export const GOOGLE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+export const GOOGLE_SCOPES = {
+    drive: 'https://www.googleapis.com/auth/drive.file',
+    calendar: 'https://www.googleapis.com/auth/calendar.app.created',
+    freebusy: 'https://www.googleapis.com/auth/calendar.freebusy'
+};
 
 /** Nazwa folderu głównego zakładanego na Dysku przy pierwszym połączeniu. */
 export const DRIVE_ROOT_FOLDER_NAME = 'pacjenci';
@@ -40,7 +49,7 @@ export function setGoogleClientId(value) {
 
 /**
  * Adresy API Google. Test automatyczny (tools/smoke-test.mjs) podstawia tu
- * lokalną atrapę przez `window.__PSY_TEST_GDRIVE__ = { base, token }`.
+ * lokalną atrapę przez `window.__PSY_TEST_GDRIVE__ = { base, token }` (patrz też `_google-auth.js`).
  */
 export function googleEndpoints() {
     const test = (typeof window !== 'undefined' && window.__PSY_TEST_GDRIVE__) || null;
@@ -49,13 +58,13 @@ export function googleEndpoints() {
             drive: test.base + '/drive/v3',
             upload: test.base + '/upload/drive/v3',
             sheets: test.base + '/v4/spreadsheets',
-            testToken: test.token || 'test-token'
+            calendar: test.base + '/calendar/v3'
         };
     }
     return {
         drive: 'https://www.googleapis.com/drive/v3',
         upload: 'https://www.googleapis.com/upload/drive/v3',
         sheets: 'https://sheets.googleapis.com/v4/spreadsheets',
-        testToken: null
+        calendar: 'https://www.googleapis.com/calendar/v3'
     };
 }

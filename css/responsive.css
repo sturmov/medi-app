@@ -3,6 +3,7 @@
    z regułami trybu kompaktowego i zwężonego menu formularza.
 
    Progi:
+     ≤ 1500 px  laptop              — przycisk „Kalendarz" jako sama ikona
      ≤ 1100 px  tablet poziomo      — pasek pacjenta bez e-maila, bez miejsca na logo
      ≤  900 px  tablet pionowo      — menu boczne wysuwane (☰), jedna kolumna
      ≤  600 px  telefon             — pasek pacjenta ograniczony do nazwiska
@@ -21,6 +22,14 @@
 .psy-new-patient-tag > .psy-new-patient-tag__name {
     flex-shrink: 1;
     min-width: 60px;
+}
+
+/* Na laptopie (1366 px) przycisk strony głównej jest samą ikoną — inaczej zabierał
+   miejsce nazwisku pacjenta. Pełny napis dopiero na szerokich ekranach. */
+@media (max-width: 1500px) {
+    .psy-new-topbar__btn-text {
+        display: none;
+    }
 }
 
 @media (max-width: 1100px) {

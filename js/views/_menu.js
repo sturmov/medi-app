@@ -40,6 +40,8 @@ export const APP_MENU = [
     },
     // 2) Historia wizyt
     { id: 'history',         label: 'Historia wizyt',        short: 'HW',    icon: '📅', route: '#/history',         order: 2 },
+    // Kalendarz pacjenta — terminy tego pacjenta (dodane na prośbę właściciela, 2026-10)
+    { id: 'patient-calendar', label: 'Kalendarz',            short: 'Kal',   icon: '🗓️', route: '#/patient-calendar', order: 2.5 },
     // 3) Leki
     { id: 'meds',            label: 'Leki',                  short: 'Leki',  icon: '💊', route: '#/meds',            order: 3 },
     // 4) Testy
@@ -59,7 +61,7 @@ export const APP_MENU = [
 ];
 
 // Domyślny hash po starcie aplikacji (gdy nie ma żadnego routa)
-export const APP_DEFAULT_ROUTE = '#/patients';
+export const APP_DEFAULT_ROUTE = '#/calendar';
 
 // Route „pacjenci" (ekran startowy — wybór pacjenta) nie pojawia się w menu,
 // bo wybór robi się z topbara (search + dropdown). Ten route jest celem akcji

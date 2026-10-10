@@ -8,17 +8,17 @@ UI text and code comments are Polish. Requirements come from the client through 
 
 ```bash
 node tools/serve.mjs            # http://localhost:8123  (no Python on the dev machine)
-node tools/test-patient-doc.mjs # data layer: every form field survives save → load
-node tools/smoke-test.mjs       # real browser: demo | gdrive | local scenarios
+node tools/test-patient-doc.mjs # data layer: every form field survives save → load; holidays
+node tools/smoke-test.mjs       # real browser: demo | calendar | gdrive | local scenarios
 ```
 
 `node --check` is not evidence that anything works; it has passed on files the browser refused to parse. A change is done when `tools/smoke-test.mjs` passes and, for UI work, you have looked at the screenshots it writes to `tools/.smoke/`. The smoke test needs Chrome or Edge (override with `CHROME_PATH`) and no npm packages.
 
-The `gdrive` scenario runs against a local stand-in for Google's APIs (`tools/lib/google-mock.mjs`). It proves the app's logic, not Google's behaviour. Request shapes were checked against Google's discovery documents, but anything touching `_storage-gdrive.js` should also be tried once against a real account.
+The `gdrive` scenario runs against a local stand-in for Google's APIs (`tools/lib/google-mock.mjs`: Drive, Sheets, Calendar). It proves the app's logic, not Google's behaviour. Request shapes were checked against Google's discovery documents, but anything touching `_storage-gdrive.js` or `_calendar-api.js` should also be tried once against a real account.
 
 ## Architecture
 
-Vanilla ES modules and DOM (`el()` from `js/views/_dom.js`). Lit is used only by the toast component.
+Vanilla ES modules and DOM (`el()` from `js/views/_dom.js`). Lit is used only by the toast component. The calendar grid is FullCalendar (MIT), vendored in `lib/fullcalendar/` and loaded on first use.
 
 | File | Role |
 |---|---|
@@ -29,7 +29,11 @@ Vanilla ES modules and DOM (`el()` from `js/views/_dom.js`). Lit is used only by
 | `js/views/view-visit-form.js`, `_form-toolbar.js` | Visit form: field list on the left, journal of entries on the right |
 | `js/views/_patient-doc.js` | The patient document (what gets saved) |
 | `js/views/_sheet-model.js` | Spreadsheet layout shared by Google Sheets and XLSX |
+| `js/views/_google-auth.js` | One Google sign-in for Drive and Calendar, plus the shared API call helper |
 | `js/views/_storage-gdrive.js`, `_storage-local.js` | Storage backends with the same contract |
+| `js/views/_calendar-api.js` | Appointments: Google Calendar backend and a browser-only one |
+| `js/views/view-calendar.js` | Calendar page (home and per patient) with the booking panel |
+| `js/views/_holidays-pl.js` | Polish public holidays, computed locally |
 
 ### Data model
 
@@ -45,35 +49,54 @@ Adding a field type means touching three places: the schema, `_visit-describe.js
 
 One patient = one document (`buildPatientDoc`). In storage it is a spreadsheet with readable tabs (Pacjent, Wizyty, Leki, Diagnozy, Parametry, Plan leczenia, Zalecenia, Testy) plus a hidden `_dane` tab holding the document as JSON in chunks. The app only ever reads `_dane`; readable tabs are regenerated on every save and exist so the therapist keeps usable data without the app. Never parse the readable tabs back.
 
-- **Google Drive (the product):** `pacjenci/` → one folder per patient → Google Sheet + `dokumenty/`. Scope is `drive.file` only (the app sees just the files it created). The patient list comes from Drive file `appProperties` in a single request; a patient's sheet is read on first open. A save is one atomic `spreadsheets.batchUpdate`.
+- **Google Drive (the product):** `pacjenci/` → one folder per patient → Google Sheet + `dokumenty/`. The patient list comes from Drive file `appProperties` in a single request; a patient's sheet is read on first open. A save is one atomic `spreadsheets.batchUpdate`. Small app settings (such as the calendar ID) live in the root folder's `appProperties`, so they follow the therapist across devices.
 - **Local folder:** same layout with `pacjent.xlsx`; Chrome/Edge desktop only. Kept for testing and offline use.
 - **Demo mode:** sample data in `localStorage`. Once storage is connected, patient data is not copied to the browser.
 
 Unsaved patients stay queued on any failure and are retried; expired Google sessions need a user click ("Połącz ponownie"). A patient whose document is not loaded is never written.
 
-## Google setup (owner's Google Cloud project)
+### Calendar
+
+An appointment is not a visit note. The calendar holds the schedule (who, when, visit type, paid or not); the note is still the visit in the patient's sheet. They are linked both ways: the event stores `visitId`, the visit stores `calendarEventId`. "Napisz notatkę" on an appointment opens the visit form with date, time and type filled in. Payment status is kept in step in both directions.
+
+- **With Google Drive connected:** appointments are events in a separate Google calendar, "PsychoApp — wizyty", created by the app. App data sits in the event's `extendedProperties.private`; the event title carries name, visit type, phone and payment so it reads well on a phone. Events added or moved in Google Calendar itself show up in the app.
+- **Demo / local folder:** appointments are kept in this browser only.
+- **Busy blocks:** the therapist's main calendar is queried for free/busy only, never titles.
+- **Holidays** are computed in code, not read from Google.
+- On a patient's calendar, everything except that patient's appointments is drawn as background, so the list view shows only their appointments.
+
+The `events` function given to FullCalendar must not be `async`: FullCalendar treats a returned promise as a second result and throws if the view was closed mid-load.
+
+## Google setup (owner's Google Cloud project "Test Google Drive")
 
 The OAuth client ID is in `js/views/_config.js` and can be overridden in Settings. It is public by nature. `client_secret_*.json` is not used by the app and must never be committed or referenced from the front end.
 
-1. Enable **Google Drive API** and **Google Sheets API** in the project.
+1. Enable **Google Drive API**, **Google Sheets API** and **Google Calendar API**.
 2. OAuth client (type "Web application") → **Authorized JavaScript origins**: `https://sturmov.github.io` and, for local testing, `http://localhost:8123`.
-3. OAuth consent screen: scope `…/auth/drive.file`. While the app is in "Testing", each therapist's Google account must be added under Test users.
+3. Data access (scopes), all requested in one sign-in; only the first is required for the app to work:
+   - `…/auth/drive.file`: only files the app created.
+   - `…/auth/calendar.app.created`: only the calendar the app created (Google lists it as non-sensitive).
+   - `…/auth/calendar.freebusy`: busy/free times of the main calendar.
+4. The consent screen is in production. With these scopes no Google review has been needed.
 
 ## Product decisions in force
 
-- Sidebar: 10 items in the client's order, text only (icons only when the sidebar narrows in the visit form).
+- Home page is the calendar; the patient list is the tab next to it. The topbar 📅 button returns home.
+- Sidebar: the client's 10 items in her order, text only (icons only when the sidebar narrows in the visit form), plus "Kalendarz" for the selected patient.
 - Six visit types; only `first_meeting` opens the full interview form.
-- No "Save" buttons; autosave everywhere. Modals only for confirmations.
+- No "Save" buttons; autosave everywhere. Modals only for confirmations. The one exception is booking: an appointment is created by an explicit "Umów wizytę".
 - Visit form: filled fields read as a finished note; click to edit; one entry in edit at a time; leaving returns it to read mode. Section headings stay visually quiet.
 - Meds are entered fresh on every visit (no carry-over from the previous one). Brand name without brackets; substance, group and max dose read-only from the dictionary; dose is a number in the max dose's unit.
 - Diagnosis is one `code — description` field; date and author come from the visit.
-- Compact layout is the default (`theme--compact`), target 1366×768.
+- Appointments show full name, visit type, phone and paid / not paid (owner's choice). No email invitations to patients.
+- Compact layout is the default (`theme--compact`), target 1366×768; tablets are supported in both orientations (`css/responsive.css`).
 - Patients are archived, never deleted from the UI.
 
 ## Not done yet
 
 - **Zalecenia:** the page still lists standalone records and nothing in the visit form creates them. Waiting for a product decision on where they come from.
 - **ICD-10:** dictionary has about 80 codes; the client wants all of them. `extendIcd10Dict()` exists; a full list still has to be sourced and loaded.
+- **Calendar:** Google Meet links for online sessions (wanted later); recurring appointments.
 - **Deferred by the client:** closing a visit and required fields; marking fields as more / less important.
-- **Not started:** practitioner profile (auto-fill "Lekarz prowadzący" / "Placówka"), document generation (zaświadczenie, skierowanie), more test questionnaires, calendar integration.
+- **Not started:** practitioner profile (auto-fill "Lekarz prowadzący" / "Placówka"), document generation (zaświadczenie, skierowanie), more test questionnaires.
 - Large uploads to Drive use a single multipart request; very large files may need resumable upload.

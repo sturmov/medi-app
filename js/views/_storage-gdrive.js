@@ -24,7 +24,8 @@
 // Kontrakt taki sam jak `_storage-local.js`.
 // ============================================================================
 
-import { getGoogleClientId, GOOGLE_SCOPE, DRIVE_ROOT_FOLDER_NAME, googleEndpoints } from './_config.js';
+import { DRIVE_ROOT_FOLDER_NAME, googleEndpoints } from './_config.js';
+import { googleAuth as auth, googleCall as call } from './_google-auth.js';
 import { buildTabs, chunksToDoc, DATA_TAB } from './_sheet-model.js';
 import { patientFolderName, patientSummary, parsePatientDoc, DOC_FORMAT, DOC_VERSION } from './_patient-doc.js';
 import { StorageError } from './_storage-errors.js';
@@ -32,114 +33,6 @@ import { StorageError } from './_storage-errors.js';
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
 const SHEET_MIME = 'application/vnd.google-apps.spreadsheet';
 const DOCS_FOLDER = 'dokumenty';
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/* ==========================================================================
-   Logowanie (Google Identity Services — okienko Google, bez haseł w aplikacji)
-   ========================================================================== */
-
-let gisLoading = null;
-function loadGoogleIdentity() {
-    if (window.google && window.google.accounts && window.google.accounts.oauth2) return Promise.resolve();
-    if (!gisLoading) {
-        gisLoading = new Promise((resolve, reject) => {
-            const s = document.createElement('script');
-            s.src = 'https://accounts.google.com/gsi/client';
-            s.async = true;
-            s.onload = () => resolve();
-            s.onerror = () => {
-                gisLoading = null;
-                reject(new StorageError('offline', 'Nie udało się załadować logowania Google — sprawdź połączenie z internetem.'));
-            };
-            document.head.appendChild(s);
-        });
-    }
-    return gisLoading;
-}
-
-function authMessage(reason) {
-    switch (reason) {
-        case 'popup_failed_to_open':
-            return 'Przeglądarka zablokowała okienko logowania Google. Kliknij „Połącz ponownie".';
-        case 'popup_closed':
-            return 'Okienko logowania Google zostało zamknięte przed zakończeniem. '
-                + 'Jeśli pokazało błąd 400 (origin_mismatch), adres tej aplikacji trzeba dodać w konsoli Google '
-                + 'do „Authorized JavaScript origins".';
-        case 'access_denied':
-            return 'Nie udzielono zgody na dostęp do plików aplikacji na Dysku Google.';
-        default:
-            return 'Logowanie do Google nie powiodło się' + (reason ? ' (' + reason + ').' : '.');
-    }
-}
-
-function createAuth(endpoints) {
-    let token = null;
-    let expiresAt = 0;
-    let client = null;
-    let onToken = null;
-    let onError = null;
-    let inflight = null;
-    let loginHint = '';
-
-    async function request() {
-        if (endpoints.testToken) {
-            // Test automatyczny: bez okienka Google; `authFail` udaje zablokowane logowanie.
-            if (window.__PSY_TEST_GDRIVE__ && window.__PSY_TEST_GDRIVE__.authFail) {
-                throw new StorageError('auth', authMessage('popup_failed_to_open'));
-            }
-            token = endpoints.testToken;
-            expiresAt = Date.now() + 3600 * 1000;
-            return token;
-        }
-        await loadGoogleIdentity();
-        const oauth2 = window.google.accounts.oauth2;
-        if (!client) {
-            client = oauth2.initTokenClient({
-                client_id: getGoogleClientId(),
-                scope: GOOGLE_SCOPE,
-                callback: (resp) => { if (onToken) onToken(resp); },
-                error_callback: (err) => { if (onError) onError(err); }
-            });
-        }
-        return new Promise((resolve, reject) => {
-            onToken = (resp) => {
-                if (!resp || resp.error || !resp.access_token) {
-                    reject(new StorageError('auth', authMessage(resp && resp.error)));
-                    return;
-                }
-                if (typeof oauth2.hasGrantedAllScopes === 'function' && !oauth2.hasGrantedAllScopes(resp, GOOGLE_SCOPE)) {
-                    reject(new StorageError('auth', authMessage('access_denied')));
-                    return;
-                }
-                token = resp.access_token;
-                expiresAt = Date.now() + (Number(resp.expires_in) || 3600) * 1000;
-                resolve(token);
-            };
-            onError = (err) => reject(new StorageError('auth', authMessage(err && err.type)));
-            // prompt '' = okienko pyta tylko wtedy, gdy to konieczne (pierwsza zgoda).
-            client.requestAccessToken({ prompt: '', login_hint: loginHint || undefined });
-        });
-    }
-
-    return {
-        /** Ważny token; gdy wygasł — prosi Google o nowy (może otworzyć okienko). */
-        getToken() {
-            if (token && Date.now() < expiresAt - 60 * 1000) return Promise.resolve(token);
-            if (!inflight) inflight = request().finally(() => { inflight = null; });
-            return inflight;
-        },
-        invalidate() { token = null; expiresAt = 0; },
-        setLoginHint(email) { loginHint = email || ''; },
-        signOut() {
-            const t = token;
-            token = null; expiresAt = 0;
-            try {
-                if (t && window.google && window.google.accounts) window.google.accounts.oauth2.revoke(t, () => {});
-            } catch (_) { /* */ }
-        }
-    };
-}
 
 /* ==========================================================================
    Pomocnicze
@@ -259,62 +152,14 @@ function formatRequests(sheetId, tab) {
 
 export function createGDriveBackend() {
     const E = googleEndpoints();
-    const auth = createAuth(E);
 
     let rootId = null;
+    let rootProps = {};             // ustawienia aplikacji zapisane na folderze głównym
     let account = '';
     const tabMeta = new Map();      // spreadsheetId → Map(tytuł → { sheetId, rowCount, columnCount })
     const written = new Map();      // spreadsheetId → Map(tytuł → hash ostatnio zapisanych wierszy)
     const fresh = new Set();        // arkusze utworzone w tej sesji (wolno usunąć domyślną zakładkę)
     const created = new Map();      // kod pacjenta → ref pliku założonego w tej sesji
-
-    /* ---------------- HTTP ---------------- */
-    async function call(method, url, opts = {}, attempt = 0, reauthed = false) {
-        const token = await auth.getToken();
-        const headers = Object.assign({ Authorization: 'Bearer ' + token }, opts.headers || {});
-        let body = opts.body;
-        if (opts.json !== undefined) {
-            headers['Content-Type'] = 'application/json';
-            body = JSON.stringify(opts.json);
-        }
-        let res;
-        try {
-            res = await fetch(url, { method, headers, body });
-        } catch (e) {
-            throw new StorageError('offline', 'Brak połączenia z Google — zmiany czekają na wysłanie.');
-        }
-
-        if (res.status === 401) {
-            // Token wygasł: jedno odnowienie na żądanie (niezależnie od ponowień po błędach serwera).
-            auth.invalidate();
-            if (!reauthed) return call(method, url, opts, attempt, true);
-            throw new StorageError('auth', 'Sesja Google wygasła.');
-        }
-
-        if (!res.ok) {
-            let message = '';
-            let reason = '';
-            try {
-                const err = (await res.json()).error || {};
-                message = err.message || '';
-                reason = (err.errors && err.errors[0] && err.errors[0].reason) || err.status || '';
-            } catch (_) { /* odpowiedź bez JSON */ }
-            const rateLimited = res.status === 429
-                || /rateLimitExceeded|userRateLimitExceeded|RESOURCE_EXHAUSTED/.test(reason);
-            if ((rateLimited || res.status >= 500) && attempt < 4) {
-                await sleep(700 * Math.pow(2, attempt) + Math.random() * 300);
-                return call(method, url, opts, attempt + 1, reauthed);
-            }
-            const e = new StorageError(res.status >= 500 || rateLimited ? 'offline' : 'io',
-                'Google (' + res.status + '): ' + (message || res.statusText || 'błąd'));
-            e.status = res.status;
-            throw e;
-        }
-
-        if (opts.expect === 'blob') return res.blob();
-        if (res.status === 204) return null;
-        return res.json();
-    }
 
     async function driveList(q, fields) {
         const out = [];
@@ -339,10 +184,11 @@ export function createGDriveBackend() {
         if (rootId) return rootId;
         const found = await driveList(
             "mimeType='" + FOLDER_MIME + "' and trashed=false and appProperties has { key='psyKind' and value='root' }",
-            'id,name,createdTime');
+            'id,name,createdTime,appProperties');
         if (found.length) {
             found.sort((a, b) => String(a.createdTime || '').localeCompare(String(b.createdTime || '')));
             rootId = found[0].id;
+            rootProps = found[0].appProperties || {};
         } else {
             rootId = (await driveCreate({
                 name: DRIVE_ROOT_FOLDER_NAME,
@@ -503,6 +349,18 @@ export function createGDriveBackend() {
         },
 
         signOut() { auth.signOut(); },
+
+        /** Drobne ustawienia aplikacji (np. identyfikator kalendarza) — na folderze głównym,
+         *  żeby były wspólne dla wszystkich urządzeń terapeuty. */
+        async getSetting(key) {
+            await ensureRoot();
+            return rootProps['cfg_' + key] || '';
+        },
+        async setSetting(key, value) {
+            await ensureRoot();
+            rootProps['cfg_' + key] = value;
+            await drivePatch(rootId, { appProperties: { ['cfg_' + key]: value } });
+        },
 
         async listPatients() {
             await ensureRoot();

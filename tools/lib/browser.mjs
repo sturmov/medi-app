@@ -126,13 +126,43 @@ export async function launchBrowser({ width = 1366, height = 768 } = {}) {
             const node = ${expr};
             if (!node) return null;
             node.scrollIntoView({ block: 'center', inline: 'nearest' });
-            await new Promise((r) => requestAnimationFrame(() => r()));
-            const b = node.getBoundingClientRect();
+            // Czekamy, aż element przestanie się ruszać (np. animacja wejścia okna),
+            // inaczej kliknięcie trafiłoby w miejsce, którego już tam nie ma.
+            let b = node.getBoundingClientRect();
+            for (let i = 0; i < 40; i++) {
+                await new Promise((r) => requestAnimationFrame(() => r()));
+                const next = node.getBoundingClientRect();
+                const still = Math.abs(next.left - b.left) < 0.5 && Math.abs(next.top - b.top) < 0.5;
+                b = next;
+                if (still && i > 0) break;
+            }
             return { x: b.left + Math.min(b.width / 2, 40), y: b.top + b.height / 2 };`);
         if (!pt) throw new Error('Brak elementu do kliknięcia: ' + selectorOrExpr);
         await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pt.x, y: pt.y });
         await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
         await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
+    }
+
+    /** Kliknięcie w konkretny punkt okna (gdy liczy się miejsce w elemencie, np. górna część wiersza godziny). */
+    async function clickAt(pt) {
+        await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pt.x, y: pt.y });
+        await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
+        await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
+    }
+
+    /** Przeciągnięcie myszą między dwoma punktami okna (np. przeniesienie terminu w kalendarzu). */
+    async function drag(from, to) {
+        await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: from.x, y: from.y });
+        await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: from.x, y: from.y, button: 'left', clickCount: 1 });
+        const steps = 8;
+        for (let i = 1; i <= steps; i++) {
+            await send('Input.dispatchMouseEvent', {
+                type: 'mouseMoved', button: 'left', buttons: 1,
+                x: from.x + (to.x - from.x) * i / steps, y: from.y + (to.y - from.y) * i / steps
+            });
+            await sleep(30);
+        }
+        await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: to.x, y: to.y, button: 'left', clickCount: 1 });
     }
 
     /** Wpisuje tekst w aktualnie sfokusowane pole (jak klawiatura). */
@@ -152,7 +182,7 @@ export async function launchBrowser({ width = 1366, height = 768 } = {}) {
     }
 
     return {
-        send, evaluate, click, type, key, screenshot, problems, dialogs,
+        send, evaluate, click, clickAt, drag, type, key, screenshot, problems, dialogs,
         navigate: async (url) => { await send('Page.navigate', { url }); },
         reload: async () => { await send('Page.reload', { ignoreCache: true }); },
         onNewDocument: (source) => send('Page.addScriptToEvaluateOnNewDocument', { source }),

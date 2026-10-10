@@ -29,6 +29,8 @@ import { renderTestRunner } from './views/view-test-runner.js';
 import { renderTreatmentPlan } from './views/view-treatment-plan.js';
 import { renderParameters } from './views/view-parameters.js';
 import { renderDocuments } from './views/view-documents.js';
+import { renderCalendar, renderHomeTabs } from './views/view-calendar.js';
+import { syncVisitToAppointment } from './views/_calendar-api.js';
 import { listAvailableTests } from './views/_tests-catalog.js';
 
 import { showStorageGate, hideStorageGate, shouldShowGate } from './views/view-folder-gate.js';
@@ -261,7 +263,7 @@ function viewPatients() {
     const root = el('div', { class: 'psy-new-view' });
     root.appendChild(el('div', { class: 'psy-new-view__header' }, [
         el('div', {}, [
-            el('h1', { class: 'psy-new-view__title' }, ['Pacjenci']),
+            renderHomeTabs('patients'),
             el('div', { class: 'psy-new-view__subtitle' }, [
                 patients.length + ' ' + (patients.length === 1 ? 'pacjent' : 'pacjentów') +
                 ' · ' + allPatients.length + ' łącznie w bazie'
@@ -462,7 +464,7 @@ function viewHistory() {
                     title: 'Kliknij, aby zmienić stan płatności',
                     onclick: (ev) => {
                         ev.stopPropagation();
-                        Store.togglePaid(v.id);
+                        syncVisitToAppointment(Store.togglePaid(v.id));
                     }
                 }, [v.paid ? '✓ Zapłacono' : '☐ Nie zapłacono'])
             ])
@@ -906,7 +908,15 @@ function viewVisitForm() {
     const hash = window.location.hash || '';
     // Identyfikatory typów zawierają podkreślnik (np. `first_meeting`).
     const mNew = hash.match(/^#\/visit\/form\/new(?:\/([\w-]+))?/);
-    if (mNew) return renderVisitForm({ isNew: true, typeId: mNew[1] || null });
+    if (mNew) {
+        // Wejście z kalendarza: `?date=…&time=…&event=…&paid=1` (termin, z którego powstaje notatka).
+        const q = new URLSearchParams(hash.split('?')[1] || '');
+        return renderVisitForm({
+            isNew: true, typeId: mNew[1] || null,
+            date: q.get('date') || '', time: q.get('time') || '',
+            eventId: q.get('event') || '', paid: q.get('paid') === '1'
+        });
+    }
     const mEdit = hash.match(/^#\/visit\/form\/([^/?]+)/);
     if (mEdit) return renderVisitForm({ visitId: decodeURIComponent(mEdit[1]) });
     return renderVisitForm({ isNew: true });
@@ -951,6 +961,17 @@ function viewTreatmentPlan() {
 // Parametry (route `#/parameters`) — wzrost/waga/BMI/ciśnienie/tętno.
 function viewParameters() {
     return renderParameters();
+}
+
+// Strona główna: kalendarz wszystkich terminów. Kalendarz pacjenta: tylko jego terminy.
+function viewHomeCalendar() {
+    return renderCalendar();
+}
+
+function viewPatientCalendar() {
+    const cp = Store.state.currentPatient;
+    if (!cp) return noPatientView('Kalendarz', '🗓️');
+    return renderCalendar({ patientId: cp.id });
 }
 
 // Dokumenty (route `#/documents`) — stub UI uploadera + lista placeholder.
@@ -1199,6 +1220,10 @@ const ROUTE_MAP = {
     '#/parameters':           { renderer: viewParameters,          menuId: 'parameters',      needsPatient: true },
     '#/documents':            { renderer: viewDocuments,           menuId: 'documents',       needsPatient: true },
 
+    // Kalendarz
+    '#/calendar':             { renderer: viewHomeCalendar,        menuId: null },
+    '#/patient-calendar':     { renderer: viewPatientCalendar,     menuId: 'patient-calendar', needsPatient: true },
+
     // Pozostałe
     '#/history':              { renderer: viewHistory,             menuId: 'history',         needsPatient: true },
     '#/settings':             { renderer: viewSettings,            menuId: null }
@@ -1285,6 +1310,9 @@ const AppController = {
         });
         document.getElementById('btn-settings').addEventListener('click', () => {
             window.location.hash = APP_SETTINGS_ROUTE;
+        });
+        document.getElementById('btn-home').addEventListener('click', () => {
+            window.location.hash = APP_DEFAULT_ROUTE;
         });
     },
 

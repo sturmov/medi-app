@@ -1,0 +1,239 @@
+/* ============================================================================
+   calendar.css — strona kalendarza (FullCalendar + panel umawiania).
+   ============================================================================ */
+
+/* ---------- zakładki strony głównej: Kalendarz | Pacjenci ---------- */
+.psy-home-tabs {
+    display: inline-flex;
+    gap: 4px;
+    padding: 3px;
+    background: #F1F5F9;
+    border-radius: 8px;
+    margin-bottom: 4px;
+}
+.psy-home-tabs__tab {
+    padding: 5px 14px;
+    border-radius: 6px;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #475569;
+    text-decoration: none;
+}
+.psy-home-tabs__tab:hover { color: #1E293B; }
+.psy-home-tabs__tab--active {
+    background: #FFFFFF;
+    color: #1D4ED8;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+/* ---------- układ: kalendarz + panel z prawej ---------- */
+.psy-cal {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    height: calc(100vh - 150px);
+    min-height: 440px;
+}
+.psy-cal--panel-open {
+    grid-template-columns: minmax(0, 1fr) 320px;
+}
+.psy-cal__host {
+    min-width: 0;
+    min-height: 0;
+    background: #FFFFFF;
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+
+.psy-cal__fc { height: 100%; }
+
+.psy-cal__notice {
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    font-size: 12.5px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.psy-cal__notice--warning { background: #FFFBEB; border: 1px solid #FCD34D; color: #78350F; }
+.psy-cal__notice--error   { background: #FEF2F2; border: 1px solid #FCA5A5; color: #7F1D1D; }
+
+/* ---------- panel umawiania ---------- */
+.psy-cal__panel {
+    background: #FFFFFF;
+    border: 1px solid #BFDBFE;
+    border-radius: 8px;
+    padding: 10px 12px;
+    overflow-y: auto;
+    min-height: 0;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08);
+}
+.psy-cal__panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13.5px;
+    color: #1E40AF;
+    margin-bottom: 8px;
+}
+.psy-cal__panel-body { display: flex; flex-direction: column; gap: 8px; }
+.psy-cal__field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.psy-cal__field-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748B;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.psy-cal__field input,
+.psy-cal__field select,
+.psy-cal__field textarea { width: 100%; box-sizing: border-box; }
+.psy-cal__row { display: grid; grid-template-columns: 1.3fr 1fr 0.8fr; gap: 8px; }
+.psy-cal__check { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+.psy-cal__kinds { display: flex; gap: 6px; }
+.psy-cal__kind {
+    flex: 1;
+    padding: 5px 8px;
+    font-size: 12px;
+    border: 1px solid #D1D5DB;
+    border-radius: 6px;
+    background: #F9FAFB;
+    color: #475569;
+    cursor: pointer;
+}
+.psy-cal__kind--active { background: #EFF6FF; border-color: #93C5FD; color: #1D4ED8; font-weight: 600; }
+.psy-cal__patient { font-size: 13.5px; }
+.psy-cal__patient-results { display: flex; flex-direction: column; margin-top: 4px; max-height: 200px; overflow-y: auto; }
+.psy-cal__patient-option {
+    text-align: left;
+    padding: 6px 8px;
+    border: 0;
+    border-bottom: 1px solid #F1F5F9;
+    background: transparent;
+    font-size: 13px;
+    cursor: pointer;
+}
+.psy-cal__patient-option:hover { background: #EFF6FF; }
+.psy-cal__link {
+    border: 0;
+    background: transparent;
+    color: #2563EB;
+    cursor: pointer;
+    font-size: 12.5px;
+    padding: 2px 6px;
+}
+.psy-cal__warn {
+    margin-top: 8px;
+    padding: 6px 8px;
+    background: #FFFBEB;
+    border: 1px solid #FCD34D;
+    border-radius: 6px;
+    font-size: 12px;
+    color: #78350F;
+}
+.psy-cal__panel-actions,
+.psy-cal__panel-extra { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.psy-cal__panel-extra { padding-top: 10px; border-top: 1px dashed #E5E7EB; }
+
+/* ---------- FullCalendar: dopasowanie do zwartego wyglądu aplikacji ---------- */
+.psy-cal__host .fc {
+    font-size: 12.5px;
+    --fc-today-bg-color: #F0F9FF;
+    --fc-border-color: #E5E7EB;
+    --fc-now-indicator-color: #DC2626;
+}
+.psy-cal__host .fc-toolbar.fc-header-toolbar { margin-bottom: 8px; }
+.psy-cal__host .fc-toolbar-title { font-size: 15px; font-weight: 700; color: #0F172A; }
+.psy-cal__host .fc-button {
+    padding: 3px 10px;
+    font-size: 12.5px;
+    background: #FFFFFF;
+    border-color: #D1D5DB;
+    color: #334155;
+    box-shadow: none;
+}
+.psy-cal__host .fc-button:hover { background: #F1F5F9; color: #0F172A; border-color: #CBD5E1; }
+.psy-cal__host .fc-button-primary:not(:disabled).fc-button-active,
+.psy-cal__host .fc-button-primary:not(:disabled):active {
+    background: #2563EB;
+    border-color: #2563EB;
+    color: #FFFFFF;
+}
+.psy-cal__host .fc-button:disabled { opacity: 0.55; }
+.psy-cal__host .fc-col-header-cell-cushion,
+.psy-cal__host .fc-daygrid-day-number,
+.psy-cal__host .fc-list-day-text,
+.psy-cal__host .fc-list-day-side-text { color: #334155; text-decoration: none; }
+.psy-cal__host .fc-timegrid-slot-label { font-size: 11px; color: #64748B; }
+
+/* cały dzień pracy (7–21) mieści się bez przewijania na ekranie 1366×768 */
+.psy-cal__host .fc-timegrid-slot { height: 15px; }
+
+/* terminy pacjentów */
+.psy-cal__host .psy-cal-ev {
+    border-radius: 5px;
+    border: 1px solid #93C5FD;
+    border-left-width: 4px;
+    background: #EFF6FF;
+    cursor: pointer;
+}
+.psy-cal__host .psy-cal-ev,
+.psy-cal__host .psy-cal-ev .fc-event-main { color: #0F172A; }
+.psy-cal__host .psy-cal-ev--paid   { border-color: #6EE7B7; border-left-color: #10B981; background: #ECFDF5; }
+.psy-cal__host .psy-cal-ev--unpaid { border-color: #FCD34D; border-left-color: #F59E0B; background: #FFFBEB; }
+.psy-cal__host .psy-cal-ev--other  { border-color: #C4B5FD; border-left-color: #8B5CF6; background: #F5F3FF; }
+.psy-cal-ev__box { padding: 1px 4px; line-height: 1.3; overflow: hidden; }
+.psy-cal-ev__line1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.psy-cal-ev__line2 { font-size: 11px; color: #475569; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.psy-cal-ev__time { color: #475569; font-variant-numeric: tabular-nums; }
+.psy-cal-ev__pay--paid   { color: #047857; font-weight: 600; }
+.psy-cal-ev__pay--unpaid { color: #B45309; font-weight: 600; }
+.psy-cal-ev__listline { color: #0F172A; }
+
+/* zajęte (prywatne terminy / wizyty innych pacjentów) */
+.psy-cal__host .psy-cal-busy {
+    background: repeating-linear-gradient(135deg, #E2E8F0 0 6px, #F1F5F9 6px 12px);
+    opacity: 0.9;
+}
+.psy-cal-busy__label { font-size: 10.5px; color: #64748B; padding: 2px 4px; font-style: italic; }
+
+/* święta */
+.psy-cal__host .psy-cal-holiday,
+.psy-cal__host .psy-cal-holiday .fc-event-main {
+    background: #FEE2E2;
+    border-color: #FCA5A5;
+    color: #991B1B;
+    font-weight: 600;
+}
+.psy-cal__host .psy-cal-day--holiday { background: #FEF2F2; }
+
+/* ---------- tablet poziomo: panel nachodzi na kalendarz zamiast go ściskać ---------- */
+@media (min-width: 901px) and (max-width: 1100px) {
+    .psy-cal--panel-open {
+        grid-template-columns: minmax(0, 1fr);
+        position: relative;
+    }
+    .psy-cal--panel-open .psy-cal__panel {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: 320px;
+        z-index: 5;
+        box-shadow: -6px 0 18px rgba(15, 23, 42, 0.18);
+    }
+}
+
+/* ---------- tablet pionowo / wąskie okno: panel pod kalendarzem ---------- */
+@media (max-width: 900px) {
+    .psy-cal,
+    .psy-cal--panel-open {
+        grid-template-columns: minmax(0, 1fr);
+        height: auto;
+    }
+    .psy-cal__host { height: 70vh; }
+    .psy-cal__host .fc-toolbar.fc-header-toolbar { flex-wrap: wrap; gap: 6px; }
+}

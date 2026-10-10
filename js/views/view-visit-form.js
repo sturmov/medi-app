@@ -26,6 +26,7 @@ import { searchMeds } from './_meds-dict.js';
 import { openConfirm } from './_modal.js';
 import { createFormToolbar } from './_form-toolbar.js';
 import { el } from './_dom.js';
+import { patchAppointment, unlinkVisitFromAppointment } from './_calendar-api.js';
 import {
     visitMode, fieldKey, isBlank, listOf,
     isFieldFilled, fieldText, uzywkiEntries,
@@ -615,7 +616,8 @@ function messageView(title, children) {
 
 /* ==========================================================================
    GŁÓWNY EXPORT
-   @param {object} opts — { isNew?: boolean, typeId?: string, visitId?: string }
+   @param {object} opts — { isNew?, typeId?, visitId?,
+                            date?, time?, eventId?, paid? }  ← gdy notatka powstaje z terminu w kalendarzu
    ========================================================================== */
 export function renderVisitForm(opts = {}) {
     const patient = Store.state.currentPatient;
@@ -642,7 +644,7 @@ export function renderVisitForm(opts = {}) {
         diagnoses: clone(visit && visit.data && visit.data.diagnoses)
     };
     // Nowa wizyta: data domyślnie dzisiejsza (zapisze się przy pierwszej zmianie).
-    if (!visit && isBlank(raw['visitData.data'])) raw['visitData.data'] = todayISO();
+    if (!visit && isBlank(raw['visitData.data'])) raw['visitData.data'] = opts.date || todayISO();
 
     let dirty = false;
     let deleted = false;
@@ -739,8 +741,17 @@ export function renderVisitForm(opts = {}) {
         const summary = visitSummary({ data: payload });
 
         if (!visitId) {
-            const created = Store.addVisit({ patientId: patient.id, type: typeId, date, summary, data: payload });
+            const fromEvent = opts.eventId
+                ? { time: opts.time || '', paid: opts.paid === true, calendarEventId: opts.eventId }
+                : {};
+            const created = Store.addVisit(Object.assign(
+                { patientId: patient.id, type: typeId, date, summary, data: payload }, fromEvent));
             visitId = created.id;
+            // Termin w kalendarzu dostaje znaczek „jest notatka" (błąd kalendarza nie blokuje pisania).
+            if (opts.eventId) {
+                patchAppointment(opts.eventId, { visitId })
+                    .catch((e) => console.warn('[calendar] powiązanie notatki z terminem:', e && e.message));
+            }
             // Stabilny adres bez przeładowania widoku — ale tylko gdy nadal jesteśmy
             // na „nowej wizycie". Jeśli użytkownik właśnie przechodzi gdzie indziej,
             // podmiana adresu cofnęłaby jego nawigację.
@@ -795,7 +806,10 @@ export function renderVisitForm(opts = {}) {
             if (!ok) return;
             deleted = true;
             if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-            if (visitId) Store.removeVisit(visitId);
+            if (visitId) {
+                unlinkVisitFromAppointment(Store.getVisitById(visitId));
+                Store.removeVisit(visitId);
+            }
             window.location.hash = '#/history';
         }
     }, ['🗑 Usuń']);

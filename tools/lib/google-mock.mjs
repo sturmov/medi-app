@@ -1,5 +1,5 @@
 // ============================================================================
-// tools/lib/google-mock.mjs — lokalna atrapa Google Drive v3 + Sheets v4.
+// tools/lib/google-mock.mjs — lokalna atrapa Google Drive v3 + Sheets v4 + Calendar v3.
 //
 // Obsługuje dokładnie ten podzbiór API, którego używa `_storage-gdrive.js`,
 // i pilnuje tych samych reguł co prawdziwe API tam, gdzie pomyłka zepsułaby
@@ -16,6 +16,8 @@ export const SHEET_MIME = 'application/vnd.google-apps.spreadsheet';
 export function createGoogleMock({ token = 'test-token' } = {}) {
     const files = new Map();          // id → { id, name, mimeType, parents, appProperties, trashed, content?, sheets? }
     const calls = [];                 // dziennik: 'METHOD /ścieżka'
+    const calendars = new Map();      // id → { id, summary, timeZone, events: Map(id → event) }
+    let primaryBusy = [];             // zajęte przedziały głównego kalendarza (freeBusy)
     let nextId = 1;
     let failQueue = [];               // kody HTTP do zwrócenia przy kolejnych żądaniach
     let offline = false;
@@ -238,6 +240,84 @@ export function createGoogleMock({ token = 'test-token' } = {}) {
             while (col.length && (col[col.length - 1] === '' || col[col.length - 1] == null)) col.pop();
             return send(res, 200, col.length ? { range, majorDimension: 'COLUMNS', values: [col] } : { range });
         }
+        /* ---------------- Calendar v3 ---------------- */
+        if (p === '/calendar/v3/calendars' && method === 'POST') {
+            const body = json();
+            if (!body.summary) return fail(res, 400, 'Missing summary');
+            const cal = { id: 'cal' + (nextId++) + '@group.calendar.google.com', summary: body.summary, timeZone: body.timeZone || 'UTC', events: new Map() };
+            calendars.set(cal.id, cal);
+            return send(res, 200, { id: cal.id, summary: cal.summary, timeZone: cal.timeZone });
+        }
+        if (p === '/calendar/v3/freeBusy' && method === 'POST') {
+            const body = json();
+            const from = Date.parse(body.timeMin);
+            const to = Date.parse(body.timeMax);
+            if (!(from < to)) return fail(res, 400, 'Bad time range');
+            const out = {};
+            for (const item of (body.items || [])) {
+                out[item.id] = item.id === 'primary'
+                    ? { busy: primaryBusy.filter((b) => Date.parse(b.end) > from && Date.parse(b.start) < to) }
+                    : { errors: [{ domain: 'global', reason: 'notFound' }] };
+            }
+            return send(res, 200, { kind: 'calendar#freeBusy', calendars: out });
+        }
+        if ((m = p.match(/^\/calendar\/v3\/calendars\/([^/]+)(?:\/events(?:\/([^/]+))?)?$/))) {
+            const calId = decodeURIComponent(m[1]);
+            // Zakres `calendar.app.created` nie daje dostępu do głównego kalendarza użytkownika.
+            if (calId === 'primary') return fail(res, 403, 'Request had insufficient authentication scopes.', 'insufficientPermissions');
+            const cal = calendars.get(calId);
+            if (!cal) return fail(res, 404, 'Not Found', 'notFound');
+            const isEvents = p.includes('/events');
+            const eventId = m[2] ? decodeURIComponent(m[2]) : null;
+
+            if (!isEvents && method === 'GET') return send(res, 200, { id: cal.id, summary: cal.summary, timeZone: cal.timeZone });
+
+            const instant = (t) => (t.dateTime ? Date.parse(t.dateTime) : Date.parse(t.date + 'T00:00:00Z'));
+            const validate = (ev) => {
+                for (const side of ['start', 'end']) {
+                    const t = ev[side];
+                    if (!t || (!t.dateTime && !t.date)) throw new Error('Missing ' + side + ' time.');
+                    if (t.dateTime && isNaN(Date.parse(t.dateTime))) throw new Error('Invalid ' + side + '.dateTime');
+                    if (t.date && !/^\d{4}-\d{2}-\d{2}$/.test(t.date)) throw new Error('Invalid ' + side + '.date');
+                }
+                if (!!ev.start.date !== !!ev.end.date) throw new Error('Start and end must both be all-day or both timed.');
+                if (!(instant(ev.end) > instant(ev.start))) throw new Error('The specified time range is empty.');
+            };
+
+            if (isEvents && !eventId && method === 'GET') {
+                const from = Date.parse(url.searchParams.get('timeMin'));
+                const to = Date.parse(url.searchParams.get('timeMax'));
+                const items = Array.from(cal.events.values())
+                    .filter((ev) => instant(ev.end) > from && instant(ev.start) < to)
+                    .sort((a, b) => instant(a.start) - instant(b.start));
+                return send(res, 200, { kind: 'calendar#events', items });
+            }
+            if (isEvents && !eventId && method === 'POST') {
+                const ev = Object.assign({ status: 'confirmed' }, json(), { id: 'ev' + (nextId++) });
+                try { validate(ev); } catch (e) { return fail(res, 400, e.message); }
+                cal.events.set(ev.id, ev);
+                return send(res, 200, ev);
+            }
+            if (isEvents && eventId) {
+                const ev = cal.events.get(eventId);
+                if (!ev) return fail(res, 404, 'Not Found', 'notFound');
+                if (method === 'GET') return send(res, 200, ev);
+                if (method === 'DELETE') { cal.events.delete(eventId); return send(res, 204, null); }
+                if (method === 'PATCH') {
+                    const body = json();
+                    const next = Object.assign({}, ev, body);
+                    if (body.extendedProperties && body.extendedProperties.private) {
+                        next.extendedProperties = {
+                            private: Object.assign({}, (ev.extendedProperties || {}).private, body.extendedProperties.private)
+                        };
+                    }
+                    try { validate(next); } catch (e) { return fail(res, 400, e.message); }
+                    cal.events.set(eventId, next);
+                    return send(res, 200, next);
+                }
+            }
+        }
+
         return fail(res, 404, 'Atrapa nie obsługuje: ' + method + ' ' + p, 'notFound');
     }
 
@@ -253,6 +333,10 @@ export function createGoogleMock({ token = 'test-token' } = {}) {
         // ---- narzędzia testu ----
         files,
         calls,
+        calendars,
+        setPrimaryBusy(list) { primaryBusy = list; },
+        /** Wszystkie wydarzenia jedynego kalendarza aplikacji. */
+        events() { const c = Array.from(calendars.values())[0]; return c ? Array.from(c.events.values()) : []; },
         failNext(...statuses) { failQueue = failQueue.concat(statuses); },
         setOffline(v) { offline = !!v; },
         find(predicate) { return Array.from(files.values()).filter((f) => !f.trashed).filter(predicate); },
