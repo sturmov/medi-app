@@ -329,6 +329,32 @@ async function scenarioDemo(origin) {
                 'notatka z 10 wpisami mieści się na ekranie z zapasem (' + r.noteHeight + ' z ' + r.windowHeight + ' px)');
         });
 
+        await step('edycja „Danych wizyty": pola wyboru mają zwykły rozmiar i stoją obok swoich podpisów', async () => {
+            await b.click(`__t.ent('visitData::__grid')`);
+            await waitFor(b, `__t.mode('visitData::__grid') === 'edit'`);
+            const r = await b.evaluate(`
+                const boxes = (uid) => [...__t.ent(uid).querySelectorAll('label')]
+                    .filter((l) => l.querySelector('input[type="checkbox"]'))
+                    .map((l) => {
+                        const i = l.querySelector('input').getBoundingClientRect();
+                        const s = l.querySelector('span').getBoundingClientRect();
+                        return { text: l.innerText.trim(), width: Math.round(i.width), beforeText: i.right <= s.left + 1 };
+                    });
+                const grid = boxes('visitData::__grid');
+                const date = __t.ctl('visitData::__grid', 'input[type="date"]').getBoundingClientRect();
+                const cell = __t.ctl('visitData::__grid', 'input[type="date"]').closest('.psy-vf__compact-grid-cell').getBoundingClientRect();
+                return { grid, dateFillsCell: date.width > cell.width - 4 };`);
+            assert.equal(r.grid.length, 8, 'osoby obecne: ' + r.grid.map((x) => x.text).join(', '));
+            for (const x of r.grid) {
+                assert.ok(x.width <= 22, x.text + ': pole wyboru ma ' + x.width + ' px szerokości');
+                assert.equal(x.beforeText, true, x.text + ': pole wyboru nachodzi na podpis');
+            }
+            assert.equal(r.dateFillsCell, true, 'pola tekstowe nadal wypełniają komórkę');
+            await b.screenshot(path.join(SHOTS, 'demo-11-dane-wizyty-edycja.png'));
+            await b.key('Escape');
+            await waitFor(b, `__t.mode('visitData::__grid') === 'read'`);
+        });
+
         await step('mały ekran (1366×768): formularz do dołu okna, nagłówek w jednej linii, menu boczne z napisów', async () => {
             const r = await b.evaluate(`
                 const box = (n) => { const x = n.getBoundingClientRect(); return { top: Math.round(x.top), bottom: Math.round(x.bottom), h: Math.round(x.height) }; };

@@ -53,9 +53,11 @@
     gap: 6px;
 }
 
-.psy-vf__compact-grid-input-row input,
+/* Pola tekstowe wypełniają komórkę. Pola wyboru i radio — NIE: rozciągnięte na całą
+   szerokość etykiety rozpychały „Osoby obecne" i nachodziły na swoje podpisy. */
+.psy-vf__compact-grid-input-row input:not([type="checkbox"]):not([type="radio"]),
 .psy-vf__compact-grid-input-row select,
-.psy-vf__compact-grid-input input,
+.psy-vf__compact-grid-input input:not([type="checkbox"]):not([type="radio"]),
 .psy-vf__compact-grid-input select,
 .psy-vf__compact-grid-input textarea {
     width: 100%;
