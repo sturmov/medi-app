@@ -26,7 +26,7 @@ import { Store } from './_store.js';
 import { el, toast } from './_dom.js';
 import { openConfirm } from './_modal.js';
 import { VISIT_TYPES, visitTypeLabel } from './_visit-types.js';
-import { getCalendarApi, appointmentTitle } from './_calendar-api.js';
+import { getCalendarApi, appointmentTitle, CALENDAR_NAME } from './_calendar-api.js';
 import { holidaysBetween } from './_holidays-pl.js';
 
 const DEFAULT_MINUTES = 50;
@@ -89,12 +89,9 @@ export function renderCalendar(opts = {}) {
 
     /* ---------------- nagłówek ---------------- */
     const summaryEl = el('div', { class: 'psy-new-view__subtitle' }, [
-        patient
-            ? patientName(patient) + ' · terminy tego pacjenta'
-            : (api.kind === 'google'
-                ? 'Terminy z kalendarza Google „PsychoApp — wizyty"'
-                : 'Terminy zapisane w tej przeglądarce (bez połączenia z Dyskiem Google)')
+        patient ? patientName(patient) + ' · terminy tego pacjenta' : ''
     ]);
+    if (!patient) renderHomeSummary();
     root.appendChild(el('div', { class: 'psy-new-view__header' }, [
         el('div', {}, [
             patient ? el('h1', { class: 'psy-new-view__title' }, ['Kalendarz']) : renderHomeTabs('calendar'),
@@ -137,6 +134,75 @@ export function renderCalendar(opts = {}) {
     }
     function clearNotice() { noticeEl.style.display = 'none'; }
 
+    /* ---------------- zgody Google ---------------- */
+    function ready() { return api.status() === 'ready'; }
+    let enableProblem = '';     // co poszło nie tak przy ostatniej próbie włączenia kalendarza
+
+    /**
+     * Kalendarz Google nie jest jeszcze włączony. Jedno kliknięcie = jedno okienko
+     * Google z jedną zgodą (bez pól wyboru, które można przeoczyć).
+     */
+    function showEnableNotice() {
+        const btn = el('button', { class: 'btn btn--primary btn--sm', dataset: { action: 'enable-calendar' } },
+            ['Włącz Kalendarz Google']);
+        btn.addEventListener('click', async () => {
+            btn.disabled = true;
+            try {
+                if (await api.requestPermission()) {
+                    enableProblem = '';
+                    clearNotice();
+                    renderHomeSummary();
+                    cal.refetchEvents();
+                    toast('success', 'Kalendarz Google włączony', 'Terminy zapisują się w kalendarzu „' + CALENDAR_NAME + '".');
+                    return;
+                }
+                enableProblem = 'Google nie przyznał zgody. W okienku Google wybierz „Dalej" / „Zezwól" — spróbuj jeszcze raz.';
+            } catch (e) {
+                enableProblem = String(e && e.message || e);
+            }
+            if (!destroyed) showEnableNotice();
+        });
+        showNotice('warning', [
+            el('div', { class: 'psy-cal__notice-text' }, [
+                el('strong', {}, ['Kalendarz Google nie jest jeszcze włączony. ']),
+                'Po kliknięciu Google zapyta o jedną zgodę: na własny kalendarz aplikacji „' + CALENDAR_NAME
+                    + '". Pozostałych kalendarzy aplikacja nie zobaczy.',
+                enableProblem ? el('div', { class: 'psy-cal__notice-problem' }, [enableProblem]) : null
+            ]),
+            btn
+        ]);
+    }
+
+    /**
+     * Podtytuł strony głównej. Przy kalendarzu Google także (nieobowiązkowe)
+     * włączenie „zajętych" z głównego kalendarza — to osobna zgoda.
+     */
+    function renderHomeSummary() {
+        if (patient) return;
+        summaryEl.innerHTML = '';
+        summaryEl.appendChild(document.createTextNode(api.kind === 'google'
+            ? 'Terminy z kalendarza Google „' + CALENDAR_NAME + '"'
+            : 'Terminy zapisane w tej przeglądarce (bez połączenia z Dyskiem Google)'));
+        if (api.kind !== 'google' || !ready() || api.busyStatus() !== 'no-permission') return;
+        summaryEl.appendChild(document.createTextNode(' · '));
+        summaryEl.appendChild(el('button', {
+            type: 'button', class: 'psy-cal__link', dataset: { action: 'enable-busy' },
+            title: 'Google zapyta o zgodę na odczyt samej zajętości głównego kalendarza — bez tytułów i szczegółów.',
+            onclick: async () => {
+                try {
+                    if (await api.requestBusyPermission()) {
+                        renderHomeSummary();
+                        cal.refetchEvents();
+                    } else {
+                        toast('warning', 'Bez zmian', 'Google nie przyznał zgody na odczyt zajętości.');
+                    }
+                } catch (e) {
+                    toast('warning', 'Nie udało się uzyskać zgody', String(e && e.message || e));
+                }
+            }
+        }, ['pokaż też moje prywatne terminy jako „zajęte"']));
+    }
+
     /* ---------------- zdarzenia na kalendarzu ---------------- */
     function toCalendarEvent(a) {
         const ownVisit = a.kind === 'visit' && (!patient || a.patientId === patient.id);
@@ -178,6 +244,14 @@ export function renderCalendar(opts = {}) {
             (events) => { if (!destroyed) success(events); },
             (e) => {
                 if (destroyed) return;
+                if (!ready()) {
+                    // Google odpowiedział, że token nie obejmuje kalendarza — prosimy o zgodę zamiast straszyć błędem.
+                    loaded = [];
+                    enableProblem = String(e && e.message || e);
+                    showEnableNotice();
+                    success(holidayEvents(info));
+                    return;
+                }
                 console.error('[calendar] wczytywanie terminów', e);
                 showNotice('error', [
                     'Nie udało się wczytać terminów: ' + String(e && e.message || e) + ' ',
@@ -189,21 +263,9 @@ export function renderCalendar(opts = {}) {
     }
 
     async function loadEvents(info) {
-        if (api.status() !== 'ready') {
+        if (!ready()) {
             loaded = [];
-            showNotice('warning', [
-                'Aplikacja nie ma zgody na Kalendarz Google, więc nie może pokazać ani zapisać terminów. ',
-                el('button', {
-                    class: 'btn btn--primary btn--sm',
-                    onclick: async () => {
-                        try {
-                            if (await api.requestPermission()) { clearNotice(); cal.refetchEvents(); }
-                        } catch (e) {
-                            toast('warning', 'Nie udało się uzyskać zgody', String(e && e.message || e));
-                        }
-                    }
-                }, ['Nadaj dostęp'])
-            ]);
+            showEnableNotice();
             return holidayEvents(info);
         }
         const [appointments, busy] = await Promise.all([
@@ -213,7 +275,7 @@ export function renderCalendar(opts = {}) {
         if (destroyed) return [];
         loaded = appointments;
         clearNotice();
-        if (patient) refreshPatientSummary();
+        if (patient) refreshPatientSummary(); else renderHomeSummary();
         return [
             ...appointments.map(toCalendarEvent),
             ...busy.map((b, i) => ({
@@ -315,6 +377,11 @@ export function renderCalendar(opts = {}) {
     }
 
     function openPanel(source) {
+        if (!ready()) {
+            if (cal) cal.unselect();
+            toast('warning', 'Najpierw włącz Kalendarz Google', 'Przycisk jest nad kalendarzem.');
+            return;
+        }
         const existing = !!source.id;
         const startDate = source.allDay ? fromLocal(String(source.start).slice(0, 10), '09:00') : new Date(source.start);
         const endDate = source.allDay ? addMinutes(startDate, DEFAULT_MINUTES) : new Date(source.end);

@@ -95,8 +95,32 @@ function fromGoogleEvent(ev) {
     };
 }
 
+/**
+ * Wywołanie API kalendarza. Dwa błędy 403 nazywamy po ludzku, bo terapeuta może
+ * coś z nimi zrobić: token bez zgody (widok poprosi o nią przyciskiem) oraz API
+ * niewłączone w projekcie Google (sprawa dla administratora).
+ */
+async function calendarCall(scope, method, url, opts) {
+    try {
+        return await googleCall(method, url, opts);
+    } catch (e) {
+        if (e && e.status === 403) {
+            const text = (e.reason || '') + ' ' + (e.message || '');
+            if (/insufficientPermissions|ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient authentication scopes/i.test(text)) {
+                googleAuth.dropScope(scope);
+                e.message = 'Google nie udzielił aplikacji zgody na kalendarz.';
+            } else if (/accessNotConfigured|SERVICE_DISABLED|has not been used in project|is disabled/i.test(text)) {
+                e.message = 'W projekcie Google tej aplikacji nie jest włączone „Google Calendar API" '
+                    + '(konsola Google Cloud → Interfejsy API i usługi → Biblioteka).';
+            }
+        }
+        throw e;
+    }
+}
+
 function createGoogleCalendarApi() {
     const E = googleEndpoints();
+    const call = (method, url, opts) => calendarCall(GOOGLE_SCOPES.calendar, method, url, opts);
     let calendarId = null;
     let ensuring = null;
 
@@ -108,14 +132,14 @@ function createGoogleCalendarApi() {
                 const saved = await Store.getSetting('calendarId');
                 if (saved) {
                     try {
-                        await googleCall('GET', E.calendar + '/calendars/' + encodeURIComponent(saved));
+                        await call('GET', E.calendar + '/calendars/' + encodeURIComponent(saved));
                         calendarId = saved;
                         return calendarId;
                     } catch (e) {
                         if (e.status !== 404 && e.status !== 410) throw e;
                     }
                 }
-                const created = await googleCall('POST', E.calendar + '/calendars', {
+                const created = await call('POST', E.calendar + '/calendars', {
                     json: {
                         summary: CALENDAR_NAME,
                         description: 'Terminy wizyt z aplikacji PsychoApp. Zmiany godzin zrobione tutaj pojawią się w aplikacji.',
@@ -135,15 +159,20 @@ function createGoogleCalendarApi() {
 
     return {
         kind: 'google',
-        /** 'ready' | 'no-permission' (użytkownik nie zaznaczył zgody na kalendarz) */
+        /** 'ready' | 'no-permission' (kalendarz nie został jeszcze włączony na tym koncie Google) */
         status() {
             return googleAuth.hasScope(GOOGLE_SCOPES.calendar) ? 'ready' : 'no-permission';
         },
-        /** Ponowne okienko Google — żeby użytkownik mógł dodać brakującą zgodę. */
-        async requestPermission() {
-            googleAuth.invalidate();
-            await googleAuth.getToken();
-            return this.status() === 'ready';
+        /** Okienko Google z prośbą o tę jedną zgodę (wywołać z kliknięcia). → czy przyznano */
+        requestPermission() {
+            return googleAuth.enable(GOOGLE_SCOPES.calendar);
+        },
+        /** „Zajęte" z głównego kalendarza to osobna, nieobowiązkowa zgoda: 'ready' | 'no-permission' */
+        busyStatus() {
+            return googleAuth.hasScope(GOOGLE_SCOPES.freebusy) ? 'ready' : 'no-permission';
+        },
+        requestBusyPermission() {
+            return googleAuth.enable(GOOGLE_SCOPES.freebusy);
         },
 
         async list(fromISO, toISO) {
@@ -154,7 +183,7 @@ function createGoogleCalendarApi() {
                     + '&timeMin=' + encodeURIComponent(new Date(fromISO).toISOString())
                     + '&timeMax=' + encodeURIComponent(new Date(toISO).toISOString())
                     + (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
-                const page = await googleCall('GET', await eventsUrl(q));
+                const page = await call('GET', await eventsUrl(q));
                 for (const ev of (page.items || [])) {
                     if (ev.status !== 'cancelled' && ev.start && ev.end) out.push(fromGoogleEvent(ev));
                 }
@@ -164,21 +193,21 @@ function createGoogleCalendarApi() {
         },
 
         async get(id) {
-            const ev = await googleCall('GET', await eventsUrl('/' + encodeURIComponent(id)));
+            const ev = await call('GET', await eventsUrl('/' + encodeURIComponent(id)));
             return ev && ev.status !== 'cancelled' ? fromGoogleEvent(ev) : null;
         },
 
         async save(a) {
             const body = toGoogleEvent(a);
             const ev = a.id
-                ? await googleCall('PATCH', await eventsUrl('/' + encodeURIComponent(a.id)), { json: body })
-                : await googleCall('POST', await eventsUrl(), { json: body });
+                ? await call('PATCH', await eventsUrl('/' + encodeURIComponent(a.id)), { json: body })
+                : await call('POST', await eventsUrl(), { json: body });
             return fromGoogleEvent(ev);
         },
 
         async remove(id) {
             try {
-                await googleCall('DELETE', await eventsUrl('/' + encodeURIComponent(id)));
+                await call('DELETE', await eventsUrl('/' + encodeURIComponent(id)));
             } catch (e) {
                 if (e.status !== 404 && e.status !== 410) throw e;      // już usunięte
             }
@@ -188,7 +217,7 @@ function createGoogleCalendarApi() {
         async busy(fromISO, toISO) {
             if (!googleAuth.hasScope(GOOGLE_SCOPES.freebusy)) return [];
             try {
-                const r = await googleCall('POST', E.calendar + '/freeBusy', {
+                const r = await calendarCall(GOOGLE_SCOPES.freebusy, 'POST', E.calendar + '/freeBusy', {
                     json: {
                         timeMin: new Date(fromISO).toISOString(),
                         timeMax: new Date(toISO).toISOString(),
@@ -222,6 +251,8 @@ function createLocalCalendarApi() {
         kind: 'local',
         status: () => 'ready',
         async requestPermission() { return true; },
+        busyStatus: () => 'unavailable',        // bez konta Google nie ma głównego kalendarza
+        async requestBusyPermission() { return false; },
         async list(fromISO, toISO) {
             const from = new Date(fromISO).getTime();
             const to = new Date(toISO).getTime();

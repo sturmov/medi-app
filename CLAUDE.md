@@ -61,7 +61,7 @@ An appointment is not a visit note. The calendar holds the schedule (who, when, 
 
 - **With Google Drive connected:** appointments are events in a separate Google calendar, "PsychoApp — wizyty", created by the app. App data sits in the event's `extendedProperties.private`; the event title carries name, visit type, phone and payment so it reads well on a phone. Events added or moved in Google Calendar itself show up in the app.
 - **Demo / local folder:** appointments are kept in this browser only.
-- **Busy blocks:** the therapist's main calendar is queried for free/busy only, never titles.
+- **Busy blocks:** the therapist's main calendar is queried for free/busy only, never titles. This is a separate, optional permission, switched on from a link above the calendar or in Settings.
 - **Holidays** are computed in code, not read from Google.
 - On a patient's calendar, everything except that patient's appointments is drawn as background, so the list view shows only their appointments.
 
@@ -73,11 +73,22 @@ The OAuth client ID is in `js/views/_config.js` and can be overridden in Setting
 
 1. Enable **Google Drive API**, **Google Sheets API** and **Google Calendar API**.
 2. OAuth client (type "Web application") → **Authorized JavaScript origins**: `https://sturmov.github.io` and, for local testing, `http://localhost:8123`.
-3. Data access (scopes), all requested in one sign-in; only the first is required for the app to work:
+3. Data access (scopes). Only the first is required for the app to work:
    - `…/auth/drive.file`: only files the app created.
    - `…/auth/calendar.app.created`: only the calendar the app created (Google lists it as non-sensitive).
    - `…/auth/calendar.freebusy`: busy/free times of the main calendar.
 4. The consent screen is in production. With these scopes no Google review has been needed.
+
+### Permissions are asked for one at a time
+
+When several scopes are requested together, Google shows a checkbox per scope and leaves them unticked, so a therapist who just clicks "Continue" ends up without the calendar. `_google-auth.js` therefore never asks for two new permissions in one popup:
+
+- Connecting asks for Drive only.
+- "Włącz Kalendarz Google" (above the calendar, or in Settings) asks for `calendar.app.created` only; the free/busy link asks for `calendar.freebusy` only. The token Google returns also covers what was granted earlier (`include_granted_scopes`).
+- The names of granted optional scopes are remembered in `localStorage` (`psy-new:googleExtras`, no token), so later sign-ins request them together and Google has nothing left to ask. On a new device the first Drive token already carries them.
+- A 403 "insufficient scopes" from the Calendar API brings back the enable button instead of an error. A 403 "API not enabled" is reported in plain words.
+
+Settings shows which permissions the current token has. That, and the `[google] zgody: …` line in the browser console, are the first things to check when a therapist reports that the calendar does not work.
 
 ## Product decisions in force
 

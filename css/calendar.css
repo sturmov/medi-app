@@ -58,6 +58,8 @@
     gap: 10px;
     flex-wrap: wrap;
 }
+.psy-cal__notice-text { flex: 1; min-width: 260px; }
+.psy-cal__notice-problem { margin-top: 3px; font-weight: 600; }
 .psy-cal__notice--warning { background: #FFFBEB; border: 1px solid #FCD34D; color: #78350F; }
 .psy-cal__notice--error   { background: #FEF2F2; border: 1px solid #FCA5A5; color: #7F1D1D; }
 
@@ -145,6 +147,16 @@
     --fc-border-color: #E5E7EB;
     --fc-now-indicator-color: #DC2626;
 }
+/* style.css maluje każdą tabelę w paski i podświetla wiersz pod kursorem. Siatka
+   kalendarza też jest tabelą (cały tydzień to jeden wiersz), więc bez tego szarzał
+   co drugi wiersz godzin, a pod kursorem — wszystkie dni naraz. */
+.psy-cal__host .fc tbody tr,
+.psy-cal__host .fc tbody tr:nth-child(even),
+.psy-cal__host .fc tbody tr:hover { background-color: transparent; }
+/* tylko pełne godziny odróżniamy delikatną linią od połówek */
+.psy-cal__host .fc .fc-timegrid-slot-minor { border-top-color: #F1F5F9; }
+/* widok miesiąca: podświetla się wyłącznie dzień pod kursorem */
+.psy-cal__host .fc .fc-daygrid-day:hover .fc-daygrid-day-frame { box-shadow: inset 0 0 0 2px #BFDBFE; }
 .psy-cal__host .fc-toolbar.fc-header-toolbar { margin-bottom: 8px; }
 .psy-cal__host .fc-toolbar-title { font-size: 15px; font-weight: 700; color: #0F172A; }
 .psy-cal__host .fc-button {

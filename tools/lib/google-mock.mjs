@@ -160,7 +160,18 @@ export function createGoogleMock({ token = 'test-token' } = {}) {
             const status = failQueue.shift();
             return fail(res, status, 'Wymuszony błąd testowy', status === 429 ? 'rateLimitExceeded' : 'backendError');
         }
-        if (req.headers.authorization !== 'Bearer ' + token) return fail(res, 401, 'Invalid Credentials', 'authError');
+        // Token testowy może nieść listę zgód: „test-token:drive.file,calendar.app.created".
+        // Wtedy atrapa, jak Google, odmawia (403) wywołań spoza tych zgód.
+        const bearer = String(req.headers.authorization || '');
+        if (bearer !== 'Bearer ' + token && !bearer.startsWith('Bearer ' + token + ':')) {
+            return fail(res, 401, 'Invalid Credentials', 'authError');
+        }
+        const scopes = bearer.includes(':') ? bearer.slice(bearer.indexOf(':') + 1).split(',').filter(Boolean) : null;
+        const needs = p === '/calendar/v3/freeBusy' ? 'calendar.freebusy'
+            : (p.startsWith('/calendar/') ? 'calendar.app.created' : 'drive.file');
+        if (scopes && !scopes.includes(needs)) {
+            return fail(res, 403, 'Request had insufficient authentication scopes.', 'insufficientPermissions');
+        }
 
         const chunks = [];
         for await (const c of req) chunks.push(c);

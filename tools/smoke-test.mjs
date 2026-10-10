@@ -71,6 +71,42 @@ window.__t = {
     appointments: async () => (await window.__t.calApi()).list('2020-01-01T00:00:00Z', '2035-01-01T00:00:00Z')
 };`;
 
+const SCOPE = {
+    drive: 'https://www.googleapis.com/auth/drive.file',
+    calendar: 'https://www.googleapis.com/auth/calendar.app.created',
+    busy: 'https://www.googleapis.com/auth/calendar.freebusy'
+};
+
+/**
+ * „Konto Google" dla scenariusza z atrapą API: pamięta udzielone zgody (także po
+ * odświeżeniu strony — jak prawdziwe konto) i wydaje token niosący ich listę,
+ * żeby atrapa mogła odmówić wywołań spoza zgód.
+ */
+const GOOGLE_ACCOUNT_MODEL = `
+window.__PSY_TEST_GDRIVE__ = {
+    base: location.origin + '/__gapi',
+    token: 'test-token',
+    deny: [],            // zgody, których „użytkownik" nie zatwierdzi w okienku Google
+    incremental: true,   // false: token obejmuje tylko to, o co poproszono (bez wcześniejszych zgód)
+    hideFromToken: [],   // zgody zgłoszone jako udzielone, których token faktycznie nie ma
+    asked: [],           // dziennik próśb: { requested, consent }
+    account() { return new Set(JSON.parse(sessionStorage.getItem('__psy_test_google_account') || '[]')); },
+    revoke(scope) {
+        const a = this.account();
+        a.delete(scope);
+        sessionStorage.setItem('__psy_test_google_account', JSON.stringify([...a]));
+    },
+    grant(requested, opts) {
+        const a = this.account();
+        for (const s of requested) if (!this.deny.includes(s)) a.add(s);
+        sessionStorage.setItem('__psy_test_google_account', JSON.stringify([...a]));
+        const covered = this.incremental ? [...a] : requested.filter((s) => a.has(s));
+        this.token = 'test-token:' + covered.filter((s) => !this.hideFromToken.includes(s)).map((s) => s.split('/').pop()).join(',');
+        this.asked.push({ requested, consent: !!(opts && opts.consent) });
+        return covered;
+    }
+};`;
+
 /** Środa przyszłego tygodnia (zawsze w przyszłości, więc „najbliższy termin" jest przewidywalny). */
 function nextWeekWednesday() {
     const d = new Date();
@@ -507,9 +543,11 @@ async function scenarioGDrive(origin, mock) {
     const sheet = () => mock.spreadsheets()[0];
     const idle = `window.PsyStore && !PsyStore.hasUnsavedChanges() && PsyStore.state.saveStatus !== 'saving'`;
     try {
-        await b.onNewDocument(`window.__PSY_TEST_GDRIVE__ = { base: location.origin + '/__gapi', token: 'test-token' }; ${PAGE_HELPERS}`);
+        await b.onNewDocument(`${GOOGLE_ACCOUNT_MODEL} ${PAGE_HELPERS}`);
         await b.navigate(origin + '/index.html');
         await waitFor(b, `document.querySelector('.psy-folder-gate__btn--primary')`, 8000, 'ekran startowy');
+        const asked = () => b.evaluate(`return window.__PSY_TEST_GDRIVE__.asked;`);
+        const lastAsked = async () => (await asked()).slice(-1)[0];
 
         await step('ekran startowy → połączenie; na Dysku powstaje folder „pacjenci"', async () => {
             assert.match(await b.evaluate(`return document.querySelector('.psy-folder-gate__btn--primary').innerText;`), /Połącz z Dyskiem Google/);
@@ -525,6 +563,8 @@ async function scenarioGDrive(origin, mock) {
             assert.match(r.badge, /Dysk Google/);
             assert.equal(r.n, 0, 'po połączeniu nie ma danych demo');
             assert.match(r.main, /Dodaj pierwszego pacjenta/);
+            assert.deepEqual(await asked(), [{ requested: [SCOPE.drive], consent: false }],
+                'przy łączeniu Google pyta o jedną zgodę: Dysk');
         });
 
         await step('nowy pacjent → jeden folder i jeden arkusz z czytelnymi zakładkami', async () => {
@@ -583,17 +623,60 @@ async function scenarioGDrive(origin, mock) {
         });
 
         const day = nextWeekWednesday();
-        await step('Kalendarz Google: osobny kalendarz aplikacji, termin z danymi pacjenta, prywatne terminy jako „zajęte"', async () => {
-            const at = (h) => new Date(day + 'T' + String(h).padStart(2, '0') + ':00:00');
-            mock.setPrimaryBusy([{ start: at(16).toISOString(), end: at(17).toISOString() }]);
+        const at = (h) => new Date(day + 'T' + String(h).padStart(2, '0') + ':00:00');
+        const noticeText = `(document.querySelector('.psy-cal__notice').style.display === 'none' ? '' : document.querySelector('.psy-cal__notice').innerText)`;
+        const panelOpen = `document.querySelector('.psy-cal__panel').style.display !== 'none'`;
+
+        await step('Kalendarz Google włącza się osobnym kliknięciem (jedna zgoda); odmowa w okienku Google niczego nie psuje', async () => {
             await openCalendar(b, '#/calendar', day);
+            await waitFor(b, `${noticeText}.includes('nie jest jeszcze włączony')`, 6000, 'zachęta do włączenia kalendarza');
+            assert.ok(!mock.calls.some((c) => c.includes('/calendar/')), 'bez zgody aplikacja nie woła API kalendarza');
+            await b.screenshot(path.join(SHOTS, 'gdrive-05-wlacz-kalendarz.png'));
+
+            await b.click('[data-action="book"]');
+            await sleep(300);
+            assert.equal(await b.evaluate(`return ${panelOpen};`), false, 'bez kalendarza nie da się umawiać');
+
+            // użytkownik zamyka okienko Google bez zgody
+            await b.evaluate(`window.__PSY_TEST_GDRIVE__.deny = [${JSON.stringify(SCOPE.calendar)}];`);
+            await b.click('[data-action="enable-calendar"]');
+            await waitFor(b, `${noticeText}.includes('Google nie przyznał zgody')`, 6000, 'informacja o odmowie');
+            assert.deepEqual(await lastAsked(), { requested: [SCOPE.calendar], consent: false }, 'prośba tylko o kalendarz');
+            assert.equal(mock.calendars.size, 0);
+            assert.equal(await b.evaluate(`return PsyStore.state.storageStatus;`), 'connected', 'Dysk działa dalej');
+
+            // druga próba: aplikacja wymusza ekran zgody; tym razem użytkownik się zgadza
+            await b.evaluate(`window.__PSY_TEST_GDRIVE__.deny = [];`);
+            await b.click('[data-action="enable-calendar"]');
+            await waitFor(b, `${noticeText} === ''`, 8000, 'zachęta znika po włączeniu');
+            assert.deepEqual(await lastAsked(), { requested: [SCOPE.calendar], consent: true });
+            await waitFor(b, `document.querySelector('[data-action="enable-busy"]')`, 6000, 'propozycja pokazania „zajętych"');
+            // kalendarz zakłada się przy pierwszym wczytaniu terminów — czekamy, aż aplikacja zapisze jego identyfikator
+            const root = () => mock.find((f) => f.appProperties.psyKind === 'root')[0];
+            for (let i = 0; i < 60 && !root().appProperties.cfg_calendarId; i++) await sleep(100);
             assert.equal(mock.calendars.size, 1, 'jeden kalendarz aplikacji');
             const cal = Array.from(mock.calendars.values())[0];
             assert.equal(cal.summary, 'PsychoApp — wizyty');
-            const root = mock.find((f) => f.appProperties.psyKind === 'root')[0];
-            assert.equal(root.appProperties.cfg_calendarId, cal.id, 'identyfikator kalendarza zapamiętany na Dysku');
-            await waitFor(b, `document.querySelector('.psy-cal__host .psy-cal-busy')`, 6000, 'prywatny termin jako „zajęte"');
+            assert.equal(root().appProperties.cfg_calendarId, cal.id, 'identyfikator kalendarza zapamiętany na Dysku');
+        });
 
+        await step('„zajęte" z głównego kalendarza to osobna, nieobowiązkowa zgoda', async () => {
+            mock.setPrimaryBusy([{ start: at(16).toISOString(), end: at(17).toISOString() }]);
+            await openCalendar(b, '#/calendar', day);
+            await waitFor(b, `document.querySelector('[data-action="enable-busy"]')`, 6000, 'link do włączenia „zajętych"');
+            assert.ok(!mock.calls.some((c) => c.includes('/freeBusy')), 'bez zgody aplikacja nie pyta o zajętość');
+            assert.equal(await b.evaluate(`return document.querySelectorAll('.psy-cal__host .psy-cal-busy').length;`), 0);
+
+            await b.click('[data-action="enable-busy"]');
+            await waitFor(b, `document.querySelector('.psy-cal__host .psy-cal-busy')`, 6000, 'prywatny termin jako „zajęte"');
+            assert.deepEqual(await lastAsked(), { requested: [SCOPE.busy], consent: false }, 'prośba tylko o zajętość');
+            assert.equal(await b.evaluate(`return !!document.querySelector('[data-action="enable-busy"]');`), false, 'link znika');
+            assert.equal(await b.evaluate(`return localStorage.getItem('psy-new:googleExtras');`), SCOPE.calendar + ' ' + SCOPE.busy,
+                'przeglądarka pamięta włączone zgody (same nazwy, bez tokenu)');
+        });
+
+        await step('Kalendarz Google: termin z danymi pacjenta w osobnym kalendarzu aplikacji', async () => {
+            await openCalendar(b, '#/calendar', day);
             await b.click('[data-action="book"]');
             await b.click('input[name="cal-patient-search"]');
             await b.type('kowal');
@@ -611,14 +694,43 @@ async function scenarioGDrive(origin, mock) {
             await b.screenshot(path.join(SHOTS, 'gdrive-04-kalendarz.png'));
         });
 
-        await step('bez zgody na kalendarz reszta aplikacji działa, a kalendarz prosi o dostęp', async () => {
-            await b.evaluate(`window.__PSY_TEST_GDRIVE__.scopes = ['https://www.googleapis.com/auth/drive.file']; await PsyStore.reconnectStorage();`);
+        await step('zgoda na kalendarz cofnięta w koncie Google: reszta działa, kalendarz prosi o włączenie; token tylko na nową zgodę też wystarcza', async () => {
+            // Konto nie ma już zgody na kalendarz, a przy logowaniu użytkownik jej nie przywraca.
+            await b.evaluate(`
+                const g = window.__PSY_TEST_GDRIVE__;
+                g.revoke(${JSON.stringify(SCOPE.calendar)});
+                g.deny = [${JSON.stringify(SCOPE.calendar)}];
+                await PsyStore.reconnectStorage();`);
+            assert.deepEqual((await lastAsked()).requested, [SCOPE.drive, SCOPE.calendar, SCOPE.busy], 'logowanie prosi o zapamiętane zgody');
             await openCalendar(b, '#/calendar', day);
-            await waitFor(b, `document.querySelector('.psy-cal__notice').innerText.includes('nie ma zgody')`, 6000, 'prośba o zgodę');
+            await waitFor(b, `${noticeText}.includes('nie jest jeszcze włączony')`, 6000, 'zachęta do włączenia');
             assert.equal(await b.evaluate(`return document.querySelectorAll('.psy-cal-ev--unpaid').length;`), 0);
-            await b.evaluate(`delete window.__PSY_TEST_GDRIVE__.scopes;`);
-            await b.click('.psy-cal__notice .btn');
-            await waitFor(b, `document.querySelector('.psy-cal-ev--unpaid')`, 8000, 'terminy po nadaniu dostępu');
+            assert.equal(await b.evaluate(`return localStorage.getItem('psy-new:googleExtras');`), SCOPE.busy,
+                'o cofniętą zgodę aplikacja nie prosi już przy każdym logowaniu');
+            assert.equal(await b.evaluate(`return PsyStore.state.storageStatus;`), 'connected');
+
+            // Google odpowiada tokenem tylko na nową zgodę → aplikacja sama dobiera pełny.
+            await b.evaluate(`const g = window.__PSY_TEST_GDRIVE__; g.deny = []; g.incremental = false;`);
+            await b.click('[data-action="enable-calendar"]');
+            await waitFor(b, `document.querySelector('.psy-cal-ev--unpaid')`, 8000, 'terminy po włączeniu');
+            assert.deepEqual((await asked()).slice(-2).map((a) => a.requested),
+                [[SCOPE.calendar], [SCOPE.drive, SCOPE.calendar, SCOPE.busy]]);
+            await b.evaluate(`window.__PSY_TEST_GDRIVE__.incremental = true;`);
+            assert.equal(mock.calendars.size, 1, 'ten sam kalendarz aplikacji (bez duplikatu)');
+        });
+
+        await step('token bez zgody, o której aplikacja myśli, że ją ma (403 z Google) → prośba o włączenie zamiast błędu', async () => {
+            await b.evaluate(`
+                const g = window.__PSY_TEST_GDRIVE__;
+                g.hideFromToken = [${JSON.stringify(SCOPE.calendar)}];
+                await PsyStore.reconnectStorage();`);
+            await openCalendar(b, '#/calendar', day);
+            await waitFor(b, `${noticeText}.includes('Google nie udzielił aplikacji zgody na kalendarz')`, 8000, 'zachęta z wyjaśnieniem');
+            assert.equal(await b.evaluate(`return document.querySelectorAll('.psy-cal-ev--unpaid').length;`), 0);
+            await b.evaluate(`window.__PSY_TEST_GDRIVE__.hideFromToken = [];`);
+            await b.click('[data-action="enable-calendar"]');
+            await waitFor(b, `document.querySelector('.psy-cal-ev--unpaid') && ${noticeText} === ''`, 8000, 'terminy po włączeniu');
+            assert.equal(mock.calendars.size, 1);
         });
 
         await step('dane pacjentów nie są kopiowane do pamięci przeglądarki', async () => {
@@ -651,9 +763,13 @@ async function scenarioGDrive(origin, mock) {
             assert.match(await b.evaluate(`return document.querySelector('.psy-history-paragraph').innerText;`), /Setal.*100 mg\/d/s);
             await b.screenshot(path.join(SHOTS, 'gdrive-02-historia-po-odswiezeniu.png'));
 
-            // kalendarz po odświeżeniu: ten sam (bez duplikatu), termin nadal jest
+            // kalendarz po odświeżeniu: włączony od razu (bez klikania), ten sam (bez duplikatu), termin nadal jest
+            assert.deepEqual(await asked(), [{ requested: [SCOPE.drive, SCOPE.calendar, SCOPE.busy], consent: false }],
+                'jedno logowanie obejmuje zgody włączone wcześniej');
             await openCalendar(b, '#/calendar', day);
             await waitFor(b, `document.querySelector('.psy-cal-ev--unpaid')`, 8000, 'termin po odświeżeniu');
+            assert.equal(await b.evaluate(`return ${noticeText};`), '');
+            await waitFor(b, `document.querySelector('.psy-cal__host .psy-cal-busy')`, 6000, '„zajęte" po odświeżeniu');
             assert.equal(mock.calendars.size, 1, 'nadal jeden kalendarz aplikacji');
         });
 

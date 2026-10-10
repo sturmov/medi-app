@@ -30,7 +30,7 @@ import { renderTreatmentPlan } from './views/view-treatment-plan.js';
 import { renderParameters } from './views/view-parameters.js';
 import { renderDocuments } from './views/view-documents.js';
 import { renderCalendar, renderHomeTabs } from './views/view-calendar.js';
-import { syncVisitToAppointment } from './views/_calendar-api.js';
+import { syncVisitToAppointment, getCalendarApi, CALENDAR_NAME } from './views/_calendar-api.js';
 import { listAvailableTests } from './views/_tests-catalog.js';
 
 import { showStorageGate, hideStorageGate, shouldShowGate } from './views/view-folder-gate.js';
@@ -1051,6 +1051,38 @@ function viewSettings() {
         + 'przeglądać także bez aplikacji. Aplikacja nie ma własnego serwera ani kopii danych.'
     ]));
 
+    /* --- Zgody Google: co aplikacja może, z możliwością włączenia brakujących --- */
+    if (st.storageKind === 'gdrive' && st.storageConnected) {
+        const calendar = getCalendarApi();
+        const permission = (label, hint, granted, action, request) => el('div', { class: 'psy-new-row', style: { marginBottom: '6px' } }, [
+            el('span', { class: 'psy-new-badge psy-new-badge--' + (granted ? 'success' : 'neutral'), dataset: { permission: action } },
+                [(granted ? '✓ ' : '✗ ') + label]),
+            el('span', { class: 'psy-new-hint' }, [hint]),
+            granted || !request ? null : el('button', {
+                class: 'btn btn--secondary btn--sm',
+                dataset: { action: 'enable-' + action },
+                onclick: async () => {
+                    try {
+                        if (!(await request())) toast('warning', 'Bez zmian', 'Google nie przyznał tej zgody.');
+                    } catch (e) {
+                        toast('warning', 'Nie udało się uzyskać zgody', String(e && e.message || e));
+                    }
+                    AppController._renderView(true);
+                }
+            }, ['Włącz'])
+        ]);
+        body.appendChild(el('h3', { style: { marginTop: '8px' } }, ['Google — na co aplikacja ma zgodę']));
+        body.appendChild(permission('Dysk Google', 'tylko pliki i foldery założone przez tę aplikację', true, 'drive', null));
+        body.appendChild(permission('Kalendarz Google', 'tylko własny kalendarz aplikacji „' + CALENDAR_NAME + '"',
+            calendar.status() === 'ready', 'calendar', () => calendar.requestPermission()));
+        body.appendChild(permission('Zajętość głównego kalendarza', 'same przedziały zajęte / wolne, bez tytułów (nieobowiązkowe)',
+            calendar.busyStatus() === 'ready', 'busy', () => calendar.requestBusyPermission()));
+        body.appendChild(el('div', { class: 'psy-new-hint', style: { marginBottom: '18px' } }, [
+            'Każdą zgodę Google potwierdza w osobnym okienku. Cofnąć je można w każdej chwili: '
+            + 'konto Google → Bezpieczeństwo → Aplikacje i usługi innych firm.'
+        ]));
+    }
+
     /* --- Google --- */
     const clientInput = el('input', {
         type: 'text',
@@ -1079,7 +1111,7 @@ function viewSettings() {
     body.appendChild(el('div', { class: 'psy-new-hint', style: { marginBottom: '18px' } }, [
         'W konsoli Google Cloud, przy tym kliencie OAuth, w „Authorized JavaScript origins" musi być adres: ',
         el('code', {}, [window.location.origin]),
-        '. W projekcie muszą być włączone „Google Drive API" i „Google Sheets API".'
+        '. W projekcie muszą być włączone „Google Drive API", „Google Sheets API" i „Google Calendar API".'
     ]));
 
     /* --- Tryb demo --- */

@@ -6,21 +6,45 @@
 // Token dostępu żyje wyłącznie w pamięci karty (~1 h); gdy wygaśnie, aplikacja
 // prosi o nowy (zwykle bez pytań — okienko tylko mignie).
 //
-// Zgody są proszone razem, ale tylko Dysk jest WYMAGANY. Kalendarz i informacja
-// „zajęte" są opcjonalne: bez nich aplikacja działa, a strona kalendarza
-// pokazuje przycisk „Nadaj dostęp".
+// ZGODY PROSIMY PO JEDNEJ. Gdy aplikacja prosi o kilka zgód naraz, Google
+// pokazuje pola wyboru, które są domyślnie ODZNACZONE — łatwo kliknąć „Dalej"
+// i zostać bez kalendarza. Dlatego:
+//   1) przy łączeniu z Dyskiem prosimy tylko o Dysk (wymagane),
+//   2) Kalendarz i „zajęte" włącza się osobnym przyciskiem (`enable(scope)`):
+//      jedna prośba = jedna nowa zgoda, a token obejmuje też wcześniejsze,
+//   3) zgody udzielone wcześniej pamiętamy w tej przeglądarce i przy kolejnych
+//      logowaniach prosimy o nie od razu (Google już o nic nie pyta).
 // ============================================================================
 
 import { getGoogleClientId, GOOGLE_SCOPES } from './_config.js';
 import { StorageError } from './_storage-errors.js';
 
-const ALL_SCOPES = [GOOGLE_SCOPES.drive, GOOGLE_SCOPES.calendar, GOOGLE_SCOPES.freebusy];
+const OPTIONAL_SCOPES = [GOOGLE_SCOPES.calendar, GOOGLE_SCOPES.freebusy];
+const ALL_SCOPES = [GOOGLE_SCOPES.drive, ...OPTIONAL_SCOPES];
+const LS_EXTRAS = 'psy-new:googleExtras';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Test automatyczny podstawia atrapę API: `window.__PSY_TEST_GDRIVE__ = { base, token, scopes?, authFail? }`. */
+/**
+ * Test automatyczny podstawia atrapę API i „konto Google":
+ * `window.__PSY_TEST_GDRIVE__ = { base, token, authFail?, grant?(zakresy, { consent }) → zakresy tokenu }`.
+ */
 function testConfig() {
     const t = (typeof window !== 'undefined' && window.__PSY_TEST_GDRIVE__) || null;
     return t && t.base ? t : null;
+}
+
+/* ---------------- zgody dodatkowe zapamiętane w tej przeglądarce ---------------- */
+function rememberedExtras() {
+    let raw = '';
+    try { raw = window.localStorage.getItem(LS_EXTRAS) || ''; } catch (_) { /* */ }
+    const saved = raw.split(' ').filter(Boolean);
+    return OPTIONAL_SCOPES.filter((s) => saved.includes(s));
+}
+function saveExtras(list) {
+    try {
+        if (list.length) window.localStorage.setItem(LS_EXTRAS, list.join(' '));
+        else window.localStorage.removeItem(LS_EXTRAS);
+    } catch (_) { /* */ }
 }
 
 let gisLoading = null;
@@ -56,6 +80,11 @@ function authMessage(reason) {
             return 'Logowanie do Google nie powiodło się' + (reason ? ' (' + reason + ').' : '.');
     }
 }
+function authError(reason) {
+    const e = new StorageError('auth', authMessage(reason));
+    e.reason = reason || '';
+    return e;
+}
 
 let token = null;
 let expiresAt = 0;
@@ -63,17 +92,30 @@ let granted = new Set();
 let client = null;
 let onToken = null;
 let onError = null;
-let inflight = null;
+let refreshing = null;
+let queue = Promise.resolve();      // okienko Google jest jedno — prośby idą po kolei
 let loginHint = '';
+const enableTries = new Map();      // zakres → ile razy użytkownik próbował go włączyć
 
-async function request() {
+const tokenValid = () => !!token && Date.now() < expiresAt - 60 * 1000;
+const serial = (fn) => {
+    const run = queue.then(fn, fn);
+    queue = run.catch(() => {});
+    return run;
+};
+
+/**
+ * Jedna prośba do Google. Niczego nie zapamiętuje — zwraca, co Google odpowiedział.
+ * @param {string[]} scopes — o co prosimy
+ * @param {{ consent?: boolean }} opts — consent: pokaż ekran zgody nawet, gdy Google uznałby go za zbędny
+ * @returns {Promise<{ accessToken: string, expiresIn: number, scopes: string[] }>} scopes = co obejmuje token
+ */
+async function ask(scopes, { consent = false } = {}) {
     const test = testConfig();
     if (test) {
-        if (test.authFail) throw new StorageError('auth', authMessage('popup_failed_to_open'));
-        token = test.token || 'test-token';
-        expiresAt = Date.now() + 3600 * 1000;
-        granted = new Set(test.scopes || ALL_SCOPES);
-        return token;
+        if (test.authFail) throw authError('popup_failed_to_open');
+        const covered = typeof test.grant === 'function' ? test.grant(scopes.slice(), { consent }) : scopes;
+        return { accessToken: test.token || 'test-token', expiresIn: 3600, scopes: covered };
     }
 
     await loadGoogleIdentity();
@@ -81,7 +123,7 @@ async function request() {
     if (!client) {
         client = oauth2.initTokenClient({
             client_id: getGoogleClientId(),
-            scope: ALL_SCOPES.join(' '),
+            scope: GOOGLE_SCOPES.drive,         // właściwy zakres podajemy przy każdej prośbie
             callback: (resp) => { if (onToken) onToken(resp); },
             error_callback: (err) => { if (onError) onError(err); }
         });
@@ -89,45 +131,99 @@ async function request() {
     return new Promise((resolve, reject) => {
         onToken = (resp) => {
             if (!resp || resp.error || !resp.access_token) {
-                reject(new StorageError('auth', authMessage(resp && resp.error)));
+                reject(authError(resp && resp.error));
                 return;
             }
-            // Użytkownik może odznaczyć część zgód w okienku Google.
-            const listed = new Set(String(resp.scope || '').split(/\s+/).filter(Boolean));
-            const has = (scope) => (typeof oauth2.hasGrantedAnyScope === 'function'
-                ? oauth2.hasGrantedAnyScope(resp, scope)
-                : listed.has(scope));
-            const now = new Set(ALL_SCOPES.filter(has));
-            if (!now.has(GOOGLE_SCOPES.drive)) {
-                reject(new StorageError('auth', authMessage('access_denied')));
-                return;
-            }
-            granted = now;
-            token = resp.access_token;
-            expiresAt = Date.now() + (Number(resp.expires_in) || 3600) * 1000;
-            resolve(token);
+            const listed = String(resp.scope || '').split(' ').filter(Boolean);
+            const has = (scope) => listed.includes(scope)
+                || (typeof oauth2.hasGrantedAnyScope === 'function' && oauth2.hasGrantedAnyScope(resp, scope));
+            resolve({ accessToken: resp.access_token, expiresIn: Number(resp.expires_in) || 3600, scopes: ALL_SCOPES.filter(has) });
         };
-        onError = (err) => reject(new StorageError('auth', authMessage(err && err.type)));
-        // prompt '' = okienko pyta tylko wtedy, gdy to konieczne (pierwsza zgoda / nowe uprawnienie).
-        client.requestAccessToken({ prompt: '', login_hint: loginHint || undefined });
+        onError = (err) => reject(authError(err && err.type));
+        client.requestAccessToken({
+            scope: scopes.join(' '),
+            // '' = Google pyta tylko o to, na co jeszcze nie ma zgody (a gdy ma wszystko — o nic)
+            prompt: consent ? 'consent' : '',
+            include_granted_scopes: true,       // token obejmuje też zgody udzielone wcześniej
+            login_hint: loginHint || undefined
+        });
     });
 }
 
+/** Przyjmuje token: od teraz to on i jego zgody obowiązują. */
+function adopt(answer) {
+    token = answer.accessToken;
+    expiresAt = Date.now() + answer.expiresIn * 1000;
+    granted = new Set(ALL_SCOPES.filter((s) => answer.scopes.includes(s)));
+    // Pamiętamy dokładnie to, co Google przyznał — o cofniętą zgodę nie prosimy przy każdym logowaniu.
+    saveExtras(OPTIONAL_SCOPES.filter((s) => granted.has(s)));
+    console.info('[google] zgody: ' + ALL_SCOPES.map((s) => s.split('/').pop() + (granted.has(s) ? ' ✓' : ' ✗')).join(', '));
+}
+
 export const googleAuth = {
-    /** Ważny token; gdy wygasł — prosi Google o nowy (może otworzyć okienko). */
+    /** Ważny token; gdy wygasł — prosi Google o nowy (Dysk + zgody udzielone wcześniej). */
     getToken() {
-        if (token && Date.now() < expiresAt - 60 * 1000) return Promise.resolve(token);
-        if (!inflight) inflight = request().finally(() => { inflight = null; });
-        return inflight;
+        if (tokenValid()) return Promise.resolve(token);
+        if (!refreshing) {
+            refreshing = serial(async () => {
+                const answer = await ask([GOOGLE_SCOPES.drive, ...rememberedExtras()]);
+                if (!answer.scopes.includes(GOOGLE_SCOPES.drive)) throw authError('access_denied');
+                adopt(answer);
+                return token;
+            }).finally(() => { refreshing = null; });
+        }
+        return refreshing;
     },
+
+    /**
+     * Włącza jedną dodatkową zgodę (Kalendarz albo „zajęte"). Musi być wywołane
+     * z kliknięcia użytkownika — otwiera okienko Google z prośbą o tę jedną zgodę.
+     * @returns {Promise<boolean>} czy Google ją przyznał (false = użytkownik odmówił)
+     * @throws {StorageError} gdy okienko się nie otworzyło albo zostało zamknięte
+     */
+    async enable(scope) {
+        if (granted.has(scope) && tokenValid()) return true;
+        // Pierwsza próba: zwykła prośba (jeśli zgoda była już kiedyś udzielona, okienko tylko mignie).
+        // Kolejne: wymuszamy ekran zgody — na wypadek, gdyby Google nie pokazał go sam.
+        const tries = enableTries.get(scope) || 0;
+        enableTries.set(scope, tries + 1);
+        let answer;
+        try {
+            answer = await serial(() => ask([scope], { consent: tries > 0 }));
+        } catch (e) {
+            if (e && e.reason === 'access_denied') return false;
+            throw e;
+        }
+        if (!answer.scopes.includes(scope)) return false;
+        if (answer.scopes.includes(GOOGLE_SCOPES.drive)) {
+            adopt(answer);
+        } else {
+            // Token tylko na nową zgodę (Google nie dołączył wcześniejszych): zapamiętujemy ją,
+            // a pełny token aplikacja pobierze przy najbliższym wywołaniu.
+            const remembered = rememberedExtras();
+            saveExtras(OPTIONAL_SCOPES.filter((s) => s === scope || remembered.includes(s)));
+            granted.add(scope);
+            token = null; expiresAt = 0;
+        }
+        return true;
+    },
+
+    /** API odpowiedziało, że token nie obejmuje tej zgody — przestajemy na nią liczyć. */
+    dropScope(scope) {
+        granted.delete(scope);
+        saveExtras(rememberedExtras().filter((s) => s !== scope));
+    },
+
     invalidate() { token = null; expiresAt = 0; },
     setLoginHint(email) { loginHint = email || ''; },
     /** Czy użytkownik udzielił danej zgody (znane dopiero po zalogowaniu). */
     hasScope(scope) { return granted.has(scope); },
-    isSignedIn() { return !!token; },
+    isSignedIn() { return tokenValid(); },
     signOut() {
         const t = token;
         token = null; expiresAt = 0; granted = new Set();
+        enableTries.clear();
+        saveExtras([]);         // cofnięcie dostępu kasuje w Google wszystkie zgody — następnym razem od nowa
         try {
             if (t && !testConfig() && window.google && window.google.accounts) {
                 window.google.accounts.oauth2.revoke(t, () => {});
@@ -141,7 +237,7 @@ export const googleAuth = {
  * i ponawia przy przeciążeniu / błędzie serwera (z rosnącą przerwą).
  *
  * @param {object} opts — { json?, body?, headers?, expect?: 'blob' }
- * @throws {StorageError} code: 'auth' | 'offline' | 'io'; `status` = kod HTTP
+ * @throws {StorageError} code: 'auth' | 'offline' | 'io'; `status` = kod HTTP, `reason` = powód podany przez Google
  */
 export async function googleCall(method, url, opts = {}, attempt = 0, reauthed = false) {
     const accessToken = await googleAuth.getToken();
@@ -181,6 +277,7 @@ export async function googleCall(method, url, opts = {}, attempt = 0, reauthed =
         const e = new StorageError(res.status >= 500 || rateLimited ? 'offline' : 'io',
             'Google (' + res.status + '): ' + (message || res.statusText || 'błąd'));
         e.status = res.status;
+        e.reason = reason;
         throw e;
     }
 
