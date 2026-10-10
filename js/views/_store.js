@@ -645,7 +645,16 @@ export const Store = {
         }
 
         if (kind === 'gdrive') {
-            // Okienko logowania Google wolno otworzyć tylko po kliknięciu użytkownika.
+            // Odświeżenie strony w tej samej karcie: sesja Google jeszcze trwa → wracamy bez klikania.
+            try {
+                const backend = createGDriveBackend();
+                if (await backend.resume({ loginHint: ls.get(LS_ACCOUNT) || '' })) {
+                    await attachBackend(backend);
+                    emit();
+                    return true;
+                }
+            } catch (e) { console.warn('[store] wznawianie sesji Google', e); }
+            // W pozostałych przypadkach okienko logowania Google wolno otworzyć tylko po kliknięciu użytkownika.
             state.storageKind = 'gdrive';
             state.storageLabel = ls.get(LS_ACCOUNT) || '';
             state.storageStatus = 'needs-auth';

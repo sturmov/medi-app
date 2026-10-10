@@ -3,8 +3,13 @@
 // oraz wspólna funkcja wywołań API.
 //
 // Logowanie: Google Identity Services — okienko Google, bez haseł w aplikacji.
-// Token dostępu żyje wyłącznie w pamięci karty (~1 h); gdy wygaśnie, aplikacja
-// prosi o nowy (zwykle bez pytań — okienko tylko mignie).
+// Token dostępu jest ważny ~1 h; gdy wygaśnie, aplikacja prosi o nowy (zwykle
+// bez pytań — okienko tylko mignie).
+//
+// ODŚWIEŻENIE STRONY (F5) nie wymaga logowania: token leży w `sessionStorage`
+// tej karty — znika z jej zamknięciem i nigdy nie trafia do `localStorage`.
+// Google nie pozwala aplikacji bez serwera odnowić tokenu bez okienka, więc po
+// godzinie albo w nowej karcie potrzebne jest jedno kliknięcie.
 //
 // ZGODY PROSIMY PO JEDNEJ. Gdy aplikacja prosi o kilka zgód naraz, Google
 // pokazuje pola wyboru, które są domyślnie ODZNACZONE — łatwo kliknąć „Dalej"
@@ -22,6 +27,8 @@ import { StorageError } from './_storage-errors.js';
 const OPTIONAL_SCOPES = [GOOGLE_SCOPES.calendar, GOOGLE_SCOPES.freebusy];
 const ALL_SCOPES = [GOOGLE_SCOPES.drive, ...OPTIONAL_SCOPES];
 const LS_EXTRAS = 'psy-new:googleExtras';
+const LS_DECLINED = 'psy-new:googleDeclined';
+const SS_SESSION = 'psy-new:googleSession';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -34,18 +41,20 @@ function testConfig() {
 }
 
 /* ---------------- zgody dodatkowe zapamiętane w tej przeglądarce ---------------- */
-function rememberedExtras() {
+function readScopes(key) {
     let raw = '';
-    try { raw = window.localStorage.getItem(LS_EXTRAS) || ''; } catch (_) { /* */ }
+    try { raw = window.localStorage.getItem(key) || ''; } catch (_) { /* */ }
     const saved = raw.split(' ').filter(Boolean);
     return OPTIONAL_SCOPES.filter((s) => saved.includes(s));
 }
-function saveExtras(list) {
+function writeScopes(key, list) {
     try {
-        if (list.length) window.localStorage.setItem(LS_EXTRAS, list.join(' '));
-        else window.localStorage.removeItem(LS_EXTRAS);
+        if (list.length) window.localStorage.setItem(key, list.join(' '));
+        else window.localStorage.removeItem(key);
     } catch (_) { /* */ }
 }
+const rememberedExtras = () => readScopes(LS_EXTRAS);
+const saveExtras = (list) => writeScopes(LS_EXTRAS, list);
 
 let gisLoading = null;
 function loadGoogleIdentity() {
@@ -98,6 +107,33 @@ let loginHint = '';
 const enableTries = new Map();      // zakres → ile razy użytkownik próbował go włączyć
 
 const tokenValid = () => !!token && Date.now() < expiresAt - 60 * 1000;
+
+/* ---------------- sesja tej karty (przetrwa F5, nie przetrwa zamknięcia karty) ---------------- */
+function saveSession() {
+    try {
+        if (token) window.sessionStorage.setItem(SS_SESSION, JSON.stringify({ token, expiresAt, scopes: Array.from(granted) }));
+        else window.sessionStorage.removeItem(SS_SESSION);
+    } catch (_) { /* */ }
+}
+function forgetToken() {
+    token = null;
+    expiresAt = 0;
+    saveSession();
+}
+function loadSession() {
+    let saved = null;
+    try { saved = JSON.parse(window.sessionStorage.getItem(SS_SESSION) || 'null'); } catch (_) { /* */ }
+    if (!saved || typeof saved.token !== 'string' || !Array.isArray(saved.scopes)) return false;
+    token = saved.token;
+    expiresAt = Number(saved.expiresAt) || 0;
+    if (!tokenValid() || !saved.scopes.includes(GOOGLE_SCOPES.drive)) {
+        forgetToken();
+        return false;
+    }
+    granted = new Set(ALL_SCOPES.filter((s) => saved.scopes.includes(s)));
+    return true;
+}
+
 const serial = (fn) => {
     const run = queue.then(fn, fn);
     queue = run.catch(() => {});
@@ -157,10 +193,20 @@ function adopt(answer) {
     granted = new Set(ALL_SCOPES.filter((s) => answer.scopes.includes(s)));
     // Pamiętamy dokładnie to, co Google przyznał — o cofniętą zgodę nie prosimy przy każdym logowaniu.
     saveExtras(OPTIONAL_SCOPES.filter((s) => granted.has(s)));
+    writeScopes(LS_DECLINED, readScopes(LS_DECLINED).filter((s) => !granted.has(s)));
+    saveSession();
     console.info('[google] zgody: ' + ALL_SCOPES.map((s) => s.split('/').pop() + (granted.has(s) ? ' ✓' : ' ✗')).join(', '));
 }
 
 export const googleAuth = {
+    /**
+     * Po odświeżeniu strony: podejmuje sesję tej karty, jeśli jej token jest jeszcze
+     * ważny. Nie otwiera okienka Google. → czy jest token, na którym można pracować
+     */
+    resume() {
+        return tokenValid() || loadSession();
+    },
+
     /** Ważny token; gdy wygasł — prosi Google o nowy (Dysk + zgody udzielone wcześniej). */
     getToken() {
         if (tokenValid()) return Promise.resolve(token);
@@ -182,7 +228,11 @@ export const googleAuth = {
      * @throws {StorageError} gdy okienko się nie otworzyło albo zostało zamknięte
      */
     async enable(scope) {
-        if (granted.has(scope) && tokenValid()) return true;
+        if (granted.has(scope)) {
+            // Zgoda już jest — wystarczy ważny token (to kliknięcie pozwala go odnowić).
+            await this.getToken();
+            if (granted.has(scope)) return true;
+        }
         // Pierwsza próba: zwykła prośba (jeśli zgoda była już kiedyś udzielona, okienko tylko mignie).
         // Kolejne: wymuszamy ekran zgody — na wypadek, gdyby Google nie pokazał go sam.
         const tries = enableTries.get(scope) || 0;
@@ -203,7 +253,7 @@ export const googleAuth = {
             const remembered = rememberedExtras();
             saveExtras(OPTIONAL_SCOPES.filter((s) => s === scope || remembered.includes(s)));
             granted.add(scope);
-            token = null; expiresAt = 0;
+            forgetToken();
         }
         return true;
     },
@@ -212,18 +262,30 @@ export const googleAuth = {
     dropScope(scope) {
         granted.delete(scope);
         saveExtras(rememberedExtras().filter((s) => s !== scope));
+        saveSession();
     },
 
-    invalidate() { token = null; expiresAt = 0; },
+    /**
+     * Użytkownik nie chce teraz tej zgody: nie proponujemy jej przy każdym łączeniu
+     * (włączyć da się ją zawsze — przyciskiem przy kalendarzu albo w Ustawieniach).
+     */
+    decline(scope) {
+        writeScopes(LS_DECLINED, OPTIONAL_SCOPES.filter((s) => s === scope || readScopes(LS_DECLINED).includes(s)));
+    },
+    isDeclined(scope) { return readScopes(LS_DECLINED).includes(scope); },
+
+    invalidate() { forgetToken(); },
     setLoginHint(email) { loginHint = email || ''; },
     /** Czy użytkownik udzielił danej zgody (znane dopiero po zalogowaniu). */
     hasScope(scope) { return granted.has(scope); },
     isSignedIn() { return tokenValid(); },
     signOut() {
         const t = token;
-        token = null; expiresAt = 0; granted = new Set();
+        granted = new Set();
+        forgetToken();
         enableTries.clear();
         saveExtras([]);         // cofnięcie dostępu kasuje w Google wszystkie zgody — następnym razem od nowa
+        writeScopes(LS_DECLINED, []);
         try {
             if (t && !testConfig() && window.google && window.google.accounts) {
                 window.google.accounts.oauth2.revoke(t, () => {});
@@ -236,10 +298,12 @@ export const googleAuth = {
  * Wywołanie API Google z tokenem. Sama odnawia wygasły token (raz na żądanie)
  * i ponawia przy przeciążeniu / błędzie serwera (z rosnącą przerwą).
  *
- * @param {object} opts — { json?, body?, headers?, expect?: 'blob' }
+ * @param {object} opts — { json?, body?, headers?, expect?: 'blob', reauth?: false }
+ *        reauth: false — odrzucony token (401) to od razu błąd, bez okienka Google
+ *        (przy wznawianiu sesji po odświeżeniu strony nie ma kliknięcia, które pozwala je otworzyć)
  * @throws {StorageError} code: 'auth' | 'offline' | 'io'; `status` = kod HTTP, `reason` = powód podany przez Google
  */
-export async function googleCall(method, url, opts = {}, attempt = 0, reauthed = false) {
+export async function googleCall(method, url, opts = {}, attempt = 0, reauthed = opts.reauth === false) {
     const accessToken = await googleAuth.getToken();
     const headers = Object.assign({ Authorization: 'Bearer ' + accessToken }, opts.headers || {});
     let body = opts.body;

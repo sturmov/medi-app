@@ -174,6 +174,11 @@ function createGoogleCalendarApi() {
         requestBusyPermission() {
             return googleAuth.enable(GOOGLE_SCOPES.freebusy);
         },
+        /** Zakłada (albo odnajduje) kalendarz aplikacji — żeby ewentualny błąd wyszedł przy łączeniu, nie później. */
+        async prepare() { await ensureCalendar(); },
+        /** Terapeuta odłożył włączenie kalendarza: ekran startowy nie pyta przy każdym łączeniu. */
+        postpone() { googleAuth.decline(GOOGLE_SCOPES.calendar); },
+        isPostponed() { return googleAuth.isDeclined(GOOGLE_SCOPES.calendar); },
 
         async list(fromISO, toISO) {
             const out = [];
@@ -253,6 +258,9 @@ function createLocalCalendarApi() {
         async requestPermission() { return true; },
         busyStatus: () => 'unavailable',        // bez konta Google nie ma głównego kalendarza
         async requestBusyPermission() { return false; },
+        async prepare() { /* nie ma czego zakładać */ },
+        postpone() { /* */ },
+        isPostponed: () => false,
         async list(fromISO, toISO) {
             const from = new Date(fromISO).getTime();
             const to = new Date(toISO).getTime();

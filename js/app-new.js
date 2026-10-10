@@ -1310,7 +1310,8 @@ const AppController = {
             this._updateSidebarActive();
         });
 
-        // Ostatnio używany magazyn: folder lokalny wraca sam, Dysk Google wymaga
+        // Ostatnio używany magazyn: folder lokalny wraca sam; Dysk Google — sam po
+        // odświeżeniu strony (sesja karty), a w nowej karcie lub po godzinie wymaga
         // jednego kliknięcia (przeglądarka nie pozwala otworzyć logowania bez gestu).
         await Store.restoreStorage();
 
@@ -1518,6 +1519,7 @@ const AppController = {
      */
     _renderView(force = false) {
         if (document.body.classList.contains('psy-modal-open')) return;
+        if (shouldShowGate()) return;                       // ekran startowy przykrywa aplikację
 
         const current = this.mainEl.firstElementChild;
         if (!force && current && current.dataset && current.dataset.live === 'true') return;

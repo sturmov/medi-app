@@ -2216,6 +2216,12 @@ body.psy-folder-gate-open {
     color: #991B1B;
 }
 
+.psy-folder-gate__notice--ok {
+    background: #ECFDF5;
+    border-color: #A7F3D0;
+    color: #065F46;
+}
+
 .psy-folder-gate__btn {
     width: 100%;
     justify-content: center;

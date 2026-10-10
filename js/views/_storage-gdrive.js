@@ -342,6 +342,26 @@ export function createGDriveBackend() {
             await ensureRoot();
         },
 
+        /**
+         * Po odświeżeniu strony: podejmuje pracę na tokenie zapamiętanym w tej karcie,
+         * bez okienka Google. → false, gdy tokenu nie ma albo Google już go nie przyjmuje
+         * (wtedy potrzebne jest kliknięcie i `connect`).
+         */
+        async resume({ loginHint } = {}) {
+            if (!auth.resume()) return false;
+            auth.setLoginHint(loginHint);
+            try {
+                const about = await call('GET', E.drive + '/about?fields=' + encodeURIComponent('user(emailAddress)'), { reauth: false });
+                account = (about && about.user && about.user.emailAddress) || loginHint || '';
+                if (account) auth.setLoginHint(account);
+            } catch (e) {
+                if (e && e.code === 'auth') return false;
+                throw e;
+            }
+            await ensureRoot();
+            return true;
+        },
+
         /** Odnowienie sesji po kliknięciu „Połącz ponownie". */
         async reauthorize() {
             auth.invalidate();

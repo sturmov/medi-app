@@ -553,7 +553,13 @@ async function scenarioGDrive(origin, mock) {
             assert.match(await b.evaluate(`return document.querySelector('.psy-folder-gate__btn--primary').innerText;`), /Połącz z Dyskiem Google/);
             await b.screenshot(path.join(SHOTS, 'gdrive-01-start.png'));
             await b.click('.psy-folder-gate__btn--primary');
-            await waitFor(b, `PsyStore.state.storageConnected && !document.querySelector('.psy-folder-gate')`);
+            // Po Dysku ten sam ekran proponuje od razu Kalendarz Google. Tu go odkładamy
+            // (ścieżkę „włącz na ekranie startowym" sprawdza krok na końcu scenariusza).
+            await waitFor(b, `PsyStore.state.storageConnected && document.querySelector('[data-action="gate-enable-calendar"]')`, 8000, 'krok 2: kalendarz');
+            assert.equal(await b.evaluate(`return !!document.querySelector('.psy-cal-view, .psy-new-table');`), false,
+                'aplikacja nie rysuje się pod ekranem startowym');
+            await b.click('[data-action="gate-skip-calendar"]');
+            await waitFor(b, `!document.querySelector('.psy-folder-gate')`);
             const roots = mock.find((f) => f.mimeType === FOLDER_MIME && f.appProperties.psyKind === 'root');
             assert.equal(roots.length, 1);
             assert.equal(roots[0].name, 'pacjenci');
@@ -734,19 +740,17 @@ async function scenarioGDrive(origin, mock) {
         });
 
         await step('dane pacjentów nie są kopiowane do pamięci przeglądarki', async () => {
-            const dump = await b.evaluate(`return JSON.stringify(Object.assign({}, localStorage));`);
+            const dump = await b.evaluate(`return JSON.stringify([Object.assign({}, localStorage), Object.assign({}, sessionStorage)]);`);
             assert.ok(!/Kowalska|Kontrola za 2 tygodnie/.test(dump), dump.slice(0, 200));
         });
 
-        await step('odświeżenie strony: lista z indeksu, arkusz wczytany dopiero po otwarciu pacjenta', async () => {
+        await step('odświeżenie strony (F5): bez logowania; lista z indeksu, arkusz wczytany dopiero po otwarciu pacjenta', async () => {
             await go(b, '#/patients');
-            await b.reload();
-            await waitFor(b, `document.querySelector('.psy-folder-gate__btn--primary')`, 8000, 'ekran startowy po odświeżeniu');
-            assert.match(await b.evaluate(`return document.querySelector('.psy-folder-gate__btn--primary').innerText;`),
-                /Kontynuuj z Dyskiem Google \(terapeuta@example\.com\)/);
             const callsBefore = mock.calls.length;
-            await b.click('.psy-folder-gate__btn--primary');
-            await waitFor(b, `document.querySelector('tr[data-patient-id="P001"]')`);
+            await b.reload();
+            await waitFor(b, `window.PsyStore && document.querySelector('tr[data-patient-id="P001"]')`, 8000, 'lista pacjentów bez logowania');
+            assert.equal(await b.evaluate(`return !!document.querySelector('.psy-folder-gate');`), false, 'bez ekranu startowego');
+            assert.deepEqual(await asked(), [], 'po odświeżeniu aplikacja o nic nie prosi Google');
             const row = await b.evaluate(`return { text: document.querySelector('tr[data-patient-id="P001"]').innerText, loaded: PsyStore.isPatientLoaded('P001') };`);
             assert.match(row.text, /Anna Kowalska/);
             assert.match(row.text, /\d{4}-\d{2}-\d{2}/, 'data ostatniej wizyty z indeksu');
@@ -763,14 +767,44 @@ async function scenarioGDrive(origin, mock) {
             assert.match(await b.evaluate(`return document.querySelector('.psy-history-paragraph').innerText;`), /Setal.*100 mg\/d/s);
             await b.screenshot(path.join(SHOTS, 'gdrive-02-historia-po-odswiezeniu.png'));
 
-            // kalendarz po odświeżeniu: włączony od razu (bez klikania), ten sam (bez duplikatu), termin nadal jest
-            assert.deepEqual(await asked(), [{ requested: [SCOPE.drive, SCOPE.calendar, SCOPE.busy], consent: false }],
-                'jedno logowanie obejmuje zgody włączone wcześniej');
+            // kalendarz po odświeżeniu: włączony od razu, ten sam (bez duplikatu), termin nadal jest
             await openCalendar(b, '#/calendar', day);
             await waitFor(b, `document.querySelector('.psy-cal-ev--unpaid')`, 8000, 'termin po odświeżeniu');
             assert.equal(await b.evaluate(`return ${noticeText};`), '');
             await waitFor(b, `document.querySelector('.psy-cal__host .psy-cal-busy')`, 6000, '„zajęte" po odświeżeniu');
             assert.equal(mock.calendars.size, 1, 'nadal jeden kalendarz aplikacji');
+            assert.deepEqual(await asked(), [], 'nadal bez okienka Google');
+        });
+
+        await step('sesja odrzucona przez Google albo przeterminowana: ekran startowy z jednym przyciskiem, bez okienka', async () => {
+            const KEY = 'psy-new:googleSession';
+            const gateButton = `document.querySelector('.psy-folder-gate__btn--primary')`;
+            await go(b, '#/patients');
+
+            // token, którego Google już nie przyjmuje (np. dostęp cofnięty w koncie)
+            await b.evaluate(`
+                const s = JSON.parse(sessionStorage.getItem('${KEY}'));
+                s.token = 'niewazny';
+                sessionStorage.setItem('${KEY}', JSON.stringify(s));`);
+            await b.reload();
+            await waitFor(b, gateButton, 8000, 'ekran startowy');
+            assert.match(await b.evaluate(`return ${gateButton}.innerText;`), /Kontynuuj z Dyskiem Google \(terapeuta@example\.com\)/);
+            assert.deepEqual(await asked(), [], 'bez kliknięcia aplikacja nie otwiera okienka Google');
+            assert.equal(await b.evaluate(`return sessionStorage.getItem('${KEY}');`), null, 'odrzucony token nie zostaje w karcie');
+
+            // token przeterminowany: aplikacja nawet nie próbuje go użyć
+            await b.evaluate(`sessionStorage.setItem('${KEY}', JSON.stringify(
+                { token: 'test-token:drive.file', expiresAt: Date.now() - 1000, scopes: [${JSON.stringify(SCOPE.drive)}] }));`);
+            const callsBefore = mock.calls.length;
+            await b.reload();
+            await waitFor(b, gateButton, 8000, 'ekran startowy');
+            assert.equal(mock.calls.length, callsBefore, 'żadnych wywołań API z przeterminowanym tokenem');
+
+            // jedno kliknięcie: jedno logowanie obejmuje Dysk i zgody włączone wcześniej; bez kroku z kalendarzem
+            await b.click('.psy-folder-gate__btn--primary');
+            await waitFor(b, `!document.querySelector('.psy-folder-gate') && document.querySelector('tr[data-patient-id="P001"]')`, 8000, 'aplikacja po kliknięciu');
+            assert.deepEqual(await asked(), [{ requested: [SCOPE.drive, SCOPE.calendar, SCOPE.busy], consent: false }]);
+            await b.evaluate(`PsyStore.selectPatient('P001'); await PsyStore.ensurePatientLoaded('P001');`);
         });
 
         await step('zmiana nazwiska zmienia nazwę folderu i arkusza (bez duplikatu)', async () => {
@@ -851,6 +885,38 @@ async function scenarioGDrive(origin, mock) {
             assert.equal(await b.evaluate(`return PsyStore.state.patients.length;`), 0);
             assert.equal(mock.spreadsheets().length, 1);
             assert.equal(mock.doc(sheet().id).patient.nazwisko, 'Kowalska-Nowak');
+            const left = await b.evaluate(`return [sessionStorage.getItem('psy-new:googleSession'), localStorage.getItem('psy-new:googleExtras'), localStorage.getItem('psy-new:googleDeclined')];`);
+            assert.deepEqual(left, [null, null, null], 'po odłączeniu w przeglądarce nie zostaje token ani lista zgód');
+        });
+
+        await step('łączenie od zera: po Dysku ten sam ekran włącza Kalendarz Google (drugie okienko, jedna zgoda)', async () => {
+            // odłączenie cofa w Google wszystkie zgody aplikacji
+            await b.evaluate(`sessionStorage.removeItem('__psy_test_google_account');`);
+            await b.reload();
+            await waitFor(b, `document.querySelector('.psy-folder-gate__btn--primary')`, 8000, 'ekran startowy');
+            assert.match(await b.evaluate(`return document.querySelector('.psy-folder-gate__btn--primary').innerText;`), /Połącz z Dyskiem Google/);
+            await b.click('.psy-folder-gate__btn--primary');
+            await waitFor(b, `document.querySelector('[data-action="gate-enable-calendar"]')`, 8000, 'krok 2: kalendarz');
+            await b.screenshot(path.join(SHOTS, 'gdrive-06-krok-kalendarz.png'));
+
+            // odmowa w okienku Google → komunikat na tym samym ekranie
+            await b.evaluate(`window.__PSY_TEST_GDRIVE__.deny = [${JSON.stringify(SCOPE.calendar)}];`);
+            await b.click('[data-action="gate-enable-calendar"]');
+            await waitFor(b, `document.querySelector('.psy-folder-gate__notice--error')`, 6000, 'informacja o odmowie');
+            assert.match(await b.evaluate(`return document.querySelector('.psy-folder-gate__notice--error').innerText;`), /Google nie przyznał zgody na kalendarz/);
+
+            // zgoda → kalendarz gotowy, zanim aplikacja się pokaże (ten sam, bez duplikatu)
+            await b.evaluate(`window.__PSY_TEST_GDRIVE__.deny = [];`);
+            const callsBefore = mock.calls.length;
+            await b.click('[data-action="gate-enable-calendar"]');
+            await waitFor(b, `!document.querySelector('.psy-folder-gate') && document.querySelector('.psy-cal-view, .psy-new-table')`, 8000, 'aplikacja po kroku 2');
+            assert.deepEqual((await asked()).map((a) => a.requested), [[SCOPE.drive], [SCOPE.calendar], [SCOPE.calendar]],
+                'dwa okienka, w każdym jedna zgoda');
+            assert.ok(mock.calls.slice(callsBefore).some((c) => c.startsWith('GET /calendar/v3/calendars/')), 'kalendarz sprawdzony już przy łączeniu');
+            assert.equal(mock.calendars.size, 1);
+            await openCalendar(b, '#/calendar', day);
+            await waitFor(b, `document.querySelector('.psy-cal-ev--unpaid')`, 8000, 'terminy od razu, bez przycisku włączania');
+            assert.equal(await b.evaluate(`return ${noticeText};`), '');
         });
 
         await step('brak błędów w konsoli (poza wymuszonymi awariami sieci)', async () => {

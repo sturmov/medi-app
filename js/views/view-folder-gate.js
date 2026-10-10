@@ -6,18 +6,26 @@
 //   2) 📁 Folder na komputerze — tryb testowy / offline (tylko Chrome / Edge)
 //   3) 🧪 Tryb demo          — dane przykładowe, tylko w tej przeglądarce
 //
-// Po udanym połączeniu woła `AppController.afterStorageReady()`.
+// Po połączeniu z Dyskiem Google ekran proponuje od razu drugi krok: Kalendarz
+// Google. To osobne okienko Google, bo o dwie zgody naraz Google pyta polami
+// wyboru, które są domyślnie odznaczone (patrz `_google-auth.js`). Krok pojawia
+// się tylko, gdy kalendarz nie jest jeszcze włączony i nie został odłożony.
+//
+// Po zakończeniu woła `AppController.afterStorageReady()`.
 // ============================================================================
 
 import { Store } from './_store.js';
 import { el } from './_dom.js';
+import { getCalendarApi, CALENDAR_NAME } from './_calendar-api.js';
 
 let _gateEl = null;
 let _busy = false;
 let _error = '';
+let _step = 'storage';      // 'storage' | 'calendar'
 
 export function shouldShowGate() {
     const s = Store.state;
+    if (_gateEl) return true;       // ekran jeszcze pracuje: łączenie albo krok z kalendarzem
     return !(s.devMode === true || s.storageConnected === true);
 }
 
@@ -27,6 +35,7 @@ export function showStorageGate() {
         document.body.appendChild(_gateEl);
         document.body.classList.add('psy-folder-gate-open');
         _error = '';
+        _step = 'storage';
     }
     render();
 }
@@ -35,7 +44,21 @@ export function hideStorageGate() {
     if (_gateEl && _gateEl.parentNode) _gateEl.parentNode.removeChild(_gateEl);
     _gateEl = null;
     _busy = false;
+    _step = 'storage';
     document.body.classList.remove('psy-folder-gate-open');
+}
+
+function finish() {
+    hideStorageGate();
+    if (window.AppController) window.AppController.afterStorageReady();
+}
+
+/** Po połączeniu z Dyskiem Google: czy od razu zaproponować Kalendarz Google. */
+function wantsCalendarStep() {
+    const s = Store.state;
+    if (!(s.storageConnected && s.storageKind === 'gdrive')) return false;
+    const calendar = getCalendarApi();
+    return calendar.status() !== 'ready' && !calendar.isPostponed();
 }
 
 /** Uruchamia połączenie; blokuje przyciski na czas pracy i pokazuje ewentualny błąd. */
@@ -52,12 +75,86 @@ async function run(action) {
     }
     _busy = false;
     if (result && result.ok) {
-        hideStorageGate();
-        if (window.AppController) window.AppController.afterStorageReady();
+        if (wantsCalendarStep()) {
+            _step = 'calendar';
+            render();
+        } else {
+            finish();
+        }
     } else {
         _error = (result && result.error) || '';
         render();
     }
+}
+
+/** Krok 2: jedna zgoda na kalendarz i od razu założenie kalendarza aplikacji. */
+async function enableCalendar() {
+    if (_busy) return;
+    _busy = true;
+    _error = '';
+    render();
+    try {
+        const calendar = getCalendarApi();
+        if (await calendar.requestPermission()) {
+            await calendar.prepare();
+            _busy = false;
+            finish();
+            return;
+        }
+        _error = 'Google nie przyznał zgody na kalendarz. W okienku Google wybierz „Dalej" / „Zezwól".';
+    } catch (e) {
+        _error = (e && e.message) || String(e);
+    }
+    _busy = false;
+    render();
+}
+
+function skipCalendar() {
+    if (_busy) return;
+    getCalendarApi().postpone();
+    finish();
+}
+
+function renderCalendarStep(card) {
+    card.appendChild(el('div', { class: 'psy-folder-gate__notice psy-folder-gate__notice--ok' }, [
+        el('strong', {}, ['✓ Połączono z Dyskiem Google']),
+        el('p', {}, ['Został jeden krok.'])
+    ]));
+    card.appendChild(el('div', { class: 'psy-folder-gate__notice' }, [
+        el('strong', {}, ['Kalendarz Google']),
+        el('p', {}, [
+            'Terminy wizyt trafią do osobnego kalendarza „' + CALENDAR_NAME + '" na Twoim koncie Google — '
+            + 'zobaczysz je także w telefonie. Google zapyta o tę jedną zgodę; pozostałych kalendarzy aplikacja nie zobaczy.'
+        ])
+    ]));
+
+    if (_error) {
+        card.appendChild(el('div', { class: 'psy-folder-gate__notice psy-folder-gate__notice--error' }, [
+            el('strong', {}, ['Nie udało się włączyć kalendarza']),
+            el('p', {}, [_error])
+        ]));
+    }
+    if (_busy) {
+        card.appendChild(el('div', { class: 'psy-folder-gate__notice' }, [
+            el('p', {}, ['⏳ Włączanie… (jeśli otworzyło się okienko Google, dokończ w nim)'])
+        ]));
+    }
+
+    const enable = button('📅 Włącz Kalendarz Google', enableCalendar, { primary: true });
+    enable.dataset.action = 'gate-enable-calendar';
+    card.appendChild(enable);
+    card.appendChild(el('div', { class: 'psy-folder-gate__dev' }, [
+        el('button', {
+            type: 'button',
+            class: 'psy-folder-gate__dev-link',
+            dataset: { action: 'gate-skip-calendar' },
+            disabled: _busy,
+            onclick: skipCalendar
+        }, ['Pomiń — włączę później']),
+        el('div', { class: 'psy-folder-gate__dev-hint' }, [
+            'Bez kalendarza aplikacja działa normalnie; włączysz go przyciskiem na stronie kalendarza albo w Ustawieniach.'
+        ])
+    ]));
 }
 
 function button(label, onClick, { primary = false } = {}) {
@@ -85,6 +182,12 @@ function render() {
         el('h1', { class: 'psy-folder-gate__title' }, ['PsychoApp']),
         el('div', { class: 'psy-folder-gate__subtitle' }, ['Dokumentacja psychologiczna'])
     ]));
+
+    if (_step === 'calendar') {
+        renderCalendarStep(card);
+        _gateEl.appendChild(card);
+        return;
+    }
 
     card.appendChild(el('div', { class: 'psy-folder-gate__notice' }, [
         el('p', {}, [

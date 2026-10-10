@@ -83,12 +83,16 @@ The OAuth client ID is in `js/views/_config.js` and can be overridden in Setting
 
 When several scopes are requested together, Google shows a checkbox per scope and leaves them unticked, so a therapist who just clicks "Continue" ends up without the calendar. `_google-auth.js` therefore never asks for two new permissions in one popup:
 
-- Connecting asks for Drive only.
-- "Włącz Kalendarz Google" (above the calendar, or in Settings) asks for `calendar.app.created` only; the free/busy link asks for `calendar.freebusy` only. The token Google returns also covers what was granted earlier (`include_granted_scopes`).
+- Connecting asks for Drive only. If the calendar is not enabled yet, the start screen stays up and offers it as step 2 ("Włącz Kalendarz Google", or "Pomiń"); enabling there also creates the app's calendar, so an API problem shows up during setup.
+- "Włącz Kalendarz Google" (start screen, above the calendar, or in Settings) asks for `calendar.app.created` only; the free/busy link asks for `calendar.freebusy` only. The token Google returns also covers what was granted earlier (`include_granted_scopes`).
 - The names of granted optional scopes are remembered in `localStorage` (`psy-new:googleExtras`, no token), so later sign-ins request them together and Google has nothing left to ask. On a new device the first Drive token already carries them.
 - A 403 "insufficient scopes" from the Calendar API brings back the enable button instead of an error. A 403 "API not enabled" is reported in plain words.
 
 Settings shows which permissions the current token has. That, and the `[google] zgody: …` line in the browser console, are the first things to check when a therapist reports that the calendar does not work.
+
+### Reloading the page
+
+The access token (valid about an hour) is kept in the tab's `sessionStorage` (`psy-new:googleSession`), so F5 returns straight to the app: `Store.restoreStorage()` → `backend.resume()` checks the token with one Drive call and never opens a popup. A new tab, a closed tab or an expired token still needs one click on the start screen, because a browser only allows the Google popup after a click and an app without a server cannot renew a token any other way. The token is never written to `localStorage`, and disconnecting removes it.
 
 ## Product decisions in force
 
