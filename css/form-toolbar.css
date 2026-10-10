@@ -36,29 +36,71 @@
     padding: 0 0 12px;
 }
 
-/* Przełącznik „zwiń do listy sekcji / rozwiń wszystkie" — zawsze widoczny nad listą. */
+/* Nad listą, zawsze widoczne: „Szukaj tematu…" i przełącznik „zwiń do listy
+   sekcji / rozwiń wszystkie". */
 .psy-form-toolbar__nav-tools {
     position: sticky;
     top: 0;
     z-index: 1;
     display: flex;
-    justify-content: flex-end;
-    padding: 3px 8px;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 6px 4px 8px;
     background: #F9FAFB;
     border-bottom: 1px solid #E5E7EB;
 }
+.psy-form-toolbar__nav-search {
+    flex: 1 1 0;
+    min-width: 0;
+    height: 24px;
+    padding: 2px 6px;
+    font: inherit;
+    font-size: 12px;
+    color: #111827;
+    background: #FFFFFF;
+    border: 1px solid #D1D5DB;
+    border-radius: 6px;
+    box-sizing: border-box;
+}
+.psy-form-toolbar__nav-search::placeholder {
+    color: #9CA3AF;
+}
+.psy-form-toolbar__nav-search:focus {
+    outline: none;
+    border-color: #2563EB;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
 .psy-form-toolbar__nav-toggle {
+    flex-shrink: 0;
     border: 0;
     background: transparent;
     color: #2563EB;
     font: inherit;
     font-size: 11.5px;
-    padding: 3px 6px;
+    white-space: nowrap;
+    padding: 3px 4px;
     border-radius: 4px;
     cursor: pointer;
 }
 .psy-form-toolbar__nav-toggle:hover {
     background: #EFF6FF;
+}
+
+/* Wyszukiwanie: dlaczego pole jest trafieniem (opcja / słowo kluczowe) i brak trafień. */
+.psy-form-toolbar__field-match {
+    font-size: 11px;
+    line-height: 1.3;
+    color: #1D4ED8;
+    padding-left: 16px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 400;
+}
+.psy-form-toolbar__nav-empty {
+    padding: 14px 12px;
+    font-size: 12px;
+    color: #6B7280;
 }
 
 /* Po „Zwiń do listy sekcji" cały formularz ma się zmieścić na ekranie 1366×768
@@ -584,6 +626,13 @@
 .psy-form-toolbar__entry--edit {
     border-color: #93C5FD;
     box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08);
+    /* Lista podpowiedzi (leki, ICD-10) wysuwa się pod pole i musi wyjść poza ramkę
+       akapitu — przy `hidden` widać było tylko czubek pierwszej pozycji. */
+    overflow: visible;
+}
+/* Bez przycinania ramką nagłówek sam zaokrągla swoje górne rogi. */
+.psy-form-toolbar__entry--edit .psy-form-toolbar__entry-header {
+    border-radius: 7px 7px 0 0;
 }
 
 /* Header akapitu (chevron + label + X) — PR-J16a: cały header klikalny =

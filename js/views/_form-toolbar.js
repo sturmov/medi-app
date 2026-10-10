@@ -7,6 +7,9 @@
 //   rozwinięte; nagłówek sekcji ma kropkę (zieloną, gdy którekolwiek jej pole
 //   jest wypełnione) i licznik „wypełnione / wszystkie", a przełącznik u góry
 //   zwija wszystko do samej listy sekcji (i z powrotem).
+//   „Szukaj tematu…" zawęża listę do pól, których nazwa, sekcja, opcje do wyboru
+//   albo słowa kluczowe (`field.keywords`) pasują do wpisanego tekstu — bez
+//   rozróżniania wielkości liter i polskich znaków. Enter / klik otwiera pole.
 //
 // PRAWA kolumna: dziennik — tylko pola, które mają treść (plus to, które
 //   właśnie jest edytowane). Każdy akapit ma dwa stany:
@@ -91,40 +94,121 @@ export function createFormToolbar(opts) {
 
     const countEls = new Map();     // sekcja → licznik „wypełnione / wszystkie" w jej nagłówku
     const navGroups = groups.filter((g) => flat.some((f) => f._groupId === g.id));
+    const allSectionsCollapsed = () => navGroups.every((g) => collapsedSections.has(g.id));
+
+    /* --- wyszukiwanie tematu ------------------------------------------------- */
+
+    /**
+     * Do porównań: bez wielkości liter, polskich znaków i interpunkcji, słowa
+     * rozdzielone pojedynczą spacją („Lękowe / PHQ-9" → „lekowe phq 9").
+     */
+    function fold(s) {
+        return String(s == null ? '' : s).toLowerCase()
+            .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ł/g, 'l')
+            .replace(/[^a-z0-9]+/g, ' ').trim();
+    }
+
+    let query = '';     // szukany tekst, już po `fold`
+
+    /** Szukany tekst musi zaczynać SŁOWO: „waga" znajdzie „Waga", ale nie „uwaga". */
+    function hasWord(text) {
+        return (' ' + fold(text)).includes(' ' + query);
+    }
+
+    /**
+     * Czy pole pasuje do wyszukiwania — i dzięki czemu:
+     *   • nazwa pola albo nazwa sekcji → { via: '' },
+     *   • jedna z opcji do wyboru / słów kluczowych pola → { via: 'napady paniki' }
+     *     (żeby na liście było widać, dlaczego pole się pokazało).
+     */
+    function matchField(f) {
+        if (hasWord(f.label) || hasWord(f._groupTitle)) return { via: '' };
+        const terms = [...((f.input && f.input.options) || []), ...(f.keywords || [])];
+        const hit = terms.find(hasWord);
+        return hit ? { via: String(hit) } : null;
+    }
+
+    function clearSearch() {
+        query = '';
+        searchInput.value = '';
+    }
+
+    // Pole wyszukiwania i przełącznik sekcji żyją obok listy (nie są jej częścią),
+    // więc przerysowanie listy nie zabiera kursora z pola wyszukiwania.
+    const searchInput = el('input', {
+        type: 'search',
+        class: 'psy-form-toolbar__nav-search',
+        placeholder: 'Szukaj tematu…',
+        title: 'Szukaj po nazwie pola, sekcji albo opcji do wyboru (np. „sen", „panika", „waga")',
+        'aria-label': 'Szukaj tematu w wizycie',
+        autocomplete: 'off',
+        spellcheck: 'false',
+        dataset: { transient: '1' }     // wpisywanie tutaj nie jest zmianą notatki
+    });
+    searchInput.addEventListener('input', () => {
+        query = fold(searchInput.value.trim());
+        renderNav();
+        nav.scrollTop = 0;
+    });
+    searchInput.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') {
+            ev.preventDefault();
+            const first = listEl.querySelector('.psy-form-toolbar__field');
+            if (query && first) onNavClick(first.dataset.fieldUid);
+        } else if (ev.key === 'Escape' && searchInput.value) {
+            ev.preventDefault();
+            clearSearch();
+            renderNav();
+        }
+    });
+
+    // Sekcje są domyślnie ROZWINIĘTE (wymaganie klientki). Ten przełącznik zwija je
+    // na żądanie do samej listy sekcji — cały formularz mieści się wtedy na ekranie.
+    const toggleBtn = el('button', {
+        type: 'button',
+        class: 'psy-form-toolbar__nav-toggle',
+        dataset: { action: 'toggle-sections' },
+        onclick: () => {
+            if (allSectionsCollapsed()) collapsedSections.clear();
+            else for (const g of navGroups) collapsedSections.add(g.id);
+            renderNav();
+            nav.scrollTop = 0;
+        }
+    });
+    const listEl = el('div', { class: 'psy-form-toolbar__nav-list' });
+    nav.appendChild(el('div', { class: 'psy-form-toolbar__nav-tools' }, [searchInput, toggleBtn]));
+    nav.appendChild(listEl);
 
     function renderNav() {
         const scrollTop = nav.scrollTop;
-        nav.innerHTML = '';
+        listEl.innerHTML = '';
         itemEls.clear();
         countEls.clear();
 
-        // Sekcje są domyślnie ROZWINIĘTE (wymaganie klientki). Ten przełącznik zwija je
-        // na żądanie do samej listy sekcji — cały formularz mieści się wtedy na ekranie.
-        const allCollapsed = navGroups.every((g) => collapsedSections.has(g.id));
-        nav.classList.toggle('psy-form-toolbar__nav--sections-only', allCollapsed);
-        nav.appendChild(el('div', { class: 'psy-form-toolbar__nav-tools' }, [
-            el('button', {
-                type: 'button',
-                class: 'psy-form-toolbar__nav-toggle',
-                dataset: { action: 'toggle-sections' },
-                title: allCollapsed
-                    ? 'Pokaż pola wszystkich sekcji'
-                    : 'Pokaż same nazwy sekcji (z liczbą wypełnionych pól)',
-                onclick: () => {
-                    if (allCollapsed) collapsedSections.clear();
-                    else for (const g of navGroups) collapsedSections.add(g.id);
-                    renderNav();
-                    nav.scrollTop = 0;
-                }
-            }, [allCollapsed ? '▾ Rozwiń wszystkie sekcje' : '▸ Zwiń do listy sekcji'])
-        ]));
+        const searching = !!query;
+        const allCollapsed = allSectionsCollapsed();
+        nav.classList.toggle('psy-form-toolbar__nav--sections-only', allCollapsed && !searching);
+        // Podczas wyszukiwania lista pokazuje same trafienia — przełącznik sekcji nic by nie zmieniał.
+        toggleBtn.style.display = searching ? 'none' : '';
+        toggleBtn.textContent = allCollapsed ? '▾ Rozwiń wszystkie sekcje' : '▸ Zwiń do listy sekcji';
+        toggleBtn.title = allCollapsed
+            ? 'Pokaż pola wszystkich sekcji'
+            : 'Pokaż same nazwy sekcji (z liczbą wypełnionych pól)';
 
+        let shown = 0;
         for (const g of groups) {
-            const fields = flat.filter((f) => f._groupId === g.id);
+            const all = flat.filter((f) => f._groupId === g.id);
+            if (!all.length) continue;
+            // [pole, dopasowanie] — poza wyszukiwaniem wszystkie pola sekcji
+            const fields = searching
+                ? all.map((f) => [f, matchField(f)]).filter(([, m]) => m)
+                : all.map((f) => [f, null]);
             if (!fields.length) continue;
+            shown += fields.length;
 
-            const collapsed = collapsedSections.has(g.id);
+            const collapsed = !searching && collapsedSections.has(g.id);
             const toggle = () => {
+                if (searching) return;      // trafienia są zawsze rozwinięte
                 if (collapsed) collapsedSections.delete(g.id);
                 else collapsedSections.add(g.id);
                 renderNav();
@@ -153,11 +237,11 @@ export function createFormToolbar(opts) {
                 const txt = groupPreview(g, values) || '';
                 if (txt) title.appendChild(el('div', { class: 'psy-form-toolbar__group-preview' }, [txt]));
             }
-            nav.appendChild(title);
+            listEl.appendChild(title);
             if (collapsed) continue;
 
             const ul = el('ul', { class: 'psy-form-toolbar__group' });
-            for (const f of fields) {
+            for (const [f, match] of fields) {
                 const item = el('li', {
                     class: 'psy-form-toolbar__field',
                     role: 'button',
@@ -173,12 +257,20 @@ export function createFormToolbar(opts) {
                         el('span', { class: 'psy-form-toolbar__field-label' },
                             [f.label + (f.required ? ' *' : '')])
                     ]),
+                    // trafienie przez opcję / słowo kluczowe: pokaż, które
+                    match && match.via
+                        ? el('div', { class: 'psy-form-toolbar__field-match' }, ['↳ ' + match.via])
+                        : null,
                     el('div', { class: 'psy-form-toolbar__field-preview' })
                 ]);
                 ul.appendChild(item);
                 itemEls.set(f._uid, item);
             }
-            nav.appendChild(ul);
+            listEl.appendChild(ul);
+        }
+        if (searching && !shown) {
+            listEl.appendChild(el('div', { class: 'psy-form-toolbar__nav-empty' },
+                ['Brak tematów pasujących do „' + searchInput.value.trim() + '".']));
         }
         paintNav();
         nav.scrollTop = scrollTop;
@@ -217,7 +309,19 @@ export function createFormToolbar(opts) {
             if (field.input.ref) window.location.hash = field.input.ref;
             return;
         }
+        // Wybór trafienia kończy wyszukiwanie: wraca pełna lista, a wybrane pole jest
+        // w niej podświetlone i widoczne (także gdy jego sekcja była zwinięta).
+        const fromSearch = !!query;
+        if (fromSearch) {
+            clearSearch();
+            collapsedSections.delete(field._groupId);
+            renderNav();
+        }
         openEdit(uid, { scroll: true });
+        if (fromSearch) {
+            const item = itemEls.get(uid);
+            if (item) { try { item.scrollIntoView({ block: 'center' }); } catch (_) { /* */ } }
+        }
     }
 
     /* ---------------------------------------------------------------------

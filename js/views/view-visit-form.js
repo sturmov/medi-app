@@ -169,6 +169,8 @@ function attachAutocomplete(host, input, { search, itemParts, onPick, onFreeText
             ]));
         });
         host.appendChild(popover);
+        // Lista podpowiedzi wystaje poza akapit — notatka przewija się tak, żeby było ją widać całą.
+        try { popover.scrollIntoView({ block: 'nearest' }); } catch (_) { /* */ }
     }
     function pick(m) {
         input.value = '';
@@ -860,15 +862,31 @@ export function renderVisitForm(opts = {}) {
     let saveTimer = null;
 
     /* ---------------- pola paska ---------------- */
+    // Słowa, po których „Szukaj tematu…" znajduje pole, choć nie ma ich w jego nazwie
+    // ani na liście opcji (tę listę wyszukiwarka czyta sama z `input.options`).
+    const keywordsFor = (field) => {
+        const type = field.input && field.input.type;
+        if (type === 'uzywki-special') return VISIT_DICT.UZYWKI_11 || [];
+        if (type === 'inline-tests') return listAvailableTests().flatMap((t) => [t.code, t.name]);
+        return null;
+    };
+
     const groups = schema.map((section) => {
         if (section.compactGrid) {
             return {
                 id: section.id, title: section.title,
-                fields: [{ id: '__grid', label: section.title, input: { type: 'compact-grid' }, section, notes: false }]
+                fields: [{
+                    id: '__grid', label: section.title, input: { type: 'compact-grid' }, section, notes: false,
+                    // jedno okno = kilka pól: szukamy po nazwach i opcjach każdego z nich
+                    keywords: (section.subfields || []).flatMap((sf) => [sf.label, ...((sf.input && sf.input.options) || [])])
+                }]
             };
         }
         const fields = (section.subfields || []).filter((f) => !(f.input && f.input.type === 'header'));
-        const out = fields.slice();
+        const out = fields.map((f) => {
+            const keywords = keywordsFor(f);
+            return keywords ? { ...f, keywords } : f;
+        });
         if (section.sectionComment) {
             out.push({
                 id: '__comment',

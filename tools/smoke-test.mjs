@@ -382,6 +382,114 @@ async function scenarioDemo(origin) {
             assert.equal((await state()).fields, 86);
         });
 
+        await step('„Szukaj tematu": nazwy pól, sekcji i opcji (bez polskich znaków); wybór otwiera pole i przywraca pełną listę', async () => {
+            const INPUT = `document.querySelector('.psy-form-toolbar__nav-search')`;
+            const results = () => b.evaluate(`return {
+                query: ${INPUT}.value,
+                fields: [...document.querySelectorAll('.psy-form-toolbar__nav .psy-form-toolbar__field')].map((li) =>
+                    li.querySelector('.psy-form-toolbar__field-label').textContent
+                    + (li.querySelector('.psy-form-toolbar__field-match') ? ' ' + li.querySelector('.psy-form-toolbar__field-match').textContent : '')),
+                toggleShown: document.querySelector('[data-action="toggle-sections"]').style.display !== 'none',
+                empty: (document.querySelector('.psy-form-toolbar__nav-empty') || {}).textContent || '' };`);
+            const search = async (text) => {
+                await b.click('.psy-form-toolbar__nav-search');
+                await b.evaluate(`${INPUT}.value = ''; ${INPUT}.dispatchEvent(new Event('input', { bubbles: true }));`);
+                await b.type(text);
+                return results();
+            };
+            const before = await b.evaluate(`return JSON.stringify(PsyStore.getVisitById(${JSON.stringify(visitId)}));`);
+
+            let r = await search('sen');
+            assert.ok(r.fields.includes('Sen'), 'pole po nazwie: ' + r.fields.join(' | '));
+            assert.ok(r.fields.length < 10);
+            assert.equal(r.toggleShown, false, 'podczas wyszukiwania lista to same trafienia');
+
+            r = await search('lek');
+            assert.ok(r.fields.includes('Leki psychotropowe') && r.fields.includes('Lękowe'), '„lek" znajduje też „Lękowe": ' + r.fields.join(' | '));
+
+            assert.deepEqual((await search('WAGA')).fields, ['Parametry somatyczne ↳ Waga'], 'pole wewnątrz okna z kilkoma polami');
+            assert.deepEqual((await search('phq')).fields, ['Wyniki testów ↳ PHQ-9']);
+            r = await search('panik');
+            assert.ok(r.fields.some((f) => /^Lękowe ↳ .*panik/.test(f)), 'pole po opcji do wyboru: ' + r.fields.join(' | '));
+            r = await search('farmakoterapia');
+            assert.ok(r.fields.includes('Leki psychotropowe'), 'pola po nazwie sekcji: ' + r.fields.join(' | '));
+
+            r = await search('qqxyz');
+            assert.deepEqual(r.fields, []);
+            assert.match(r.empty, /Brak tematów pasujących do „qqxyz"/);
+            await b.screenshot(path.join(SHOTS, 'demo-08-szukaj-brak.png'));
+
+            // Esc czyści wyszukiwanie
+            await search('sen');
+            await b.key('Escape');
+            r = await results();
+            assert.deepEqual([r.query, r.fields.length, r.toggleShown], ['', 86, true]);
+
+            // Enter otwiera pierwsze trafienie; lista wraca do pełnej, a pole jest w niej widoczne
+            await search('waga');
+            await b.screenshot(path.join(SHOTS, 'demo-09-szukaj-waga.png'));
+            await b.key('Enter');
+            assert.equal(await b.evaluate(`return __t.mode('parametry::__grid');`), 'edit');
+            r = await results();
+            assert.deepEqual([r.query, r.fields.length], ['', 86]);
+            const inView = await b.evaluate(`
+                const nav = document.querySelector('.psy-form-toolbar__nav').getBoundingClientRect();
+                const item = __t.nav('parametry::__grid');
+                const box = item.getBoundingClientRect();
+                return item.classList.contains('psy-form-toolbar__field--active') && box.top >= nav.top && box.bottom <= nav.bottom;`);
+            assert.equal(inView, true, 'wybrane pole jest podświetlone i widoczne na liście');
+            await b.key('Escape');
+
+            // przy zwiniętej liście sekcji wybór trafienia rozwija sekcję wybranego pola
+            await b.click('[data-action="toggle-sections"]');
+            r = await search('ewaluacja');
+            assert.deepEqual(r.fields, ['Ewaluacja']);
+            await b.click(`document.querySelector('.psy-form-toolbar__nav .psy-form-toolbar__field')`);
+            assert.equal(await b.evaluate(`return __t.mode('oddzialywania::ewaluacja');`), 'edit');
+            r = await results();
+            assert.ok(r.fields.includes('Ewaluacja') && r.fields.length < 10, 'rozwinięta tylko sekcja wybranego pola: ' + r.fields.join(' | '));
+            await b.click('.psy-new-view__title');
+            await b.click('[data-action="toggle-sections"]');
+            if ((await results()).fields.length !== 86) await b.click('[data-action="toggle-sections"]');
+            assert.equal((await results()).fields.length, 86);
+
+            await sleep(600);
+            assert.equal(await b.evaluate(`return JSON.stringify(PsyStore.getVisitById(${JSON.stringify(visitId)}));`), before,
+                'samo szukanie i otwieranie pól niczego w wizycie nie zmienia');
+        });
+
+        await step('lista podpowiedzi (leki, ICD-10) jest widoczna w całości, także nisko w długiej notatce', async () => {
+            // Część listy faktycznie widoczna na ekranie (sprawdzane punkt po punkcie).
+            const visiblePercent = () => b.evaluate(`
+                const p = document.querySelector('.psy-autocomplete__popover');
+                const r = p.getBoundingClientRect();
+                let seen = 0, all = 0;
+                for (let y = r.top + 3; y < r.bottom - 1; y += 6) {
+                    for (let x = r.left + 10; x < r.right - 10; x += 40) {
+                        all++;
+                        const hit = document.elementFromPoint(x, y);
+                        if (hit && p.contains(hit)) seen++;
+                    }
+                }
+                return all ? Math.round(100 * seen / all) : 0;`);
+            for (const [uid, input, text] of [
+                ['farmakoterapia::leki', '.psy-vf__inline-meds__add input', 'se'],
+                ['rozpoznanie::diagnozy', '.psy-vf__inline-diagnoses__add input', 'F4'],
+                ['ocenaKliniczna::hipoteza', '.psy-vf__tag-icd10__input', 'F3']]) {
+                await b.click(`__t.nav('${uid}')`);
+                // pole „dodaj…" (przy lekach kursor staje najpierw w dawce pierwszego leku)
+                await b.click(`__t.ctl('${uid}', '${input}')`);
+                await b.type(text);
+                await waitFor(b, `__t.ctl('${uid}', '.psy-autocomplete__popover .psy-autocomplete__item')`, 4000, 'podpowiedzi w ' + uid);
+                await sleep(150);
+                assert.equal(await visiblePercent(), 100, uid + ': cała lista podpowiedzi na ekranie');
+                if (uid === 'rozpoznanie::diagnozy') await b.screenshot(path.join(SHOTS, 'demo-10-podpowiedzi-icd10.png'));
+                await b.key('Escape');      // zamyka listę podpowiedzi
+                await b.key('Escape');      // zamyka akapit
+            }
+            await b.click('.psy-new-view__title');
+        });
+
         await step('klik w akapit → edycja z zachowanymi wartościami; Esc → odczyt', async () => {
             await b.click(`__t.ent('somatyczne::sen')`);
             const r = await b.evaluate(`return {
