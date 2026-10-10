@@ -199,9 +199,10 @@ export async function launchBrowser({ width = 1366, height = 768 } = {}) {
          * warunek sprawdzany zaraz potem mógłby zostać spełniony jeszcze w STARYM dokumencie.
          * Dlatego znakujemy stary dokument i czekamy, aż zniknie.
          */
-        reload: async () => {
+        reload: async ({ hard = true } = {}) => {
             await evaluate(`window.__psyBeforeReload = true;`);
-            await send('Page.reload', { ignoreCache: true });
+            // hard = jak Ctrl+F5 (omija pamięć podręczną i service worker); hard: false = zwykłe F5.
+            await send('Page.reload', { ignoreCache: hard });
             for (let i = 0; i < 200; i++) {
                 await sleep(50);
                 try {

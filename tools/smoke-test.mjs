@@ -25,6 +25,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { startServer, launchBrowser, sleep } from './lib/browser.mjs';
 import { createGoogleMock, FOLDER_MIME } from './lib/google-mock.mjs';
+import { checkStamp } from './stamp.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SHOTS = path.join(ROOT, 'tools', '.smoke');
@@ -1376,15 +1377,122 @@ async function scenarioLocal(origin) {
     }
 }
 
+/* ==========================================================================
+   SCENARIUSZ: aktualne pliki po wdrożeniu (znaczniki wersji — tools/stamp.mjs)
+   ========================================================================== */
+
+/**
+ * Miniaturowa „aplikacja" zbudowana tak jak prawdziwa: strona ładuje moduł wejściowy,
+ * a ten STATYCZNIE importuje drugi moduł. Pliki są serwowane jak na GitHub Pages:
+ * przeglądarce wolno trzymać je 10 minut bez pytania serwera (`max-age=600`).
+ *   /__probe/plain.html    — import bez wersji w adresie (tak było przed znacznikami),
+ *   /__probe/stamped.html  — z mapą importów, która dopisuje do adresu modułu jego wersję
+ *                            (tak robi index.html po `tools/stamp.mjs`).
+ * `deploy()` = wdrożenie nowej wersji importowanego modułu.
+ */
+function createDeployProbe() {
+    let version = 1;
+    const page = (head) => '<!doctype html><meta charset="utf-8"><title>probe</title>' + head
+        + '<script type="module" src="entry.js?v=1"></script>';
+    const files = {
+        '/__probe/plain.html': () => ['text/html; charset=utf-8', page('')],
+        '/__probe/stamped.html': () => ['text/html; charset=utf-8', page(
+            '<script type="importmap">' + JSON.stringify({ imports: { './module.js': './module.js?v=' + version } }) + '</script>')],
+        '/__probe/entry.js': () => ['text/javascript', 'import { version } from "./module.js"; window.__probeVersion = version;'],
+        '/__probe/module.js': () => ['text/javascript', 'export const version = ' + version + ';']
+    };
+    return {
+        deploy() { version++; },
+        routes(req, res) {
+            const file = files[req.url.split('?')[0]];
+            if (!file) return false;
+            const [type, body] = file();
+            const headers = { 'Cache-Control': 'max-age=600', ETag: '"' + body.length + '-' + version + '"' };
+            if (req.headers['if-none-match'] === headers.ETag) {
+                res.writeHead(304, headers);
+                res.end();
+            } else {
+                res.writeHead(200, Object.assign({ 'Content-Type': type }, headers));
+                res.end(body);
+            }
+            return true;
+        }
+    };
+}
+
+async function scenarioFresh(origin, probe) {
+    console.log('\nAktualne pliki po wdrożeniu');
+    const b = (activeBrowser = await launchBrowser());
+    const version = async (page) => {
+        await waitFor(b, `location.pathname === '/__probe/${page}' && window.__probeVersion`, 8000, 'strona próbna ' + page);
+        return b.evaluate(`return window.__probeVersion;`);
+    };
+    try {
+        await step('bez znaczników: po wdrożeniu zwykłe odświeżenie (F5) nadal daje stary moduł', async () => {
+            await b.navigate(origin + '/__probe/plain.html');
+            assert.equal(await version('plain.html'), 1);
+            probe.deploy();
+            await b.reload({ hard: false });
+            assert.equal(await version('plain.html'), 1,
+                'F5 sprawdza tylko dokument — importowany moduł przeglądarka bierze z pamięci (stąd „nowy wygląd bez nowego pola")');
+        });
+
+        await step('ze znacznikami (mapa importów): to samo F5 daje nowy moduł od razu', async () => {
+            await b.navigate(origin + '/__probe/stamped.html');
+            assert.equal(await version('stamped.html'), 2);
+            probe.deploy();
+            await b.reload({ hard: false });
+            assert.equal(await version('stamped.html'), 3, 'po F5 strona ma wersję z wdrożenia');
+            await b.reload({ hard: false });
+            assert.equal(await version('stamped.html'), 3, 'bez wdrożenia nic się nie zmienia');
+        });
+
+        await step('aplikacja: każdy moduł jest ładowany z odciskiem treści w adresie', async () => {
+            await b.onNewDocument(`try { localStorage.setItem('psy-new:devMode', '1'); } catch (e) {} ${PAGE_HELPERS}`);
+            await b.navigate(origin + '/index.html#/patients');
+            await waitFor(b, `window.PsyStore && document.querySelector('.psy-new-table tbody tr')`, 10000, 'lista pacjentów');
+            // widok kalendarza i formularz wizyty dociągają resztę modułów
+            await b.evaluate(`PsyStore.selectPatient('P001'); location.hash = '#/visit/form/new/next_meeting';`);
+            await waitFor(b, `document.querySelector('.psy-form-toolbar__nav')`, 8000, 'formularz wizyty');
+            const r = await b.evaluate(`
+                const urls = performance.getEntriesByType('resource').map((e) => e.name);
+                const app = (re) => urls.filter((u) => u.startsWith(location.origin) && re.test(new URL(u).pathname));
+                const map = JSON.parse(document.querySelector('script[type="importmap"]').textContent).imports;
+                return {
+                    modules: app(/^\\/js\\/.+\\.js$/),
+                    styles: app(/^\\/css\\/.+\\.css$/),
+                    mapped: Object.values(map).map((v) => new URL(v, location.href).href),
+                    // moduł pobrany „z boku" (jak w testach) to ta sama instancja co w aplikacji
+                    sameStore: (await import('/js/views/_store.js')).Store === window.PsyStore };`);
+            const unstamped = [...r.modules, ...r.styles].filter((u) => !/\?v=[0-9a-f]{10}$/.test(u));
+            assert.deepEqual(unstamped, [], 'pliki bez znacznika wersji');
+            assert.ok(r.modules.length >= 30 && r.styles.length === 9, 'wczytane moduły: ' + r.modules.length + ', style: ' + r.styles.length);
+            assert.deepEqual(r.modules.filter((u) => !r.mapped.includes(u)), [], 'adresy modułów pochodzą z mapy importów');
+            assert.equal(r.sameStore, true);
+        });
+
+        await step('brak błędów w konsoli', async () => noPageProblems(b));
+    } finally {
+        await b.close();
+    }
+}
+
 /* ========================================================================== */
 
 const mock = createGoogleMock();
-const { server, origin } = await startServer(ROOT, (req, res) => mock.routes(req, res));
+const probe = createDeployProbe();
+const { server, origin } = await startServer(ROOT, (req, res) => probe.routes(req, res) || mock.routes(req, res));
 try {
+    // Przed każdym przebiegiem: wydanie z nieaktualnymi znacznikami zostawiłoby u użytkowników stare pliki.
+    console.log('\nWydanie');
+    await step('znaczniki wersji plików w index.html są aktualne (inaczej: node tools/stamp.mjs)', async () => {
+        assert.equal(checkStamp().current, true, 'index.html ma nieaktualne znaczniki wersji — uruchom: node tools/stamp.mjs');
+    });
     if (!only || only === 'demo') await scenarioDemo(origin);
     if (!only || only === 'calendar') await scenarioCalendar(origin);
     if (!only || only === 'gdrive') await scenarioGDrive(origin, mock);
     if (!only || only === 'local') await scenarioLocal(origin);
+    if (!only || only === 'fresh') await scenarioFresh(origin, probe);
 } finally {
     server.close();
 }

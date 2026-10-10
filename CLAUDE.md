@@ -8,9 +8,19 @@ UI text and code comments are Polish. Requirements come from the client through 
 
 ```bash
 node tools/serve.mjs            # http://localhost:8123  (no Python on the dev machine)
+node tools/stamp.mjs            # after any change in js/ or css/: refresh file fingerprints in index.html
 node tools/test-patient-doc.mjs # data layer: every form field survives save → load; holidays
-node tools/smoke-test.mjs       # real browser: demo | calendar | gdrive | local scenarios
+node tools/smoke-test.mjs       # real browser: demo | calendar | gdrive | local | fresh scenarios
 ```
+
+### File fingerprints (run `tools/stamp.mjs` before every commit that touches `js/` or `css/`)
+
+GitHub Pages lets a browser keep each file for 10 minutes without asking the server, and a normal refresh (F5) rechecks only `index.html`. Without fingerprints a release left browsers running new and old files together, for example new CSS with an old JS module. `tools/stamp.mjs` writes a hash of each file's content into `index.html`: as `?v=…` on the stylesheets and scripts listed there, and as an import map (between the `stamp:importmap` markers) that rewrites every module import to its fingerprinted address. A changed file therefore has a new address that no cache can answer from.
+
+- The smoke test starts with a stamp check and fails if `index.html` is out of date. Never edit the stamps by hand.
+- The `fresh` scenario reproduces the stale-module problem on a page without stamps and shows the same F5 picking up the new module with them. It also asserts that every module the app loads carries a fingerprint.
+- A service worker that forces revalidation was tried and does not work for this: on F5 Chrome reuses statically imported modules and stylesheets from memory without asking the service worker.
+- Scripts loaded by path at run time (`lib/fullcalendar/…`) are not stamped. If such a library is ever replaced, give it a new file name.
 
 `node --check` is not evidence that anything works; it has passed on files the browser refused to parse. A change is done when `tools/smoke-test.mjs` passes and, for UI work, you have looked at the screenshots it writes to `tools/.smoke/`. The smoke test needs Chrome or Edge (override with `CHROME_PATH`) and no npm packages.
 

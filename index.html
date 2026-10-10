@@ -4,20 +4,69 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PsychoApp — Dokumentacja Psychologiczna</title>
-    <!-- Cache-busting `?v=RRRRMMDDggmm` na wszystkich CSS i JS — bumpuj przy
-         każdym deployu, żeby nie był potrzebny hard reload. -->
-    <link rel="stylesheet" href="css/tokens.css?v=202610130900">
-    <link rel="stylesheet" href="css/style.css?v=202610130900">
-    <link rel="stylesheet" href="css/compat.css?v=202610130900">
-    <link rel="stylesheet" href="css/app-new.css?v=202610130900">
+    <!-- Znaczniki `?v=…` i mapę importów poniżej wpisuje `node tools/stamp.mjs`
+         (odcisk treści każdego pliku) — nie edytuj ich ręcznie. Dzięki nim po
+         wdrożeniu zwykłe odświeżenie strony ładuje wszystkie pliki w nowej wersji.
+         Mapa importów musi stać przed pierwszym skryptem typu „module". -->
+    <!-- stamp:importmap:start -->
+    <script type="importmap">
+    {
+        "imports": {
+            "./js/app-new.js": "./js/app-new.js?v=1c8c9e0088",
+            "./js/components/lit.js": "./js/components/lit.js?v=56d7543edf",
+            "./js/components/psy-toast-container.js": "./js/components/psy-toast-container.js?v=4b560b0189",
+            "./js/components/psy-toast.js": "./js/components/psy-toast.js?v=92b3d5c77f",
+            "./js/views/_attachments.js": "./js/views/_attachments.js?v=19b00c509f",
+            "./js/views/_autogrow.js": "./js/views/_autogrow.js?v=9ce225949d",
+            "./js/views/_calendar-api.js": "./js/views/_calendar-api.js?v=5f668be8b8",
+            "./js/views/_config.js": "./js/views/_config.js?v=1fab8f8eef",
+            "./js/views/_documents-store.js": "./js/views/_documents-store.js?v=2684f99e2a",
+            "./js/views/_dom.js": "./js/views/_dom.js?v=99678da9df",
+            "./js/views/_fake-data.js": "./js/views/_fake-data.js?v=d088d997b9",
+            "./js/views/_folder-handle.js": "./js/views/_folder-handle.js?v=a383009f62",
+            "./js/views/_form-helpers.js": "./js/views/_form-helpers.js?v=6fcc020d1c",
+            "./js/views/_form-toolbar.js": "./js/views/_form-toolbar.js?v=528b33f9bb",
+            "./js/views/_google-auth.js": "./js/views/_google-auth.js?v=14be975a8c",
+            "./js/views/_holidays-pl.js": "./js/views/_holidays-pl.js?v=b694a8003e",
+            "./js/views/_icd10-dict.js": "./js/views/_icd10-dict.js?v=0e651ffec8",
+            "./js/views/_local-folder-store.js": "./js/views/_local-folder-store.js?v=541dd97094",
+            "./js/views/_meds-dict.js": "./js/views/_meds-dict.js?v=9bca6f55d9",
+            "./js/views/_menu.js": "./js/views/_menu.js?v=9e41f276d0",
+            "./js/views/_modal.js": "./js/views/_modal.js?v=9207700fce",
+            "./js/views/_patient-doc.js": "./js/views/_patient-doc.js?v=9a49fdd650",
+            "./js/views/_sheet-model.js": "./js/views/_sheet-model.js?v=f7459c1e1f",
+            "./js/views/_storage-errors.js": "./js/views/_storage-errors.js?v=e7dc5aed9a",
+            "./js/views/_storage-gdrive.js": "./js/views/_storage-gdrive.js?v=9f5c142b5f",
+            "./js/views/_storage-local.js": "./js/views/_storage-local.js?v=cbe1354ed3",
+            "./js/views/_store.js": "./js/views/_store.js?v=bbd3bdc89b",
+            "./js/views/_tests-catalog.js": "./js/views/_tests-catalog.js?v=ca984378e9",
+            "./js/views/_visit-describe.js": "./js/views/_visit-describe.js?v=8cbcc5c905",
+            "./js/views/_visit-dict.js": "./js/views/_visit-dict.js?v=5848e9a439",
+            "./js/views/_visit-form-schema.js": "./js/views/_visit-form-schema.js?v=08e2cc35d0",
+            "./js/views/_visit-types.js": "./js/views/_visit-types.js?v=c2e2e2bee7",
+            "./js/views/_xlsx-codec.js": "./js/views/_xlsx-codec.js?v=a1c5dad176",
+            "./js/views/view-calendar.js": "./js/views/view-calendar.js?v=259b32b120",
+            "./js/views/view-extracts.js": "./js/views/view-extracts.js?v=f99721c4c6",
+            "./js/views/view-folder-gate.js": "./js/views/view-folder-gate.js?v=8780ce6efe",
+            "./js/views/view-patient-detail.js": "./js/views/view-patient-detail.js?v=c301f09dde",
+            "./js/views/view-test-runner.js": "./js/views/view-test-runner.js?v=663e23be83",
+            "./js/views/view-visit-form.js": "./js/views/view-visit-form.js?v=f53ebf4b83"
+        }
+    }
+    </script>
+    <!-- stamp:importmap:end -->
+    <link rel="stylesheet" href="css/tokens.css?v=7fef82cdb3">
+    <link rel="stylesheet" href="css/style.css?v=b79dfb69d3">
+    <link rel="stylesheet" href="css/compat.css?v=eb83a8b0ed">
+    <link rel="stylesheet" href="css/app-new.css?v=d5b9c34891">
     <!-- Tryb kompaktowy: aktywny przez klasę `theme--compact` na <html>. -->
-    <link rel="stylesheet" href="css/compact-new.css?v=202610130900">
+    <link rel="stylesheet" href="css/compact-new.css?v=4007cc7a7b">
     <!-- Formularz wizyty: pasek pól + dziennik akapitów. -->
-    <link rel="stylesheet" href="css/form-toolbar.css?v=202610130900">
-    <link rel="stylesheet" href="css/visit-form-2026-06.css?v=202610130900">
-    <link rel="stylesheet" href="css/calendar.css?v=202610130900">
+    <link rel="stylesheet" href="css/form-toolbar.css?v=67cd8dd281">
+    <link rel="stylesheet" href="css/visit-form-2026-06.css?v=81aa84edc6">
+    <link rel="stylesheet" href="css/calendar.css?v=bfb4f19cd1">
     <!-- Tablet / wąskie ekrany — musi być ostatni. -->
-    <link rel="stylesheet" href="css/responsive.css?v=202610130900">
+    <link rel="stylesheet" href="css/responsive.css?v=d60c34205d">
 </head>
 <body class="psy-app-body">
 
@@ -90,9 +139,9 @@
 
 <!-- xlsx-js-style (fork SheetJS ze stylami) — globalny `XLSX` dla trybu
      folderu lokalnego i przycisku „Pobierz kopię". -->
-<script src="lib/xlsx-js-style.min.js"></script>
+<script src="lib/xlsx-js-style.min.js?v=e9b2e1cc60"></script>
 
-<script type="module" src="js/app-new.js?v=202610130900"></script>
+<script type="module" src="js/app-new.js?v=1c8c9e0088"></script>
 
 </body>
 </html>
