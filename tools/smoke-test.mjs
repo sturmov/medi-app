@@ -32,6 +32,8 @@ const only = process.argv[2] || '';
 
 let passed = 0;
 let failed = 0;
+let activeBrowser = null;       // przeglądarka bieżącego scenariusza — do zrzutu ekranu przy błędzie
+const RUN_ID = new Date().toTimeString().slice(0, 8).replace(/:/g, '');
 
 async function step(name, fn) {
     try {
@@ -41,6 +43,11 @@ async function step(name, fn) {
     } catch (e) {
         failed++;
         console.error('  ✗ ' + name + '\n      ' + String(e && e.message || e).split('\n').slice(0, 14).join('\n      '));
+        // Stan ekranu w chwili błędu: tools/.smoke/BLAD-<godzina uruchomienia>-<nr>.png
+        if (activeBrowser) {
+            const shot = path.join(SHOTS, 'BLAD-' + RUN_ID + '-' + failed + '.png');
+            try { await activeBrowser.screenshot(shot); console.error('      zrzut ekranu: ' + shot); } catch (_) { /* */ }
+        }
     }
 }
 
@@ -133,7 +140,7 @@ function noPageProblems(b) {
    ========================================================================== */
 async function scenarioDemo(origin) {
     console.log('\nTryb demo — formularz wizyty');
-    const b = await launchBrowser();
+    const b = (activeBrowser = await launchBrowser());
     try {
         await b.onNewDocument(`try { localStorage.setItem('psy-new:devMode', '1'); } catch (e) {} ${PAGE_HELPERS}`);
         await b.navigate(origin + '/index.html#/patients');
@@ -347,15 +354,123 @@ async function scenarioDemo(origin) {
             await b.screenshot(path.join(SHOTS, 'demo-04-plan-leczenia.png'));
         });
 
-        await step('usunięcie wizyty usuwa też jej leki i rozpoznania z osi czasu', async () => {
+        /** Wyciąg: nagłówki tabeli i wiersze (z identyfikatorem wizyty, z której pochodzi rekord). */
+        const extract = async (hash) => {
+            await go(b, '#/settings');
+            await go(b, hash);
+            await waitFor(b, `location.hash === '${hash}' && document.querySelector('.psy-extract, .psy-new-empty')`, 6000, 'wyciąg ' + hash);
+            return b.evaluate(`return {
+                head: [...document.querySelectorAll('.psy-extract thead th')].map((x) => x.textContent),
+                rows: [...document.querySelectorAll('.psy-extract tbody tr')].map((tr) => ({ visit: tr.dataset.visitId || '', text: tr.innerText })) };`);
+        };
+        const today = await b.evaluate(`const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');`);
+
+        await step('zalecenia wpisuje się w wizycie; test uruchamia się z wizyty i wynik do niej wraca', async () => {
+            await go(b, '#/visit/form/' + visitId);
+            await waitFor(b, `__t.nav('zalecenia::tresc')`);
+            await b.click(`__t.nav('zalecenia::tresc')`);
+            await b.type('Spacer 30 minut dziennie');
+
+            await b.click(`__t.nav('testy::wyniki')`);
+            await waitFor(b, `__t.ctl('testy::wyniki', '[data-test-code="PHQ-9"]')`);
+            await b.screenshot(path.join(SHOTS, 'demo-05-testy-w-wizycie.png'));
+            await b.click(`__t.ctl('testy::wyniki', '[data-test-code="PHQ-9"]')`);
+            await waitFor(b, `location.hash === '#/tests/run/PHQ-9?visit=${visitId}' && document.querySelector('.psy-test-runner input[type="radio"]')`, 6000, 'ekran testu');
+            // 8 × „2" + ostatnie pytanie „1" = 17 pkt, z czerwoną flagą (pytanie 9)
+            await b.evaluate(`document.querySelectorAll('.psy-test-runner__q').forEach((q, i, all) => {
+                q.querySelector('input[value="' + (i === all.length - 1 ? '1' : '2') + '"]').click(); });`);
+            await b.click(`[...document.querySelectorAll('.psy-test-runner .btn')].find((x) => x.innerText.includes('Pokaż wynik'))`);
+            await waitFor(b, `document.querySelector('.psy-test-runner__result')`);
+            await b.click(`[...document.querySelectorAll('.psy-test-runner__result .btn')].find((x) => x.innerText.includes('Zapisz wynik'))`);
+            await waitFor(b, `location.hash.startsWith('#/visit/form/${visitId}') && __t.ent('testy::wyniki')`, 6000, 'powrót do wizyty');
+
+            const entry = await b.evaluate(`return __t.ent('testy::wyniki').innerText;`);
+            assert.match(entry, /PHQ-9 — wynik 17/);
+            const v = await b.evaluate(`return PsyStore.getVisitById(${JSON.stringify(visitId)});`);
+            assert.equal(v.data._raw['zalecenia.tresc'], 'Spacer 30 minut dziennie');
+            assert.equal(v.data.tests.length, 1);
+            assert.deepEqual([v.data.tests[0].code, v.data.tests[0].score, v.data.tests[0].redFlag], ['PHQ-9', 17, true]);
+            assert.equal(v.data.meds.length, 1, 'reszta wizyty nietknięta');
+            assert.equal(await b.evaluate(`return PsyStore.getStandaloneTests('P004').length;`), 0, 'wynik nie jest osobnym rekordem');
+        });
+
+        await step('siedem zakładek to wyciągi: data i rodzaj wizyty w każdym wierszu, klik otwiera tę wizytę', async () => {
+            const expected = {
+                '#/meds': ['Setal'], '#/tests': ['PHQ-9', '17'], '#/recommendations': ['Spacer 30 minut dziennie'],
+                '#/treatment-plan': ['CBT raz w tygodniu'], '#/diagnoses': ['F41.1'], '#/parameters': ['22.5']
+            };
+            for (const [hash, parts] of Object.entries(expected)) {
+                const r = await extract(hash);
+                assert.deepEqual(r.head.slice(0, 2), ['Data wizyty', 'Rodzaj wizyty'], hash);
+                assert.equal(r.rows.length, 1, hash + ': jeden rekord');
+                assert.equal(r.rows[0].visit, visitId, hash + ': rekord wskazuje wizytę');
+                for (const p of [today, '1sze spotkanie', ...parts]) assert.ok(r.rows[0].text.includes(p), hash + ': brak „' + p + '"');
+            }
+            await b.screenshot(path.join(SHOTS, 'demo-06-wyciag-zalecenia.png'));
+            await b.click(`.psy-extract tbody tr[data-visit-id="${visitId}"]`);
+            await waitFor(b, `location.hash === '#/visit/form/${visitId}' && __t.ent('testy::wyniki')`, 6000, 'wizyta po kliknięciu rekordu');
+            // dokumenty w trybie demo: nie ma gdzie trzymać plików
+            const docs = await extract('#/documents');
+            assert.equal(docs.rows.length, 0);
+        });
+
+        await step('usunięcie wizyty usuwa wszystko, co w niej wpisano — także z wyciągów', async () => {
             await go(b, '#/visit/form/' + visitId);
             await waitFor(b, `document.querySelector('.psy-visit-form-view .btn--danger')`);
             await b.click('.psy-visit-form-view .btn--danger');
             await waitFor(b, `document.querySelector('.psy-modal__footer .btn--danger')`);
             await b.click('.psy-modal__footer .btn--danger');
             await waitFor(b, `location.hash === '#/history'`);
-            const r = await b.evaluate(`return { visits: PsyStore.getVisits('P004').length, meds: PsyStore.getMedsTimeline('P004').length, dx: PsyStore.getDiagnosesTimeline('P004').length };`);
-            assert.deepEqual(r, { visits: 0, meds: 0, dx: 0 });
+            const r = await b.evaluate(`return { visits: PsyStore.getVisits('P004').length, meds: PsyStore.getMedsTimeline('P004').length,
+                dx: PsyStore.getDiagnosesTimeline('P004').length, tests: PsyStore.getTestsTimeline('P004').length,
+                rec: PsyStore.getRecommendationsTimeline('P004').length };`);
+            assert.deepEqual(r, { visits: 0, meds: 0, dx: 0, tests: 0, rec: 0 });
+        });
+
+        await step('test nie uruchomi się poza wizytą; w nowej wizycie zakłada ją w chwili uruchomienia', async () => {
+            await go(b, '#/tests/run/PHQ-9');
+            await waitFor(b, `__t.main().includes('Test uruchamia się z wizyty')`, 4000, 'informacja zamiast testu');
+            await go(b, '#/visit/form/new/phone_contact');
+            await waitFor(b, `location.hash.endsWith('phone_contact') && __t.nav('testy::wyniki')`);
+            assert.equal(await b.evaluate(`return PsyStore.getVisits('P004').length;`), 0, 'pusta nowa wizyta jeszcze nie istnieje');
+            await b.click(`__t.nav('testy::wyniki')`);
+            await b.click(`__t.ctl('testy::wyniki', '[data-test-code="GAD-7"]')`);
+            await waitFor(b, `location.hash.startsWith('#/tests/run/GAD-7?visit=') && document.querySelector('.psy-test-runner input[type="radio"]')`, 6000, 'ekran testu');
+            const r = await b.evaluate(`const v = PsyStore.getVisits('P004'); return { n: v.length, type: v[0] && v[0].type, id: v[0] && v[0].id, hash: location.hash };`);
+            assert.equal(r.n, 1);
+            assert.equal(r.type, 'phone_contact');
+            assert.equal(r.hash, '#/tests/run/GAD-7?visit=' + r.id);
+            await b.click(`[...document.querySelectorAll('.psy-test-runner .btn')].find((x) => x.innerText.includes('Wróć do wizyty'))`);
+            await waitFor(b, `location.hash.startsWith('#/visit/form/${r.id}')`, 4000, 'powrót bez zapisu wyniku');
+            assert.equal(await b.evaluate(`return PsyStore.getTestsTimeline('P004').length;`), 0);
+        });
+
+        await step('dawne rekordy „bez wizyty" (testy, zalecenia) są w wyciągach i dają się usunąć', async () => {
+            await b.evaluate(`
+                PsyStore.selectPatient('P005');
+                PsyStore.state.tests.push({ id: 'TL1', patientId: 'P005', code: 'GAD-7', name: 'GAD-7', date: '2025-01-05', score: 7, interpretation: 'dawny wynik' });
+                PsyStore.state.recommendations.push({ id: 'RL1', patientId: 'P005', title: 'Dawne zalecenie', content: 'ruch', createdAt: '2025-01-06' });`);
+            for (const [hash, part, left] of [['#/tests', 'dawny wynik', `PsyStore.getStandaloneTests('P005').length`],
+                ['#/recommendations', 'Dawne zalecenie', `PsyStore.getStandaloneRecommendations('P005').length`]]) {
+                const r = await extract(hash);
+                assert.equal(r.rows.length, 1, hash);
+                assert.equal(r.rows[0].visit, '', hash + ': rekord nie prowadzi do wizyty');
+                assert.ok(r.rows[0].text.includes('bez wizyty') && r.rows[0].text.includes(part), hash + ': ' + r.rows[0].text);
+                await b.click('.psy-extract__row--loose .btn--danger');
+                await waitFor(b, `document.querySelector('.psy-modal__footer .btn--danger')`);
+                await b.click('.psy-modal__footer .btn--danger');
+                await waitFor(b, `${left} === 0 && document.querySelector('.psy-new-empty')`, 4000, hash + ': rekord usunięty');
+            }
+        });
+
+        await step('menu boczne: same wyciągi z wizyt; dane identyfikacyjne otwiera nazwisko na górnym pasku', async () => {
+            const labels = await b.evaluate(`return [...document.querySelectorAll('.psy-new-sidebar__label')].map((x) => x.textContent.trim());`);
+            assert.deepEqual(labels, ['+ Nowa wizyta', 'Historia wizyt', 'Kalendarz', 'Leki', 'Testy', 'Zalecenia',
+                'Plan leczenia', 'Diagnozy', 'Parametry', 'Dokumenty']);
+            await go(b, '#/history');
+            await b.click('.psy-new-patient-tag__name');
+            await waitFor(b, `location.hash === '#/patient-data' && __t.main().includes('Dane kontaktowe')`, 4000, 'dane identyfikacyjne');
+            assert.match(await b.evaluate(`return __t.main();`), /Lewandowska/);
         });
 
         await step('dane przykładowe: pozostałe widoki działają', async () => {
@@ -379,7 +494,7 @@ async function scenarioDemo(origin) {
    ========================================================================== */
 async function scenarioCalendar(origin) {
     console.log('\nKalendarz');
-    const b = await launchBrowser();
+    const b = (activeBrowser = await launchBrowser());
     const day = nextWeekWednesday();
     const visitEvent = `[...document.querySelectorAll('.psy-cal-ev--unpaid, .psy-cal-ev--paid')].find((x) => x.innerText.includes('Anna Nowak'))`;
     try {
@@ -539,7 +654,7 @@ async function scenarioCalendar(origin) {
    ========================================================================== */
 async function scenarioGDrive(origin, mock) {
     console.log('\nDysk Google (atrapa API)');
-    const b = await launchBrowser();
+    const b = (activeBrowser = await launchBrowser());
     const sheet = () => mock.spreadsheets()[0];
     const idle = `window.PsyStore && !PsyStore.hasUnsavedChanges() && PsyStore.state.saveStatus !== 'saving'`;
     try {
@@ -590,7 +705,7 @@ async function scenarioGDrive(origin, mock) {
             assert.equal(folder.name, 'P001_Kowalska_Anna');
             assert.equal(mock.files.get(folder.parents[0]).appProperties.psyKind, 'root');
             assert.deepEqual(mock.tabTitles(s.id),
-                ['Pacjent', 'Wizyty', 'Leki', 'Diagnozy', 'Parametry', 'Plan leczenia', 'Zalecenia', 'Testy', '_dane']);
+                ['Pacjent', 'Wizyty', 'Leki', 'Diagnozy', 'Parametry', 'Plan leczenia', 'Zalecenia', 'Testy', 'Dokumenty', '_dane']);
             assert.equal(s.appProperties.nazwisko, 'Kowalska');
             const pacjent = mock.tab(s.id, 'Pacjent').map((r) => r.join(' | '));
             assert.ok(pacjent.includes('Kontakt | Ulica | Wiejska 4'), 'adres w zakładce Pacjent: ' + pacjent.join(' ; '));
@@ -857,27 +972,90 @@ async function scenarioGDrive(origin, mock) {
             assert.equal(paidInSheet(), true);
         });
 
-        await step('załączniki: wgranie, lista, zmiana nazwy i usunięcie w folderze „dokumenty"', async () => {
+        const docsInVisit = async (id) => mock.doc(sheet().id).visits.find((v) => v.id === id).data.docs;
+        const docRows = async () => {
+            await go(b, '#/settings');
             await go(b, '#/documents');
-            await waitFor(b, `document.querySelector('.psy-docs__uploader input[type="file"]')`);
+            // wiersze z wizyt są od razu; lista plików z Dysku dochodzi po chwili
+            await waitFor(b, `location.hash === '#/documents' && document.querySelector('.psy-extract__note') && document.querySelector('.psy-extract__note').textContent === ''
+                && document.querySelector('.psy-extract, .psy-new-empty')`, 8000, 'wyciąg Dokumenty');
+            return b.evaluate(`return [...document.querySelectorAll('.psy-extract tbody tr')].map((tr) => ({ visit: tr.dataset.visitId || '', text: tr.innerText }));`);
+        };
+        let uploaded = null;
+
+        await step('dokument dołącza się w wizycie: plik w folderze „dokumenty", a wizyta i arkusz wiedzą, że jest jej', async () => {
+            const id = await visitId();
+            await go(b, '#/visit/form/' + id);
+            await waitFor(b, `__t.nav('dokumenty::pliki')`);
+            await b.click(`__t.nav('dokumenty::pliki')`);
+            await waitFor(b, `__t.ctl('dokumenty::pliki', 'input[type="file"]')`);
             await b.evaluate(`
-                const input = document.querySelector('.psy-docs__uploader input[type="file"]');
+                const input = __t.ctl('dokumenty::pliki', 'input[type="file"]');
                 const dt = new DataTransfer();
                 dt.items.add(new File(['treść skierowania ąę'], 'skierowanie.txt', { type: 'text/plain' }));
                 input.files = dt.files;
                 input.dispatchEvent(new Event('change', { bubbles: true }));`);
-            await waitFor(b, `document.querySelector('.psy-docs__row')`, 8000, 'plik na liście');
+            await waitFor(b, `__t.ctl('dokumenty::pliki', '.psy-vf__inline-docs__link')`, 8000, 'plik na liście w wizycie');
+            await b.screenshot(path.join(SHOTS, 'gdrive-07-dokument-w-wizycie.png'));
+            assert.equal(await b.evaluate(`return PsyStore.getVisitById(${JSON.stringify(id)}).data.docs.length;`), 1,
+                'wizyta zapisuje plik od razu po wgraniu (bez czekania na autozapis)');
+            await waitFor(b, idle, 15000, 'zapis wizyty z plikiem');
+
             const docsFolder = mock.find((f) => f.name === 'dokumenty')[0];
             assert.equal(docsFolder.parents[0], sheet().parents[0], 'folder dokumenty w folderze pacjenta');
-            const uploaded = mock.find((f) => f.name === 'skierowanie.txt')[0];
+            uploaded = mock.find((f) => f.name === 'skierowanie.txt')[0];
             assert.equal(uploaded.parents[0], docsFolder.id);
             assert.equal(uploaded.content.toString('utf8'), 'treść skierowania ąę');
+            assert.deepEqual(await docsInVisit(id), [{ id: uploaded.id, name: 'skierowanie.txt', size: uploaded.content.length }],
+                'wizyta wskazuje plik po identyfikatorze z Dysku');
+            const tab = mock.tab(sheet().id, 'Dokumenty');
+            assert.deepEqual(tab[0].slice(0, 3), ['Data wizyty', 'Typ wizyty', 'Plik (folder „dokumenty")']);
+            assert.deepEqual(tab[1].slice(1, 3), ['Kolejne spotkanie', 'skierowanie.txt']);
+            assert.ok(mock.tab(sheet().id, 'Wizyty').some((r) => r[4] === 'Dokumenty' && r[5] === 'skierowanie.txt'), 'plik także w zakładce Wizyty');
+        });
 
-            await b.click('.psy-docs__row .btn--danger');
+        await step('wyciąg „Dokumenty": plik z datą swojej wizyty; plik spoza wizyt jako „bez wizyty" i da się go usunąć', async () => {
+            const id = await visitId();
+            // skan wrzucony prosto na Dysk (poza aplikacją) — żadna wizyta go nie wskazuje
+            const docsFolder = mock.find((f) => f.name === 'dokumenty')[0];
+            mock.files.set('file_reczny', {
+                id: 'file_reczny', name: 'skan z Dysku.pdf', mimeType: 'application/pdf', parents: [docsFolder.id],
+                appProperties: {}, trashed: false, createdTime: '2026-09-01T10:00:00.000Z', modifiedTime: '2026-09-01T10:00:00.000Z',
+                content: Buffer.from('%PDF-1.4')
+            });
+            let rows = await docRows();
+            assert.equal(rows.length, 2);
+            assert.equal(rows[0].visit, id, 'plik z wizyty prowadzi do tej wizyty');
+            assert.ok(rows[0].text.includes('skierowanie.txt') && rows[0].text.includes('Kolejne spotkanie'), rows[0].text);
+            assert.equal(rows[1].visit, '');
+            assert.ok(rows[1].text.includes('skan z Dysku.pdf') && rows[1].text.includes('bez wizyty') && rows[1].text.includes('2026-09-01'), rows[1].text);
+            await b.screenshot(path.join(SHOTS, 'gdrive-08-wyciag-dokumenty.png'));
+
+            await b.click('.psy-extract__row--loose .btn--danger');
             await waitFor(b, `document.querySelector('.psy-modal__footer .btn--danger')`);
             await b.click('.psy-modal__footer .btn--danger');
-            await waitFor(b, `!document.querySelector('.psy-docs__row')`, 8000, 'plik zniknął z listy');
-            assert.equal(mock.files.get(uploaded.id).trashed, true, 'plik trafił do kosza Dysku');
+            await waitFor(b, `document.querySelectorAll('.psy-extract tbody tr').length === 1`, 8000, 'plik „bez wizyty" usunięty');
+            assert.equal(mock.files.get('file_reczny').trashed, true, 'plik trafił do kosza Dysku');
+            assert.equal(uploaded.trashed, false, 'plik z wizyty nietknięty');
+
+            await b.click(`.psy-extract tbody tr[data-visit-id="${id}"]`);
+            await waitFor(b, `location.hash === '#/visit/form/${id}'`, 4000, 'klik w rekord otwiera wizytę');
+        });
+
+        await step('usunięcie pliku w wizycie: znika z wizyty i wyciągu, na Dysku trafia do Kosza', async () => {
+            const id = await visitId();
+            await waitFor(b, `__t.ent('dokumenty::pliki')`);
+            await b.click(`__t.ent('dokumenty::pliki')`);
+            await waitFor(b, `__t.ctl('dokumenty::pliki', '.psy-vf__inline-meds__remove')`);
+            await b.click(`__t.ctl('dokumenty::pliki', '.psy-vf__inline-meds__remove')`);
+            await waitFor(b, `document.querySelector('.psy-modal__footer .btn--danger')`);
+            await b.click('.psy-modal__footer .btn--danger');
+            await waitFor(b, `PsyStore.getVisitById(${JSON.stringify(id)}).data.docs.length === 0`, 8000, 'plik zniknął z wizyty');
+            await waitFor(b, idle, 15000, 'zapis wizyty bez pliku');
+            assert.equal(uploaded.trashed, true, 'plik trafił do kosza Dysku');
+            assert.deepEqual(await docsInVisit(id), []);
+            assert.equal(mock.tab(sheet().id, 'Dokumenty').length, 1, 'w zakładce Dokumenty został sam nagłówek');
+            assert.deepEqual(await docRows(), []);
         });
 
         await step('odłączenie: aplikacja wraca do ekranu startowego, dane zostają na Dysku', async () => {
@@ -933,7 +1111,7 @@ async function scenarioGDrive(origin, mock) {
    ========================================================================== */
 async function scenarioLocal(origin) {
     console.log('\nFolder lokalny (pacjent.xlsx)');
-    const b = await launchBrowser();
+    const b = (activeBrowser = await launchBrowser());
     const idle = `window.PsyStore && !PsyStore.hasUnsavedChanges() && PsyStore.state.saveStatus !== 'saving'`;
     try {
         // Okno wyboru folderu wymaga człowieka — w teście podstawiamy folder z OPFS.

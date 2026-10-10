@@ -4,7 +4,8 @@
 // Czyste funkcje (bez DOM, bez Store) — używane przez:
 //   • formularz wizyty (kropki wypełnienia, podgląd, tryb „tylko do odczytu"),
 //   • Historię wizyt (pełna treść notatki),
-//   • boczne osie czasu (Leki / Diagnozy / Parametry / Plan leczenia),
+//   • wyciągi z wizyt w menu bocznym (Leki / Testy / Zalecenia / Plan leczenia /
+//     Diagnozy / Parametry / Dokumenty),
 //   • eksport do arkusza (Google Sheets / XLSX),
 //   • testy w Node.
 //
@@ -18,9 +19,13 @@
 //       'uzywki_u_2' / '_i' / '_n'    → true / 'Regularnie' / '…' (używki, wg indeksu)
 //   visit.data.meds       — [{ name, substance, group, dose, unit, maxDose }]
 //   visit.data.diagnoses  — [{ code, description }]
+//   visit.data.tests      — [{ id, code, name, score, interpretation, answers, redFlag }]
+//   visit.data.docs       — [{ id, name, size }]   pliki w folderze `dokumenty/` pacjenta
 //
-// Leki i rozpoznania żyją W WIZYCIE (wizyta = jedyne źródło prawdy), więc
-// usunięcie wizyty usuwa je razem z nią, a osie czasu są zwykłą projekcją.
+// Leki, rozpoznania, wyniki testów i załączniki żyją W WIZYCIE (wizyta = jedyne
+// źródło prawdy), więc usunięcie wizyty usuwa je razem z nią, a zakładki menu
+// bocznego są zwykłą projekcją. Wyjątek: sam plik załącznika zostaje w folderze
+// pacjenta — usunięcie wizyty tylko go od niej odpina.
 // ============================================================================
 
 import { schemaForMode } from './_visit-form-schema.js';
@@ -79,6 +84,18 @@ export function diagnosisText(d) {
     return (d.code || '?') + (d.description ? ' — ' + d.description : '');
 }
 
+export function testText(t) {
+    if (!t) return '';
+    let s = (t.code || t.name || 'test') + ' — wynik ' + (isBlank(t.score) ? '?' : t.score);
+    if (t.interpretation) s += ' · ' + t.interpretation;
+    if (t.redFlag) s += ' · czerwona flaga';
+    return s;
+}
+
+export function docText(d) {
+    return d ? (d.name || '(plik bez nazwy)') : '';
+}
+
 export function icd10TagsText(value) {
     return listOf(value).map((item) => {
         if (item && typeof item === 'object') return diagnosisText(item);
@@ -123,6 +140,8 @@ export function isFieldFilled(sectionId, field, raw, data) {
     if (t === 'header' || t === 'link-view') return false;
     if (t === 'inline-meds') return !!(data && Array.isArray(data.meds) && data.meds.length);
     if (t === 'inline-diagnoses') return !!(data && Array.isArray(data.diagnoses) && data.diagnoses.length);
+    if (t === 'inline-tests') return !!(data && Array.isArray(data.tests) && data.tests.length);
+    if (t === 'inline-docs') return !!(data && Array.isArray(data.docs) && data.docs.length);
     if (t === 'uzywki-special') return uzywkiEntries(sectionId, raw).length > 0;
     if (!raw) return false;
     return !isBlank(raw[fieldKey(sectionId, field.id)]) || !isBlank(raw[notesKey(sectionId, field.id)]);
@@ -134,6 +153,8 @@ export function fieldText(sectionId, field, raw, data) {
     if (t === 'header' || t === 'link-view') return '';
     if (t === 'inline-meds') return ((data && data.meds) || []).map(medText).join('\n');
     if (t === 'inline-diagnoses') return ((data && data.diagnoses) || []).map(diagnosisText).join('\n');
+    if (t === 'inline-tests') return ((data && data.tests) || []).map(testText).join('\n');
+    if (t === 'inline-docs') return ((data && data.docs) || []).map(docText).join('\n');
     if (t === 'uzywki-special') {
         return uzywkiEntries(sectionId, raw).map((u) =>
             u.label + (u.intensity ? ' — ' + u.intensity : '') + (u.notes ? ' (' + u.notes + ')' : '')
@@ -250,7 +271,8 @@ export function visitSummary(visit) {
 }
 
 // ---------------------------------------------------------------------------
-// Osie czasu (boczne menu = wyciąg z wizyt, od najnowszej)
+// Wyciągi z wizyt (boczne menu), od najnowszej wizyty. Każdy rekord niesie
+// wizytę, z której pochodzi.
 // ---------------------------------------------------------------------------
 
 export function sortVisitsDesc(visits) {
@@ -306,6 +328,32 @@ export function treatmentPlanTimeline(visits) {
             notes: rawText(raw, 'oddzialywania.kontrolna.__notes')
         };
         if (entry.ustalenia || entry.ewaluacja || entry.kontrolna) out.push(entry);
+    }
+    return out;
+}
+
+export function testsTimeline(visits) {
+    const out = [];
+    for (const visit of sortVisitsDesc(visits)) {
+        for (const test of ((visit.data && visit.data.tests) || [])) out.push({ visit, test });
+    }
+    return out;
+}
+
+/** Zalecenia: jedno pole tekstowe wizyty (`zalecenia.tresc`). */
+export function recommendationsTimeline(visits) {
+    const out = [];
+    for (const visit of sortVisitsDesc(visits)) {
+        const text = rawText((visit.data && visit.data._raw) || {}, 'zalecenia.tresc');
+        if (text) out.push({ visit, text });
+    }
+    return out;
+}
+
+export function documentsTimeline(visits) {
+    const out = [];
+    for (const visit of sortVisitsDesc(visits)) {
+        for (const doc of ((visit.data && visit.data.docs) || [])) out.push({ visit, doc });
     }
     return out;
 }

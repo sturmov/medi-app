@@ -81,6 +81,24 @@ export class PsyToast extends LitElement {
         }
     }
 
+    /**
+     * Komponent renderuje się w zwykłym DOM (style są globalne), gdzie `<slot>` niczego
+     * nie przenosi. Treść i przyciski akcji, które wywołujący włożył do <psy-toast>,
+     * przenosimy więc sami do środka ramki — inaczej zostają poza nią, bez stylu.
+     */
+    firstUpdated() {
+        const box = this.querySelector(':scope > .psy-toast');
+        if (!box) return;
+        const message = box.querySelector('.psy-toast__message');
+        const actions = box.querySelector('.psy-toast__actions');
+        for (const node of Array.from(this.childNodes)) {
+            if (node === box || node.nodeType === Node.COMMENT_NODE) continue;
+            if (node.nodeType === Node.TEXT_NODE && !node.textContent.trim()) continue;
+            const isAction = node.nodeType === Node.ELEMENT_NODE && node.getAttribute('slot') === 'actions';
+            (isAction ? actions : message).appendChild(node);
+        }
+    }
+
     _scheduleAutoDismiss() {
         this._clearTimer();
         const d = Number(this.duration);
@@ -145,14 +163,10 @@ export class PsyToast extends LitElement {
                     ${this.title
                         ? html`<div class="psy-toast__title">${this.title}</div>`
                         : null}
-                    <div class="psy-toast__message">
-                        <slot></slot>
-                    </div>
+                    <div class="psy-toast__message"></div>
                 </div>
 
-                <div class="psy-toast__actions">
-                    <slot name="actions"></slot>
-                </div>
+                <div class="psy-toast__actions"></div>
 
                 ${this.closable ? html`
                     <button

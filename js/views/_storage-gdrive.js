@@ -490,7 +490,8 @@ export function createGDriveBackend() {
                     [JSON.stringify({ name: file.name, parents: [id] })], { type: 'application/json' }));
                 form.append('file', file);
                 const r = await call('POST', E.upload + '/files?uploadType=multipart&fields=id,name', { body: form });
-                return { name: (r && r.name) || file.name, size: file.size };
+                // `id` pozwala wizycie wskazać swój plik także po zmianie jego nazwy na Dysku.
+                return { id: (r && r.id) || '', name: (r && r.name) || file.name, size: file.size };
             },
 
             /** Usunięcie = przeniesienie do Kosza na Dysku (można przywrócić przez 30 dni). */

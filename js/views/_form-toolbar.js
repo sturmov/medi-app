@@ -30,7 +30,9 @@
 //       notesValue         // (field, values) → string
 //   });
 //   tb.refresh()           // odśwież kropki i podglądy na pasku
+//   tb.redraw()            // jw. + dziennik (gdy dane zmieniły się poza kontrolkami)
 //   tb.openField(uid)      // otwórz akapit w edycji
+//   tb.scrollToField(uid)  // przewiń dziennik do akapitu (bez wchodzenia w edycję)
 //   tb.closeEdit()         // zamknij edycję
 //   tb.contentEl           // prawa kolumna (do odczytu kontrolek)
 // ============================================================================
@@ -393,6 +395,17 @@ export function createFormToolbar(opts) {
     root.openField = (uid) => openEdit(uid, { scroll: true });
     root.closeEdit = () => closeEdit();
     root.getEditingUid = () => editingUid;
+    // Dane zmieniły się poza kontrolkami (np. skończyło się wgrywanie pliku). Dziennik
+    // przerysowujemy tylko wtedy, gdy nic nie jest edytowane — przerysowanie w trakcie
+    // pisania zabrałoby kursor; edytowany akapit i tak odświeża się sam.
+    root.redraw = () => {
+        if (!editingUid) renderJournal();
+        paintNav();
+    };
+    root.scrollToField = (uid) => {
+        const article = entryEl(uid);
+        if (article) { try { article.scrollIntoView({ block: 'center' }); } catch (_) { /* */ } }
+    };
 
     renderNav();
     renderJournal();

@@ -133,17 +133,21 @@ export async function launchBrowser({ width = 1366, height = 768 } = {}) {
             try { await document.fonts.ready; } catch (_) { /* */ }
             let b = node.getBoundingClientRect();
             let calm = 0;
+            let hit = null;
             for (let i = 0; i < 90 && calm < 6; i++) {
                 await new Promise((r) => requestAnimationFrame(() => r()));
                 const next = node.getBoundingClientRect();
                 const still = Math.abs(next.left - b.left) < 0.5 && Math.abs(next.top - b.top) < 0.5
                     && Math.abs(next.height - b.height) < 0.5;
                 b = next;
-                const hit = document.elementFromPoint(b.left + Math.min(b.width / 2, 40), b.top + b.height / 2);
+                hit = document.elementFromPoint(b.left + Math.min(b.width / 2, 40), b.top + b.height / 2);
                 calm = still && hit && (hit === node || node.contains(hit) || hit.contains(node)) ? calm + 1 : 0;
             }
-            return { x: b.left + Math.min(b.width / 2, 40), y: b.top + b.height / 2 };`);
+            // Element nadal czymś zasłonięty (np. powiadomieniem): klik trafi w to coś — mówimy o tym głośno.
+            const covered = calm >= 6 ? '' : (hit ? hit.tagName.toLowerCase() + (hit.className ? '.' + String(hit.className).split(' ')[0] : '') : '(nic)');
+            return { x: b.left + Math.min(b.width / 2, 40), y: b.top + b.height / 2, covered };`);
         if (!pt) throw new Error('Brak elementu do kliknięcia: ' + selectorOrExpr);
+        if (pt.covered) console.warn('      ⚠ klik w ' + selectorOrExpr + ' — element zasłonięty przez: ' + pt.covered);
         await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pt.x, y: pt.y });
         await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
         await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
@@ -190,7 +194,22 @@ export async function launchBrowser({ width = 1366, height = 768 } = {}) {
     return {
         send, evaluate, click, clickAt, drag, type, key, screenshot, problems, dialogs,
         navigate: async (url) => { await send('Page.navigate', { url }); },
-        reload: async () => { await send('Page.reload', { ignoreCache: true }); },
+        /**
+         * Przeładowanie strony. `Page.reload` wraca, zanim nowy dokument zastąpi stary, więc
+         * warunek sprawdzany zaraz potem mógłby zostać spełniony jeszcze w STARYM dokumencie.
+         * Dlatego znakujemy stary dokument i czekamy, aż zniknie.
+         */
+        reload: async () => {
+            await evaluate(`window.__psyBeforeReload = true;`);
+            await send('Page.reload', { ignoreCache: true });
+            for (let i = 0; i < 200; i++) {
+                await sleep(50);
+                try {
+                    if (await evaluate(`return !window.__psyBeforeReload && document.readyState !== 'loading';`)) return;
+                } catch (_) { /* dokument właśnie się wymienia */ }
+            }
+            throw new Error('Strona nie przeładowała się w ciągu 10 s.');
+        },
         onNewDocument: (source) => send('Page.addScriptToEvaluateOnNewDocument', { source }),
         async close() {
             try { ws.close(); } catch (_) { /* */ }

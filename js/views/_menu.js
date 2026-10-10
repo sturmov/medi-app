@@ -21,6 +21,11 @@
 // `.clinerules` (bez emoji w menu) dotyczy TYLKO trybu pełnego — w form-mode
 // ikony są dozwolone bo skróty tekstowe (HW/Leki/Param) są mało czytelne.
 //
+// 2026-10 (decyzja właściciela): pozycje od „Leki" do „Dokumenty" są wyłącznie
+// WYCIĄGAMI Z WIZYT (patrz `view-extracts.js`). „Dane identyfikacyjne" zniknęły
+// z menu — otwiera je kliknięcie w nazwisko pacjenta na górnym pasku
+// (route `#/patient-data` został).
+//
 // Wszystkie pozycje są KONTEKSTOWE per wybrany pacjent. Dopóki pacjent nie jest
 // wybrany, pozycje pozostają widoczne, ale kliknięcie przypomina o konieczności
 // wyboru (via toast), a treść głównego obszaru pokazuje listę pacjentów.
@@ -48,16 +53,14 @@ export const APP_MENU = [
     { id: 'tests',           label: 'Testy',                 short: 'Testy', icon: '🧪', route: '#/tests',           order: 4 },
     // 5) Zalecenia
     { id: 'recommendations', label: 'Zalecenia',             short: 'Zal',   icon: '📌', route: '#/recommendations', order: 5 },
-    // 6) Plan leczenia (NOWE)
+    // 6) Plan leczenia
     { id: 'treatment-plan',  label: 'Plan leczenia',         short: 'Plan',  icon: '🎯', route: '#/treatment-plan',  order: 6 },
-    // 7) Dane identyfikacyjne (rename z „Pacjent")
-    { id: 'patient-data',    label: 'Dane identyfikacyjne',  short: 'Dane',  icon: '📇', route: '#/patient-data',    order: 7 },
-    // 8) Diagnozy
-    { id: 'diagnoses',       label: 'Diagnozy',              short: 'Diag',  icon: '🏥', route: '#/diagnoses',       order: 8 },
-    // 9) Parametry (NOWE)
-    { id: 'parameters',      label: 'Parametry',             short: 'Param', icon: '📊', route: '#/parameters',      order: 9 },
-    // 10) Dokumenty (NOWE)
-    { id: 'documents',       label: 'Dokumenty',             short: 'Dok',   icon: '📁', route: '#/documents',       order: 10 }
+    // 7) Diagnozy
+    { id: 'diagnoses',       label: 'Diagnozy',              short: 'Diag',  icon: '🏥', route: '#/diagnoses',       order: 7 },
+    // 8) Parametry
+    { id: 'parameters',      label: 'Parametry',             short: 'Param', icon: '📊', route: '#/parameters',      order: 8 },
+    // 9) Dokumenty
+    { id: 'documents',       label: 'Dokumenty',             short: 'Dok',   icon: '📁', route: '#/documents',       order: 9 }
 ];
 
 // Domyślny hash po starcie aplikacji (gdy nie ma żadnego routa)

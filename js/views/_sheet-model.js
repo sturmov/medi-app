@@ -4,9 +4,10 @@
 // Arkusz pacjenta ma dwie warstwy:
 //
 //   1) ZAKŁADKI CZYTELNE (Pacjent, Wizyty, Leki, Diagnozy, Parametry,
-//      Plan leczenia, Zalecenia, Testy) — zwykłe tabele z nagłówkiem, które
-//      terapeuta może otworzyć, filtrować i wydrukować bez aplikacji.
+//      Plan leczenia, Zalecenia, Testy, Dokumenty) — zwykłe tabele z nagłówkiem,
+//      które terapeuta może otworzyć, filtrować i wydrukować bez aplikacji.
 //      Są GENEROWANE przy każdym zapisie; aplikacja nigdy ich nie czyta.
+//      Poza „Pacjent" wszystkie są wyciągiem z wizyt — tak jak zakładki w aplikacji.
 //
 //   2) ZAKŁADKA `_dane` (ukryta) — kompletny dokument pacjenta jako JSON,
 //      pocięty na kawałki (limit znaków w komórce). To jedyne źródło, z którego
@@ -16,7 +17,8 @@
 // ============================================================================
 
 import { describeVisit, sortVisitsDesc, medDoseText,
-         medsTimeline, diagnosesTimeline, parametersTimeline, treatmentPlanTimeline } from './_visit-describe.js';
+         medsTimeline, diagnosesTimeline, parametersTimeline, treatmentPlanTimeline,
+         testsTimeline, recommendationsTimeline, documentsTimeline } from './_visit-describe.js';
 import { visitTypeLabel } from './_visit-types.js';
 import { parsePatientDoc } from './_patient-doc.js';
 
@@ -38,6 +40,9 @@ function cell(v) {
 }
 
 function visitWhen(v) { return [v.date || '', v.time || '']; }
+
+/** W kolumnie „Typ wizyty" — rekord, który nie powstał w żadnej wizycie. */
+const NO_VISIT = '(bez wizyty)';
 
 /* ---------------------------------------------------------------------------
    Zakładka „Pacjent" — Sekcja | Pole | Wartość
@@ -178,23 +183,41 @@ export function buildTabs(doc) {
         },
         {
             title: 'Zalecenia',
-            columns: [col('Data', 12), col('Tytuł', 32), col('Treść', 70), col('Typ', 24), col('Termin', 22), col('Zrealizowane', 13)],
-            rows: (doc.recommendations || []).slice()
-                .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
-                .map((r) => [
-                    r.createdAt || '', cell(r.title), cell(r.content), cell(r.type),
-                    cell(r.dueDate || r.dueWhen), cell(r.done === true)
-                ])
+            columns: [col('Data wizyty', 12), col('Typ wizyty', 22), col('Zalecenia', 90)],
+            rows: [
+                ...recommendationsTimeline(visits).map(({ visit, text }) => [
+                    visit.date || '', visitTypeLabel(visit.type), cell(text)
+                ]),
+                // dawne rekordy sprzed przeniesienia zaleceń do wizyt
+                ...(doc.recommendations || []).slice()
+                    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+                    .map((r) => [r.createdAt || '', NO_VISIT, cell([r.title, r.content].filter(Boolean).join(': '))])
+            ]
         },
         {
             title: 'Testy',
-            columns: [col('Data', 12), col('Test', 12), col('Nazwa', 40), col('Wynik', 9), col('Interpretacja', 44), col('Czerwona flaga', 15)],
-            rows: (doc.tests || []).slice()
-                .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
-                .map((t) => [
-                    t.date || '', cell(t.code), cell(t.name), cell(t.score), cell(t.interpretation),
-                    t.redFlag ? 'TAK' : ''
-                ])
+            columns: [col('Data wizyty', 12), col('Typ wizyty', 22), col('Test', 12), col('Nazwa', 40), col('Wynik', 9),
+                      col('Interpretacja', 44), col('Czerwona flaga', 15)],
+            rows: [
+                ...testsTimeline(visits).map(({ visit, test }) => [
+                    visit.date || '', visitTypeLabel(visit.type), cell(test.code), cell(test.name), cell(test.score),
+                    cell(test.interpretation), test.redFlag ? 'TAK' : ''
+                ]),
+                ...(doc.tests || []).slice()
+                    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+                    .map((t) => [
+                        t.date || '', NO_VISIT, cell(t.code), cell(t.name), cell(t.score), cell(t.interpretation),
+                        t.redFlag ? 'TAK' : ''
+                    ])
+            ]
+        },
+        {
+            // Same pliki leżą obok arkusza, w folderze „dokumenty" — tu widać, do której wizyty należą.
+            title: 'Dokumenty',
+            columns: [col('Data wizyty', 12), col('Typ wizyty', 22), col('Plik (folder „dokumenty")', 60)],
+            rows: documentsTimeline(visits).map(({ visit, doc: file }) => [
+                visit.date || '', visitTypeLabel(visit.type), cell(file.name)
+            ])
         },
         {
             title: DATA_TAB,

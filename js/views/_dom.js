@@ -43,6 +43,7 @@ export function el(tag, props = {}, children = []) {
 /** Toast przez globalny kontener (no-op, gdy komponent jeszcze nie załadowany). */
 export function toast(variant, title, message) {
     if (window.PsyToast) {
-        window.PsyToast.notify({ variant, title, message }, 'psy-app-toasts');
+        // Komponent zna warianty info / success / warning / danger; „error" to u nas to samo co „danger".
+        window.PsyToast.notify({ variant: variant === 'error' ? 'danger' : variant, title, message }, 'psy-app-toasts');
     }
 }

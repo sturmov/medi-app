@@ -1,53 +1,58 @@
 // ============================================================================
 // view-test-runner.js — runner testów psychometrycznych (PHQ-9, GAD-7).
 //
+// Test uruchamia się Z WIZYTY (pole „Wyniki testów") i jego wynik staje się
+// częścią tej wizyty; zakładka „Testy" jest wyciągiem wyników z wizyt.
+//
 // Wszystkie pytania na jednej stronie (wybór PO 2026-04-30: jeden scroll, bez
 // nawigacji „następne pytanie"). Po wypełnieniu — wynik + interpretacja, zapis
-// do `Store` przyciskiem „💾 Zapisz wynik". Brak autozapisu — tu zapisujemy
-// świadomie pojedynczym kliknięciem (test nie powinien być zapisany w połowie).
+// przyciskiem „💾 Zapisz wynik". Brak autozapisu — tu zapisujemy świadomie
+// pojedynczym kliknięciem (test nie powinien być zapisany w połowie).
 //
 // Hash:
-//   #/tests/run/:code             – uruchomienie nowego testu
+//   #/tests/run/:code?visit=:visitId
 //
 // Stan ekranowy:
 //   1) wypełnianie pytań (radio per pytanie, opcje punktowane)
-//   2) po kliknięciu „Pokaż wynik" — overlay/section z wynikiem + przyciskiem
-//      „💾 Zapisz" (zapis do `Store.addTest`) i „🔄 Wypełnij ponownie".
+//   2) po kliknięciu „Pokaż wynik" — sekcja z wynikiem + przyciskiem
+//      „💾 Zapisz" (zapis do wizyty: `Store.addVisitTest`) i „🔄 Wypełnij ponownie".
 // ============================================================================
 
 import { Store } from './_store.js';
 import { getTestDefinition, computeTestResult } from './_tests-catalog.js';
+import { visitTypeLabel } from './_visit-types.js';
 import { el } from './_form-helpers.js';
+
+function messageView(title, children) {
+    return el('div', { class: 'psy-new-view' }, [
+        el('div', { class: 'psy-new-view__header' }, [
+            el('div', {}, [el('h1', { class: 'psy-new-view__title' }, [title])])
+        ]),
+        el('div', { class: 'psy-new-view__body' }, [el('div', { class: 'psy-new-hint' }, children)])
+    ]);
+}
 
 export function renderTestRunner(opts = {}) {
     const patient = Store.state.currentPatient;
+    if (!patient) return messageView('Test', ['Wybierz pacjenta, aby uruchomić test.']);
 
-    if (!patient) {
-        const r = el('div', { class: 'psy-new-view' });
-        r.appendChild(el('div', { class: 'psy-new-view__header' }, [
-            el('div', {}, [el('h1', { class: 'psy-new-view__title' }, ['Test'])])
-        ]));
-        r.appendChild(el('div', { class: 'psy-new-view__body' }, [
-            el('div', { class: 'psy-new-hint' }, ['Wybierz pacjenta, aby uruchomić test.'])
-        ]));
-        return r;
+    const visit = opts.visitId ? Store.getVisitById(opts.visitId) : null;
+    if (!visit || visit.patientId !== patient.id) {
+        return messageView('Test uruchamia się z wizyty', [
+            'Otwórz wizytę (albo załóż nową) i w sekcji „Testy" wybierz test — wynik zapisze się w tej wizycie. ',
+            el('a', { href: '#/history' }, ['Przejdź do wizyt'])
+        ]);
     }
+    const backHash = '#/visit/form/' + visit.id + '?focus=' + encodeURIComponent('testy::wyniki');
+    const visitLabel = 'Wizyta ' + (visit.date || '') + ' · ' + visitTypeLabel(visit.type);
 
     const code = opts.code;
     const def = getTestDefinition(code);
-
     if (!def) {
-        const r = el('div', { class: 'psy-new-view' });
-        r.appendChild(el('div', { class: 'psy-new-view__header' }, [
-            el('div', {}, [el('h1', { class: 'psy-new-view__title' }, ['Test — nie znaleziono'])])
-        ]));
-        r.appendChild(el('div', { class: 'psy-new-view__body' }, [
-            el('div', { class: 'psy-new-hint' }, [
-                'Test o kodzie „' + (code || '?') + '" nie jest zdefiniowany. ',
-                el('a', { href: '#/tests', onclick: (e) => { e.preventDefault(); window.location.hash = '#/tests'; } }, ['Wróć do listy testów'])
-            ])
-        ]));
-        return r;
+        return messageView('Test — nie znaleziono', [
+            'Test o kodzie „' + (code || '?') + '" nie jest zdefiniowany. ',
+            el('a', { href: backHash }, ['Wróć do wizyty'])
+        ]);
     }
 
     const root = el('div', {
@@ -57,19 +62,15 @@ export function renderTestRunner(opts = {}) {
 
     /* --------- Breadcrumb --------- */
     const breadcrumb = el('nav', { class: 'psy-new-breadcrumb' }, [
-        el('a', {
-            href: '#/tests',
-            class: 'psy-new-breadcrumb__link',
-            onclick: (e) => { e.preventDefault(); window.location.hash = '#/tests'; }
-        }, ['📊 Testy']),
+        el('a', { href: backHash, class: 'psy-new-breadcrumb__link' }, ['🗓️ ' + visitLabel]),
         el('span', { class: 'psy-new-breadcrumb__sep' }, ['›']),
         el('span', { class: 'psy-new-breadcrumb__current' }, [def.code + ' — ' + def.name])
     ]);
 
     const backBtn = el('button', {
         class: 'btn btn--secondary',
-        onclick: () => { window.location.hash = '#/tests'; }
-    }, ['← Wróć do listy']);
+        onclick: () => { window.location.hash = backHash; }
+    }, ['← Wróć do wizyty']);
 
     root.appendChild(el('div', { class: 'psy-new-view__header' }, [
         el('div', {}, [
@@ -255,15 +256,23 @@ export function renderTestRunner(opts = {}) {
     }
 
     function saveAndExit(result, answers) {
-        Store.addTest({
-            patientId: patient.id,
+        const record = {
             code: def.code,
             name: def.name,
             score: result.score,
             interpretation: result.interpretation,
-            answers,
-            redFlag: result.redFlag === true ? true : undefined
-        });
+            answers
+        };
+        if (result.redFlag === true) record.redFlag = true;
+        const saved = Store.addVisitTest(visit.id, record);
+        if (!saved) {       // wizyta zniknęła w międzyczasie (np. usunięta w innej karcie)
+            if (window.PsyToast) {
+                window.PsyToast.notify({
+                    variant: 'error', title: 'Nie zapisano wyniku', message: 'Wizyta, z której uruchomiono test, już nie istnieje.'
+                }, 'psy-app-toasts');
+            }
+            return;
+        }
         if (window.PsyToast) {
             window.PsyToast.notify({
                 variant: 'success',
@@ -271,7 +280,7 @@ export function renderTestRunner(opts = {}) {
                 message: def.code + ' — wynik: ' + result.score + ' (' + result.interpretation + ')'
             }, 'psy-app-toasts');
         }
-        window.location.hash = '#/tests';
+        window.location.hash = backHash;
     }
 
     return root;

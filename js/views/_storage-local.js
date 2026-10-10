@@ -67,7 +67,11 @@ export function createLocalBackend(dirHandle) {
                 const files = await listDocuments(dirHandle, ref);
                 return files.map((f) => ({ id: f.name, name: f.name, size: f.size, lastModified: f.lastModified }));
             },
-            upload: (ref, file) => uploadDocument(dirHandle, ref, file),
+            // W folderze lokalnym identyfikatorem pliku jest jego (unikalna) nazwa.
+            async upload(ref, file) {
+                const saved = await uploadDocument(dirHandle, ref, file);
+                return { id: saved.name, name: saved.name, size: saved.size };
+            },
             remove: (ref, entry) => deleteDocument(dirHandle, ref, entry.name),
             rename: (ref, entry, newName) => renameDocument(dirHandle, ref, entry.name, newName),
             blobUrl: (ref, entry) => getDocumentBlobURL(dirHandle, ref, entry.name)

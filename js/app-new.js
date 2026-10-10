@@ -15,23 +15,22 @@ import './components/psy-toast-container.js';
 
 import { Store } from './views/_store.js';
 import { APP_MENU, APP_PATIENTS_ROUTE, APP_SETTINGS_ROUTE, APP_DEFAULT_ROUTE } from './views/_menu.js';
-import { VISIT_TYPES, visitTypeById, visitTypeLabel } from './views/_visit-types.js';
+import { VISIT_TYPES, visitTypeById } from './views/_visit-types.js';
 import { FAKE_MED_DICT } from './views/_meds-dict.js';
-import { describeVisit, medDoseText } from './views/_visit-describe.js';
+import { describeVisit } from './views/_visit-describe.js';
 import { el, toast } from './views/_dom.js';
 import { getGoogleClientId, setGoogleClientId, DEFAULT_GOOGLE_CLIENT_ID } from './views/_config.js';
 
 import { openConfirm } from './views/_modal.js';
 import { renderVisitForm } from './views/view-visit-form.js';
-import { renderRecommendationForm } from './views/view-recommendation-form.js';
 import { renderPatientDetail } from './views/view-patient-detail.js';
 import { renderTestRunner } from './views/view-test-runner.js';
-import { renderTreatmentPlan } from './views/view-treatment-plan.js';
-import { renderParameters } from './views/view-parameters.js';
-import { renderDocuments } from './views/view-documents.js';
+import {
+    renderMedsExtract, renderTestsExtract, renderRecommendationsExtract, renderTreatmentPlanExtract,
+    renderDiagnosesExtract, renderParametersExtract, renderDocumentsExtract
+} from './views/view-extracts.js';
 import { renderCalendar, renderHomeTabs } from './views/view-calendar.js';
 import { syncVisitToAppointment, getCalendarApi, CALENDAR_NAME } from './views/_calendar-api.js';
-import { listAvailableTests } from './views/_tests-catalog.js';
 
 import { showStorageGate, hideStorageGate, shouldShowGate } from './views/view-folder-gate.js';
 import { installAutogrow } from './views/_autogrow.js';
@@ -212,7 +211,7 @@ function _buildPatientPreviewPopover(p) {
 
         // Stopka — hint nawigacyjny
         el('div', { class: 'psy-new-patient-tag__preview-footer' }, [
-            '💡 Pełna karta: klik w nazwę pacjenta lub menu „Dane identyfikacyjne".'
+            '💡 Dane identyfikacyjne (pełna karta): kliknij nazwisko pacjenta.'
         ])
     ].filter(Boolean));
 
@@ -220,21 +219,11 @@ function _buildPatientPreviewPopover(p) {
 }
 
 
-/** Polska odmiana: plural(3, 'wpis', 'wpisy', 'wpisów') → 'wpisy'. */
-function plural(n, one, few, many) {
-    if (n === 1) return one;
-    const d = n % 10, h = n % 100;
-    return (d >= 2 && d <= 4 && !(h >= 12 && h <= 14)) ? few : many;
-}
-
 // Stan filtrów per widok (utrzymywany pomiędzy re-renderami)
 const _viewFilters = {
     patientsArchived: 'active'  // 'active' | 'archived' | 'all'
     // historyShowDrafts usunięty po PO 2026-05-01 (status Robocza/Zamknięta wycofany)
 };
-
-// Pamięć dla pickera testów (czy jest otwarty na liście Testów)
-let _testsPickerOpen = false;
 
 // PR-J3 (2026-05-11): stan submenu „Nowa wizyta" w sidebarze.
 // Klientka (z2.jpg): klik „+ Nowa wizyta" rozwija/zwija listę kafelków typów.
@@ -384,6 +373,11 @@ function goToDetail(patient) {
     window.location.hash = '#/patients/detail/' + patient.id;
 }
 
+/** Dane identyfikacyjne bieżącego pacjenta (klik w jego pasek u góry ekranu). */
+function goToPatientData() {
+    window.location.hash = '#/patient-data';
+}
+
 // ----- History --------------------------------------------------------------
 //
 // PR-J5 (2026-05-11): historia wizyt = strumień akapitów (klientka, z5.jpg).
@@ -524,334 +518,11 @@ function viewHistory() {
 }
 
 
-// ----- Leki / Diagnozy — osie czasu z wizyt (tylko do odczytu) ---------------
+// ----- Wyciągi z wizyt -------------------------------------------------------
 //
-// Leki i rozpoznania wpisuje się W WIZYCIE (sekcje „Ogólna farmakoterapia"
-// i „Rozpoznanie"). Te widoki są wyciągiem: od najnowszej wizyty, klik wiersza
-// otwiera wizytę, z której pochodzi wpis.
-
-function timelineHeader(title, patient, count, forms) {
-    return el('div', { class: 'psy-new-view__header' }, [
-        el('div', {}, [
-            el('h1', { class: 'psy-new-view__title' }, [title]),
-            el('div', { class: 'psy-new-view__subtitle' }, [
-                (patient.imie || '') + ' ' + (patient.nazwisko || '') + ' · ' + count + ' '
-                + plural(count, forms[0], forms[1], forms[2]) + ' · wyciąg z wizyt, od najnowszej'
-            ])
-        ])
-    ]);
-}
-
-function viewMeds() {
-    const patient = Store.state.currentPatient;
-    if (!patient) return noPatientView('Leki', '💊');
-    const timeline = Store.getMedsTimeline(patient.id);
-
-    const root = el('div', { class: 'psy-new-view' });
-    root.appendChild(timelineHeader('Leki', patient, timeline.length, ['wpis', 'wpisy', 'wpisów']));
-
-    const body = el('div', { class: 'psy-new-view__body psy-new-view__body--plain' });
-    if (!timeline.length) {
-        body.appendChild(emptyState('💊', 'Brak leków',
-            'Leki wpisuje się w wizycie, w sekcji „Ogólna farmakoterapia".', [
-            { label: '🗓️ Przejdź do wizyt', variant: 'primary', onClick: () => (window.location.hash = '#/history') }
-        ]));
-    } else {
-        const table = el('table', { class: 'psy-new-table psy-new-table--clickrows' });
-        table.appendChild(el('thead', {}, [
-            el('tr', {}, [
-                el('th', { style: { width: '120px' } }, ['Data wizyty']),
-                el('th', {}, ['Nazwa handlowa']),
-                el('th', {}, ['Substancja']),
-                el('th', { style: { width: '140px' } }, ['Aktualna dawka']),
-                el('th', { style: { width: '180px' } }, ['Dawka maksymalna']),
-                el('th', {}, ['Typ wizyty'])
-            ])
-        ]));
-        const tbody = el('tbody', {});
-        for (const { visit, med } of timeline) {
-            tbody.appendChild(el('tr', {
-                title: 'Kliknij, aby otworzyć wizytę',
-                style: { cursor: 'pointer' },
-                onclick: () => { window.location.hash = '#/visit/form/' + visit.id; }
-            }, [
-                el('td', {}, [visit.date || '—']),
-                el('td', {}, [el('strong', {}, [med.name || '(bez nazwy)'])]),
-                el('td', {}, [med.substance || '—']),
-                el('td', {}, [medDoseText(med) || '—']),
-                el('td', { style: { color: '#B91C1C', fontWeight: '600' } }, [med.maxDose || '—']),
-                el('td', { style: { color: '#475569' } }, [visitTypeLabel(visit.type)])
-            ]));
-        }
-        table.appendChild(tbody);
-        body.appendChild(table);
-    }
-    root.appendChild(body);
-    return root;
-}
-
-function viewDiagnoses() {
-    const patient = Store.state.currentPatient;
-    if (!patient) return noPatientView('Diagnozy', '🏥');
-    const timeline = Store.getDiagnosesTimeline(patient.id);
-
-    const root = el('div', { class: 'psy-new-view' });
-    root.appendChild(timelineHeader('Diagnozy', patient, timeline.length, ['rozpoznanie', 'rozpoznania', 'rozpoznań']));
-
-    const body = el('div', { class: 'psy-new-view__body psy-new-view__body--plain' });
-    if (!timeline.length) {
-        body.appendChild(emptyState('🏥', 'Brak rozpoznań',
-            'Rozpoznania ICD-10 wpisuje się w wizycie, w sekcji „Rozpoznanie".', [
-            { label: '🗓️ Przejdź do wizyt', variant: 'primary', onClick: () => (window.location.hash = '#/history') }
-        ]));
-    } else {
-        const stack = el('div', { class: 'psy-new-stack' });
-        for (const { visit, diagnosis } of timeline) {
-            stack.appendChild(el('div', {
-                title: 'Kliknij, aby otworzyć wizytę',
-                style: {
-                    padding: '10px 14px',
-                    background: '#FFFFFF',
-                    border: '1px solid #E5E7EB',
-                    borderLeft: '4px solid #2563EB',
-                    borderRadius: '8px',
-                    cursor: 'pointer'
-                },
-                onclick: () => { window.location.hash = '#/visit/form/' + visit.id; }
-            }, [
-                el('div', { class: 'psy-new-row' }, [
-                    el('span', { style: { color: '#475569', minWidth: '110px', fontSize: '12.5px' } }, [visit.date || '—']),
-                    el('strong', {
-                        style: { fontFamily: 'monospace', fontSize: '14px', color: '#1D4ED8', minWidth: '70px' }
-                    }, [diagnosis.code || '—']),
-                    el('span', { style: { flex: '1' } }, [diagnosis.description || '(kod spoza słownika)']),
-                    el('span', { class: 'psy-new-hint' }, [visitTypeLabel(visit.type)])
-                ])
-            ]));
-        }
-        body.appendChild(stack);
-    }
-    root.appendChild(body);
-    return root;
-}
-
-// ----- Recommendations (2026-06-13 — read-only oś czasu z wizyt) -----------
-//
-// Klientka: „zalecenia to akapity wizyty". Lista zaleceń pacjenta z osi
-// czasu wizyt. Edytuje się INLINE w wizycie (sekcja „Podjęte oddziaływania"
-// → ustalenia/rekomendacje) lub przez `#/recommendations/edit/:id` (legacy
-// pojedynczy formularz, zostawiony jako fallback).
-
-function viewRecommendations() {
-    const patient = Store.state.currentPatient;
-    if (!patient) return noPatientView('Zalecenia', '📋');
-    const timeline = Store.getRecommendationsTimeline(patient.id);
-
-    const root = el('div', { class: 'psy-new-view' });
-    root.appendChild(el('div', { class: 'psy-new-view__header' }, [
-        el('div', {}, [
-            el('h1', { class: 'psy-new-view__title' }, ['Zalecenia']),
-            el('div', { class: 'psy-new-view__subtitle' }, [
-                patient.imie + ' ' + patient.nazwisko + ' · ' + timeline.length +
-                ' ' + (timeline.length === 1 ? 'zalecenie' : 'zaleceń') +
-                ' · oś czasu z wizyt (read-only)'
-            ])
-        ])
-    ]));
-
-    const body = el('div', { class: 'psy-new-view__body psy-new-view__body--plain' });
-    if (!timeline.length) {
-        body.appendChild(emptyState('📋', 'Brak zaleceń',
-            'Brak zapisanych zaleceń dla tego pacjenta. Dodaj zalecenie w wizycie.', [
-            { label: '🗓️ Przejdź do wizyt', variant: 'primary', onClick: () => (window.location.hash = '#/history') }
-        ]));
-    } else {
-        const stack = el('div', { class: 'psy-new-stack' });
-        for (const entry of timeline) {
-            const r = entry.recommendation;
-            const v = entry.visit;
-            const visitLabel = v
-                ? (v.date + (v.time ? ' ' + v.time : ''))
-                : (r.createdAt || '—');
-            const rowClick = v
-                ? () => { window.location.hash = '#/visit/form/' + v.id; }
-                : null;
-            const card = el('div', {
-                class: 'psy-recommendation' + (r.done ? ' psy-recommendation--done' : ''),
-                title: v ? 'Kliknij, aby otworzyć wizytę' : '',
-                style: { cursor: rowClick ? 'pointer' : 'default' },
-                onclick: rowClick
-            }, [
-                el('div', { class: 'psy-recommendation__header' }, [
-                    el('input', {
-                        type: 'checkbox',
-                        class: 'psy-recommendation__toggle',
-                        checked: !!r.done,
-                        title: r.done ? 'Oznacz jako niewykonane' : 'Oznacz jako zrealizowane',
-                        onclick: (ev) => ev.stopPropagation(),
-                        onchange: (ev) => {
-                            ev.stopPropagation();
-                            Store.toggleRecommendationDone(r.id);
-                        }
-                    }),
-                    el('span', { class: 'psy-recommendation__title' }, [r.title || '(bez tytułu)']),
-                    el('span', { class: 'psy-new-hint' }, [visitLabel])
-                ]),
-                el('div', { class: 'psy-recommendation__content' }, [r.content || ''])
-            ]);
-            stack.appendChild(card);
-        }
-        body.appendChild(stack);
-    }
-    root.appendChild(body);
-    return root;
-}
-
-// ----- Tests ---------------------------------------------------------------
-
-function viewTests() {
-    const patient = Store.state.currentPatient;
-    if (!patient) return noPatientView('Testy', '📊');
-    const results = Store.getTests(patient.id);
-
-    const root = el('div', { class: 'psy-new-view' });
-    root.appendChild(el('div', { class: 'psy-new-view__header' }, [
-        el('div', {}, [
-            el('h1', { class: 'psy-new-view__title' }, ['Testy']),
-            el('div', { class: 'psy-new-view__subtitle' }, [
-                patient.imie + ' ' + patient.nazwisko + ' · ' + results.length +
-                ' ' + (results.length === 1 ? 'wynik' : 'wyników')
-            ])
-        ]),
-        el('div', { class: 'psy-new-view__actions' }, [
-            el('button', {
-                class: 'btn btn--primary',
-                onclick: () => {
-                    _testsPickerOpen = !_testsPickerOpen;
-                    AppController._renderView(true);
-                }
-            }, [_testsPickerOpen ? '✕ Zamknij wybór' : '+ Uruchom test'])
-        ])
-    ]));
-
-    // Inline picker testów
-    if (_testsPickerOpen) {
-        const picker = el('div', {
-            class: 'psy-new-tests-picker',
-            style: {
-                marginBottom: '14px',
-                padding: '12px 14px',
-                background: '#F8FAFC',
-                border: '1px solid #E2E8F0',
-                borderRadius: '8px'
-            }
-        });
-        picker.appendChild(el('div', {
-            class: 'psy-new-hint',
-            style: { marginBottom: '10px', fontSize: '12.5px', fontWeight: '600' }
-        }, ['Wybierz test do uruchomienia:']));
-
-        const cardsRow = el('div', {
-            style: {
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-                gap: '10px'
-            }
-        });
-        for (const t of listAvailableTests()) {
-            cardsRow.appendChild(el('div', {
-                class: 'psy-new-visit-card',
-                style: { cursor: 'pointer', padding: '12px' },
-                tabindex: '0',
-                onclick: () => {
-                    _testsPickerOpen = false;
-                    window.location.hash = '#/tests/run/' + encodeURIComponent(t.code);
-                },
-                onkeydown: (ev) => {
-                    if (ev.key === 'Enter' || ev.key === ' ') {
-                        ev.preventDefault();
-                        _testsPickerOpen = false;
-                        window.location.hash = '#/tests/run/' + encodeURIComponent(t.code);
-                    }
-                }
-            }, [
-                el('div', { class: 'psy-new-visit-card__icon' }, ['📊']),
-                el('div', {}, [
-                    el('div', { class: 'psy-new-visit-card__title' }, [t.code]),
-                    el('div', { class: 'psy-new-visit-card__desc' }, [
-                        t.description + ' · ' + t.questions + ' pytań'
-                    ])
-                ])
-            ]));
-        }
-        picker.appendChild(cardsRow);
-        root.appendChild(picker);
-    }
-
-    const body = el('div', { class: 'psy-new-view__body psy-new-view__body--plain' });
-    if (!results.length) {
-        body.appendChild(emptyState('📊', 'Brak wyników',
-            'Pacjent nie wypełnił jeszcze żadnego testu.',
-            [
-                {
-                    label: '+ Uruchom pierwszy test',
-                    variant: 'primary',
-                    onClick: () => {
-                        _testsPickerOpen = true;
-                        AppController._renderView(true);
-                    }
-                }
-            ]
-        ));
-    } else {
-        const table = el('table', { class: 'psy-new-table' });
-        table.appendChild(el('thead', {}, [
-            el('tr', {}, [
-                el('th', { style: { width: '100px' } }, ['Kod']),
-                el('th', {}, ['Nazwa']),
-                el('th', { style: { width: '130px' } }, ['Data']),
-                el('th', { style: { width: '90px', textAlign: 'right' } }, ['Wynik']),
-                el('th', {}, ['Interpretacja']),
-                el('th', { style: { width: '60px', textAlign: 'right' } }, [''])
-            ])
-        ]));
-        const tbody = el('tbody', {});
-        for (const t of results) {
-            tbody.appendChild(el('tr', {}, [
-                el('td', {}, [el('strong', {}, [t.code])]),
-                el('td', {}, [t.name]),
-                el('td', {}, [t.date]),
-                el('td', { style: { textAlign: 'right', fontWeight: '700' } }, [String(t.score)]),
-                el('td', { style: { color: '#475569' } }, [
-                    t.redFlag ? el('span', { style: { color: '#DC2626', fontWeight: '600', marginRight: '4px' }, title: 'Czerwona flaga' }, ['🚨 ']) : null,
-                    t.interpretation || ''
-                ]),
-                el('td', { class: 'psy-row-actions', style: { textAlign: 'right' } }, [
-                    el('button', {
-                        class: 'btn btn--danger btn--sm btn--icon',
-                        title: 'Usuń wynik',
-                        onclick: async () => {
-                            const ok = await openConfirm({
-                                title: 'Usunąć wynik testu?',
-                                message: `Czy na pewno usunąć wynik testu „${t.code}" z dnia ${t.date}?`,
-                                confirmLabel: 'Usuń',
-                                variant: 'danger'
-                            });
-                            if (ok) {
-                                Store.removeTest(t.id);
-                                toast('info', 'Usunięto wynik', t.code + ' · ' + t.date);
-                            }
-                        }
-                    }, ['🗑'])
-                ])
-            ]));
-        }
-        table.appendChild(tbody);
-        body.appendChild(table);
-    }
-    root.appendChild(body);
-    return root;
-}
+// Leki, Testy, Zalecenia, Plan leczenia, Diagnozy, Parametry i Dokumenty są
+// wyłącznie do odczytu: pokazują to, co wpisano w wizytach, z datą i rodzajem
+// wizyty, a kliknięcie rekordu otwiera tę wizytę. Patrz `view-extracts.js`.
 
 // ----- Visit New (typ-picker) -----------------------------------------------
 
@@ -918,13 +589,12 @@ function viewVisitForm() {
         });
     }
     const mEdit = hash.match(/^#\/visit\/form\/([^/?]+)/);
-    if (mEdit) return renderVisitForm({ visitId: decodeURIComponent(mEdit[1]) });
+    if (mEdit) {
+        // `?focus=sekcja::pole` — akapit do pokazania po powrocie (np. z testu).
+        const q = new URLSearchParams(hash.split('?')[1] || '');
+        return renderVisitForm({ visitId: decodeURIComponent(mEdit[1]), focus: q.get('focus') || '' });
+    }
     return renderVisitForm({ isNew: true });
-}
-
-function viewRecommendationForm() {
-    const m = (window.location.hash || '').match(/^#\/recommendations\/edit\/([^/?]+)/);
-    return renderRecommendationForm({ id: m ? decodeURIComponent(m[1]) : null });
 }
 
 // Karta pacjenta jest jednym miejscem podglądu i edycji:
@@ -948,19 +618,9 @@ function viewPatientDetail() {
 function viewTestRunner() {
     const hash = window.location.hash || '';
     const m = hash.match(/^#\/tests\/run\/([^/?]+)/);
-    return renderTestRunner({ code: m ? decodeURIComponent(m[1]) : null });
-}
-
-// PR-J (2026-05-11): nowe sekcje w sidebarze.
-//
-// Plan leczenia (route `#/treatment-plan`) — drzewo celów L1 + zadania per cel.
-function viewTreatmentPlan() {
-    return renderTreatmentPlan();
-}
-
-// Parametry (route `#/parameters`) — wzrost/waga/BMI/ciśnienie/tętno.
-function viewParameters() {
-    return renderParameters();
+    // Test uruchamia się z wizyty: `?visit=…` wskazuje, w której zapisać wynik.
+    const q = new URLSearchParams(hash.split('?')[1] || '');
+    return renderTestRunner({ code: m ? decodeURIComponent(m[1]) : null, visitId: q.get('visit') || '' });
 }
 
 // Strona główna: kalendarz wszystkich terminów. Kalendarz pacjenta: tylko jego terminy.
@@ -974,14 +634,8 @@ function viewPatientCalendar() {
     return renderCalendar({ patientId: cp.id });
 }
 
-// Dokumenty (route `#/documents`) — stub UI uploadera + lista placeholder.
-function viewDocuments() {
-    return renderDocuments();
-}
-
-// Dane identyfikacyjne (route `#/patient-data`, rename z „Pacjent") —
-// delegat na widok detali pacjenta (`view-patient-detail.js`) z bieżącym
-// pacjentem ze Store. Klientka prosiła o tę nazwę w menu (z2.jpg + z4.jpg).
+// Dane identyfikacyjne bieżącego pacjenta (route `#/patient-data`). Nie ma ich
+// w menu bocznym — otwiera je kliknięcie w nazwisko na górnym pasku.
 function viewPatientData() {
     const cp = Store.state.currentPatient;
     if (!cp) return noPatientView('Dane identyfikacyjne', '📇');
@@ -1226,31 +880,23 @@ const ROUTE_MAP = {
     '#/patients/detail':      { renderer: viewPatientDetail,       menuId: null },
     '#/patients':             { renderer: viewPatients,            menuId: null },
 
-    // Diagnozy
-    '#/diagnoses':            { renderer: viewDiagnoses,           menuId: 'diagnoses',       needsPatient: true },
-
-    // Zalecenia
-    '#/recommendations/new':  { renderer: viewRecommendationForm,  menuId: 'recommendations', needsPatient: true },
-    '#/recommendations/edit': { renderer: viewRecommendationForm,  menuId: 'recommendations', needsPatient: true },
-    '#/recommendations':      { renderer: viewRecommendations,     menuId: 'recommendations', needsPatient: true },
-
-    // Leki
-    '#/meds':                 { renderer: viewMeds,                menuId: 'meds',            needsPatient: true },
-
-    // Testy
-    '#/tests/run':            { renderer: viewTestRunner,          menuId: 'tests',           needsPatient: true },
-    '#/tests':                { renderer: viewTests,               menuId: 'tests',           needsPatient: true },
+    // Wyciągi z wizyt (tylko do odczytu) — patrz `view-extracts.js`
+    '#/meds':                 { renderer: renderMedsExtract,            menuId: 'meds',            needsPatient: true },
+    '#/tests/run':            { renderer: viewTestRunner,               menuId: 'tests',           needsPatient: true },
+    '#/tests':                { renderer: renderTestsExtract,           menuId: 'tests',           needsPatient: true },
+    '#/recommendations':      { renderer: renderRecommendationsExtract, menuId: 'recommendations', needsPatient: true },
+    '#/treatment-plan':       { renderer: renderTreatmentPlanExtract,   menuId: 'treatment-plan',  needsPatient: true },
+    '#/diagnoses':            { renderer: renderDiagnosesExtract,       menuId: 'diagnoses',       needsPatient: true },
+    '#/parameters':           { renderer: renderParametersExtract,      menuId: 'parameters',      needsPatient: true },
+    '#/documents':            { renderer: renderDocumentsExtract,       menuId: 'documents',       needsPatient: true },
 
     // Wizyty (PO 2026-05-01: route `#/visit/detail` USUNIĘTE — wszystkie
     // kliknięcia w wizytę otwierają formularz wizyty; redundantny widok).
     '#/visit/form':           { renderer: viewVisitForm,           menuId: 'history',         needsPatient: true },
     '#/visit/new':            { renderer: viewVisitNew,            menuId: 'visit-new',       needsPatient: true },
 
-    // PR-J (2026-05-11): nowe sekcje pacjenta
-    '#/treatment-plan':       { renderer: viewTreatmentPlan,       menuId: 'treatment-plan',  needsPatient: true },
-    '#/patient-data':         { renderer: viewPatientData,         menuId: 'patient-data',    needsPatient: true },
-    '#/parameters':           { renderer: viewParameters,          menuId: 'parameters',      needsPatient: true },
-    '#/documents':            { renderer: viewDocuments,           menuId: 'documents',       needsPatient: true },
+    // Dane identyfikacyjne bieżącego pacjenta (bez pozycji w menu — klik w nazwisko na górnym pasku)
+    '#/patient-data':         { renderer: viewPatientData,         menuId: null,              needsPatient: true },
 
     // Kalendarz
     '#/calendar':             { renderer: viewHomeCalendar,        menuId: null },
@@ -1637,14 +1283,14 @@ const AppController = {
 
         const tag = el('div', {
             class: 'psy-new-patient-tag psy-new-patient-tag--big psy-new-patient-tag--clickable',
-            title: 'Otwórz kartę pacjenta'
+            title: 'Otwórz dane identyfikacyjne'
         }, [
             // PESEL na początku (klientka, z3.jpg)
             p.pesel
                 ? el('span', {
                     class: 'psy-new-patient-tag__field psy-new-patient-tag__field--pesel',
                     title: 'PESEL',
-                    onclick: () => goToDetail(p)
+                    onclick: goToPatientData
                 }, [p.pesel])
                 : null,
 
@@ -1653,14 +1299,14 @@ const AppController = {
                 ? el('span', {
                     class: 'psy-new-patient-tag__sex psy-new-patient-tag__sex--' + sexIcon.cls,
                     title: 'Płeć: ' + (p.plec || 'nieznana'),
-                    onclick: () => goToDetail(p)
+                    onclick: goToPatientData
                 }, [sexIcon.glyph])
                 : null,
 
             // Imię + drugie imię + nazwisko (klikalne → detale)
             el('span', {
                 class: 'psy-new-patient-tag__name',
-                onclick: () => goToDetail(p),
+                onclick: goToPatientData,
                 title: 'Otwórz dane identyfikacyjne'
             }, [nameParts]),
 

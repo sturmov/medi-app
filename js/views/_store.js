@@ -7,8 +7,10 @@
 //   storageStatus ('init' | 'connected' | 'needs-auth' | 'unsupported'),
 //   devMode (tryb demo — dane przykładowe, tylko w tej przeglądarce)
 //
-// WIZYTA = JEDYNE ŹRÓDŁO PRAWDY. Leki, rozpoznania, parametry i plan leczenia
-// są częścią wizyty; boczne widoki to projekcje (`get*Timeline`).
+// WIZYTA = JEDYNE ŹRÓDŁO PRAWDY. Leki, rozpoznania, parametry, plan leczenia,
+// zalecenia, wyniki testów i załączniki są częścią wizyty; boczne widoki to
+// projekcje (`get*Timeline`). `recommendations` i `tests` w stanie to wyłącznie
+// dawne rekordy „bez wizyty" (sprzed przeniesienia do wizyt).
 //
 // ZAPIS
 //   • Magazyn podłączony (Dysk Google / folder): każda zmiana oznacza pacjenta
@@ -23,14 +25,15 @@
 // Dostępne w konsoli jako `window.PsyStore`.
 // ============================================================================
 
-import { FAKE_PATIENTS, FAKE_VISITS, FAKE_RECOMMENDATIONS, FAKE_TESTS } from './_fake-data.js';
+import { FAKE_PATIENTS, FAKE_VISITS } from './_fake-data.js';
 import { isFileSystemAccessSupported, saveHandle, loadHandle, clearHandle, verifyPermission } from './_folder-handle.js';
 import { createLocalBackend } from './_storage-local.js';
 import { createGDriveBackend } from './_storage-gdrive.js';
 import { storageErrorCode } from './_storage-errors.js';
 import { buildPatientDoc } from './_patient-doc.js';
 import {
-    sortVisitsDesc, medsTimeline, diagnosesTimeline, parametersTimeline, treatmentPlanTimeline
+    sortVisitsDesc, medsTimeline, diagnosesTimeline, parametersTimeline, treatmentPlanTimeline,
+    testsTimeline, recommendationsTimeline, documentsTimeline
 } from './_visit-describe.js';
 
 const LS_DATA     = 'psy-new:data';              // dane trybu demo
@@ -150,8 +153,8 @@ function demoSeed() {
     const copy = (list) => JSON.parse(JSON.stringify(list));
     state.patients = copy(FAKE_PATIENTS);
     state.visits = copy(FAKE_VISITS);
-    state.recommendations = copy(FAKE_RECOMMENDATIONS);
-    state.tests = copy(FAKE_TESTS);
+    state.recommendations = [];
+    state.tests = [];
     ls.set(LS_DATA, demoSerialize());
 }
 
@@ -482,7 +485,7 @@ export const Store = {
             summary: '',
             duration: 50
         }, data);
-        visit.data = Object.assign({ _raw: {}, meds: [], diagnoses: [] }, data.data || {});
+        visit.data = Object.assign({ _raw: {}, meds: [], diagnoses: [], tests: [], docs: [] }, data.data || {});
         state.visits.push(visit);
         persist(visit.patientId);
         emit();
@@ -503,7 +506,10 @@ export const Store = {
         return v ? this.updateVisit(id, { paid: !v.paid }) : null;
     },
 
-    /** Usuwa wizytę razem z jej lekami i rozpoznaniami (są częścią wizyty). */
+    /**
+     * Usuwa wizytę razem z tym, co w niej wpisano (leki, rozpoznania, zalecenia,
+     * wyniki testów). Pliki załączników zostają w folderze pacjenta.
+     */
     removeVisit(id) {
         const i = state.visits.findIndex((v) => v.id === id);
         if (i < 0) return false;
@@ -513,45 +519,40 @@ export const Store = {
         return true;
     },
 
-    // ---- Osie czasu (projekcje z wizyt, od najnowszej) -----------------------
+    /** Wynik testu wykonanego w trakcie wizyty — staje się częścią tej wizyty. */
+    addVisitTest(visitId, result) {
+        const visit = this.getVisitById(visitId);
+        if (!visit) return null;
+        const test = Object.assign({ id: genId('T') }, result);
+        const tests = ((visit.data && visit.data.tests) || []).concat([test]);
+        this.updateVisit(visitId, { data: Object.assign({}, visit.data, { tests }) });
+        return test;
+    },
 
-    getMedsTimeline(patientId)          { return medsTimeline(this.getVisits(patientId)); },
-    getDiagnosesTimeline(patientId)     { return diagnosesTimeline(this.getVisits(patientId)); },
-    getParametersTimeline(patientId)    { return parametersTimeline(this.getVisits(patientId)); },
-    getTreatmentPlanTimeline(patientId) { return treatmentPlanTimeline(this.getVisits(patientId)); },
+    // ---- Wyciągi z wizyt (od najnowszej; każdy rekord niesie swoją wizytę) ----
 
-    // ---- Zalecenia ----------------------------------------------------------
+    getMedsTimeline(patientId)            { return medsTimeline(this.getVisits(patientId)); },
+    getDiagnosesTimeline(patientId)       { return diagnosesTimeline(this.getVisits(patientId)); },
+    getParametersTimeline(patientId)      { return parametersTimeline(this.getVisits(patientId)); },
+    getTreatmentPlanTimeline(patientId)   { return treatmentPlanTimeline(this.getVisits(patientId)); },
+    getTestsTimeline(patientId)           { return testsTimeline(this.getVisits(patientId)); },
+    getRecommendationsTimeline(patientId) { return recommendationsTimeline(this.getVisits(patientId)); },
+    getDocumentsTimeline(patientId)       { return documentsTimeline(this.getVisits(patientId)); },
 
-    getRecommendations(patientId) {
+    // ---- Dawne rekordy „bez wizyty" -------------------------------------------
+    // Zalecenia i wyniki testów powstawały kiedyś jako osobne rekordy pacjenta.
+    // Nowych już się nie tworzy (wpisuje się je w wizycie); istniejące widać
+    // w wyciągach z dopiskiem „bez wizyty" i można je stamtąd usunąć.
+
+    getStandaloneRecommendations(patientId) {
         const pid = patientId || currentId();
-        return pid ? state.recommendations.filter((r) => r.patientId === pid) : [];
+        if (!pid) return [];
+        return state.recommendations
+            .filter((r) => r.patientId === pid)
+            .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
     },
 
-    getRecommendationById(id) {
-        return state.recommendations.find((r) => r.id === id) || null;
-    },
-
-    addRecommendation(data) {
-        const rec = Object.assign({
-            id: genId('R'), patientId: currentId(),
-            title: '', content: '', createdAt: todayISO(), done: false
-        }, data);
-        state.recommendations.push(rec);
-        persist(rec.patientId);
-        emit();
-        return rec;
-    },
-
-    updateRecommendation(id, patch) {
-        const i = state.recommendations.findIndex((r) => r.id === id);
-        if (i < 0) return null;
-        state.recommendations[i] = Object.assign({}, state.recommendations[i], patch, { id });
-        persist(state.recommendations[i].patientId);
-        emit();
-        return state.recommendations[i];
-    },
-
-    removeRecommendation(id) {
+    removeStandaloneRecommendation(id) {
         const i = state.recommendations.findIndex((r) => r.id === id);
         if (i < 0) return false;
         const [removed] = state.recommendations.splice(i, 1);
@@ -560,26 +561,7 @@ export const Store = {
         return true;
     },
 
-    toggleRecommendationDone(id) {
-        const r = this.getRecommendationById(id);
-        return r ? this.updateRecommendation(id, { done: !r.done }) : null;
-    },
-
-    getRecommendationsTimeline(patientId) {
-        const pid = patientId || currentId();
-        if (!pid) return [];
-        const visits = state.visits.filter((v) => v.patientId === pid);
-        return this.getRecommendations(pid)
-            .map((r) => {
-                const visit = (r.linkedVisitId && visits.find((v) => v.id === r.linkedVisitId)) || null;
-                return { recommendation: r, visit, sortKey: (visit && visit.date) || r.createdAt || '' };
-            })
-            .sort((a, b) => b.sortKey.localeCompare(a.sortKey));
-    },
-
-    // ---- Testy --------------------------------------------------------------
-
-    getTests(patientId) {
+    getStandaloneTests(patientId) {
         const pid = patientId || currentId();
         if (!pid) return [];
         return state.tests
@@ -587,18 +569,7 @@ export const Store = {
             .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     },
 
-    addTest(data) {
-        const test = Object.assign({
-            id: genId('T'), patientId: currentId(),
-            code: '', name: '', date: todayISO(), score: 0, interpretation: ''
-        }, data);
-        state.tests.push(test);
-        persist(test.patientId);
-        emit();
-        return test;
-    },
-
-    removeTest(id) {
+    removeStandaloneTest(id) {
         const i = state.tests.findIndex((t) => t.id === id);
         if (i < 0) return false;
         const [removed] = state.tests.splice(i, 1);

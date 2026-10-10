@@ -22,7 +22,7 @@
 //   - `actions` : tablica { label, variant?, onClick? }
 // ============================================================================
 
-import { LitElement, html, ifDefined } from './lit.js';
+import { LitElement, html } from './lit.js';
 import './psy-toast.js';
 
 const VALID_POSITION = new Set([
@@ -60,6 +60,22 @@ export class PsyToastContainer extends LitElement {
     connectedCallback() {
         super.connectedCallback();
         this.addEventListener('psy-toast-dismiss', this._onToastDismiss);
+        this._applyHostClasses();
+    }
+
+    updated() {
+        this._applyHostClasses();
+    }
+
+    /**
+     * Kontener renderuje się w zwykłym DOM (style są globalne), a powiadomienia są
+     * jego BEZPOŚREDNIMI dziećmi — `<slot>` poza shadow DOM niczego nie przenosi.
+     * Pozycjonowany musi więc być sam kontener. (Wcześniej klasy dostawał pusty
+     * element w środku, a powiadomienia lądowały pod dolną krawędzią strony.)
+     */
+    _applyHostClasses() {
+        this.className = this._classes();
+        this.setAttribute('aria-live', 'polite');
     }
 
     disconnectedCallback() {
@@ -157,11 +173,7 @@ export class PsyToastContainer extends LitElement {
     }
 
     render() {
-        return html`
-            <div class=${this._classes()} aria-live="polite">
-                <slot></slot>
-            </div>
-        `;
+        return html``;      // nic własnego: dziećmi kontenera są same powiadomienia
     }
 
     // ----- Statyczne helpery (globalny rejestr kontenerów) -----

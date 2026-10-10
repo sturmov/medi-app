@@ -98,7 +98,12 @@ export const FAKE_VISITS = [
             meds: [
                 { name: 'Setaloft', substance: 'Sertralina', group: 'Leki przeciwdepresyjne', dose: '100', unit: 'mg/d', maxDose: '200 mg/d' }
             ],
-            diagnoses: []
+            diagnoses: [],
+            tests: [
+                { id: 'T1', code: 'PHQ-9', name: 'Kwestionariusz depresji (PHQ-9)', score: 14, interpretation: 'Umiarkowana depresja (10–14). Wskazana konsultacja i plan leczenia.' },
+                { id: 'T2', code: 'GAD-7', name: 'Kwestionariusz lęku uogólnionego (GAD-7)', score: 12, interpretation: 'Lęk umiarkowany' }
+            ],
+            docs: []
         }
     },
     {
@@ -112,6 +117,7 @@ export const FAKE_VISITS = [
                 'visitData.osoby': ['Pacjent'],
                 'status.obserwacje': 'Wprowadzona technika uważności (skanowanie ciała, 10 min dziennie). Praca nad identyfikacją automatycznych myśli negatywnych. Pacjentka zaczyna zauważać schemat „katastrofizacji".',
                 'oddzialywania.ustalenia': 'Dziennik myśli automatycznych przez 7 dni. Kontynuacja medytacji.',
+                'zalecenia.tresc': 'Higiena snu: stała pora kładzenia się spać (22:30), rezygnacja z ekranu godzinę przed snem, krótkie medytacje.',
                 'parametry.wzrost': '168',
                 'parametry.masa': '61',
                 'parametry.bmi': '21.6'
@@ -142,13 +148,18 @@ export const FAKE_VISITS = [
                 'ocenaKliniczna.motywacja': 'wysoka (z własnej inicjatywy)',
                 'oddzialywania.rekomendacje': ['psychoterapia indywidualna', 'konsultacja psychiatryczna'],
                 'oddzialywania.ustalenia': 'Psychoterapia CBT, 10 sesji co tydzień. Konsultacja psychiatryczna pod kątem farmakoterapii.',
-                'oddzialywania.kontrolna': 'za tydzień'
+                'oddzialywania.kontrolna': 'za tydzień',
+                'zalecenia.tresc': 'Plan terapii CBT: 10 sesji, co tydzień. Zadanie domowe: dziennik myśli automatycznych.'
             },
             meds: [],
             diagnoses: [
                 { code: 'F32.1', description: 'Epizod depresyjny umiarkowany' },
                 { code: 'F41.1', description: 'Zaburzenia lękowe uogólnione' }
-            ]
+            ],
+            tests: [
+                { id: 'T3', code: 'PHQ-9', name: 'Kwestionariusz depresji (PHQ-9)', score: 18, interpretation: 'Umiarkowana / ciężka depresja (15–19). Rozważyć farmakoterapię + psychoterapię.' }
+            ],
+            docs: []
         }
     },
     {
@@ -186,50 +197,7 @@ export const FAKE_VISITS = [
     }
 ];
 
-// Zalecenia (bez zmian w tej wersji — sposób ich wprowadzania czeka na decyzję).
-export const FAKE_RECOMMENDATIONS = [
-    {
-        id: 'R1', patientId: 'P001',
-        title: 'Plan terapii CBT',
-        createdAt: '2026-03-22',
-        content: 'Psychoterapia CBT 10 sesji (cotygodniowo). Zadania domowe: dziennik myśli automatycznych.',
-        done: false
-    },
-    {
-        id: 'R2', patientId: 'P001',
-        title: 'Higiena snu',
-        createdAt: '2026-04-01',
-        content: 'Stała pora kładzenia się spać (22:30), rezygnacja z ekranu 1h przed snem, krótkie medytacje.',
-        done: false
-    }
-];
-
-export const FAKE_TESTS = [
-    {
-        id: 'T1', patientId: 'P001',
-        code: 'PHQ-9',
-        name: 'Kwestionariusz depresji (PHQ-9)',
-        date: '2026-04-10',
-        score: 14,
-        interpretation: 'Depresja umiarkowana'
-    },
-    {
-        id: 'T2', patientId: 'P001',
-        code: 'GAD-7',
-        name: 'Kwestionariusz lęku uogólnionego (GAD-7)',
-        date: '2026-04-10',
-        score: 12,
-        interpretation: 'Lęk umiarkowany'
-    },
-    {
-        id: 'T3', patientId: 'P001',
-        code: 'PHQ-9',
-        name: 'Kwestionariusz depresji (PHQ-9)',
-        date: '2026-03-22',
-        score: 18,
-        interpretation: 'Depresja umiarkowana / ciężka'
-    }
-];
+// Zalecenia i wyniki testów są częścią wizyt powyżej (`zalecenia.tresc`, `tests`).
 
 // Baza leków (słownik) — jedno źródło: `_meds-dict.js`.
 export { FAKE_MED_DICT } from './_meds-dict.js';

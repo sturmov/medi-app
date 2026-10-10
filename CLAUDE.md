@@ -14,15 +14,19 @@ node tools/smoke-test.mjs       # real browser: demo | calendar | gdrive | local
 
 `node --check` is not evidence that anything works; it has passed on files the browser refused to parse. A change is done when `tools/smoke-test.mjs` passes and, for UI work, you have looked at the screenshots it writes to `tools/.smoke/`. The smoke test needs Chrome or Edge (override with `CHROME_PATH`) and no npm packages.
 
+Run the smoke test several times before trusting a pass: two timing bugs once hid behind single green runs. When a step fails it saves the screen as `tools/.smoke/BLAD-<time>-<n>.png`, and a click that lands on a covered element prints a `⚠` line. Look at those before changing a wait.
+
 The `gdrive` scenario runs against a local stand-in for Google's APIs (`tools/lib/google-mock.mjs`: Drive, Sheets, Calendar). It proves the app's logic, not Google's behaviour. Request shapes were checked against Google's discovery documents, but anything touching `_storage-gdrive.js` or `_calendar-api.js` should also be tried once against a real account.
 
 ## Architecture
 
-Vanilla ES modules and DOM (`el()` from `js/views/_dom.js`). Lit is used only by the toast component. The calendar grid is FullCalendar (MIT), vendored in `lib/fullcalendar/` and loaded on first use.
+Vanilla ES modules and DOM (`el()` from `js/views/_dom.js`). Lit is used only by the toast components (`js/components/`). They render into the normal DOM, where `<slot>` does nothing, so the container positions itself and each toast moves its own content into its frame. The calendar grid is FullCalendar (MIT), vendored in `lib/fullcalendar/` and loaded on first use.
 
 | File | Role |
 |---|---|
-| `js/app-new.js` | Hash router, shell (topbar, sidebar), list views |
+| `js/app-new.js` | Hash router, shell (topbar, sidebar), patient list, visit history, settings |
+| `js/views/view-extracts.js` | The seven read-only sidebar pages built from visits |
+| `js/views/_attachments.js` | Patient files: upload, list, preview, download, remove |
 | `js/views/_store.js` | State, save queue, storage connection, lazy patient loading |
 | `js/views/_visit-form-schema.js` | Visit form definition: sections and fields |
 | `js/views/_visit-describe.js` | The one place that knows how to read visit data (filled?, readable text, timelines) |
@@ -37,7 +41,18 @@ Vanilla ES modules and DOM (`el()` from `js/views/_dom.js`). Lit is used only by
 
 ### Data model
 
-The visit is the single source of truth. Meds and diagnoses live inside the visit (`visit.data.meds`, `visit.data.diagnoses`); field values live in `visit.data._raw` keyed `section.field` (`…__notes` for field notes, `section.__comment` for the section comment). Leki, Diagnozy, Parametry and Plan leczenia are read-only timelines computed from visits. Deleting a visit therefore removes everything entered in it.
+The visit is the single source of truth. Everything clinical is entered in a visit and stored inside it:
+
+- `visit.data._raw`: field values keyed `section.field` (`…__notes` for field notes, `section.__comment` for the section comment). Recommendations are the field `zalecenia.tresc`.
+- `visit.data.meds`, `visit.data.diagnoses`.
+- `visit.data.tests`: results of questionnaires run from that visit.
+- `visit.data.docs`: `[{ id, name, size }]`, the files attached in that visit. The files themselves sit in the patient's `dokumenty/` folder; `id` is the Drive file ID (the file name in a local folder).
+
+Leki, Testy, Zalecenia, Plan leczenia, Diagnozy, Parametry and Dokumenty are read-only extracts computed from visits (`*Timeline` in `_visit-describe.js`, rendered by `view-extracts.js`). Every row starts with the visit's date and type, and clicking it opens that visit. Deleting a visit removes everything entered in it; attached files stay in the folder and show up in Dokumenty as "bez wizyty".
+
+"Bez wizyty" also covers test results and recommendations saved before they moved into visits (`doc.tests`, `doc.recommendations`). Nothing creates such records any more; the extracts list them last and let the therapist delete them.
+
+A questionnaire runs on its own screen (`#/tests/run/:code?visit=:id`) and writes its result into the visit with `Store.addVisitTest`. Starting one from a brand-new visit creates that visit first.
 
 Adding a field type means touching three places: the schema, `_visit-describe.js` (filled / text), and the editor + read renderer in `view-visit-form.js`. `tools/test-patient-doc.mjs` fills every schema field and fails if one is not described.
 
@@ -47,7 +62,7 @@ Adding a field type means touching three places: the schema, `_visit-describe.js
 
 ### Storage
 
-One patient = one document (`buildPatientDoc`). In storage it is a spreadsheet with readable tabs (Pacjent, Wizyty, Leki, Diagnozy, Parametry, Plan leczenia, Zalecenia, Testy) plus a hidden `_dane` tab holding the document as JSON in chunks. The app only ever reads `_dane`; readable tabs are regenerated on every save and exist so the therapist keeps usable data without the app. Never parse the readable tabs back.
+One patient = one document (`buildPatientDoc`). In storage it is a spreadsheet with readable tabs (Pacjent, Wizyty, Leki, Diagnozy, Parametry, Plan leczenia, Zalecenia, Testy, Dokumenty) plus a hidden `_dane` tab holding the document as JSON in chunks. The app only ever reads `_dane`; readable tabs are regenerated on every save and exist so the therapist keeps usable data without the app. Never parse the readable tabs back.
 
 - **Google Drive (the product):** `pacjenci/` → one folder per patient → Google Sheet + `dokumenty/`. The patient list comes from Drive file `appProperties` in a single request; a patient's sheet is read on first open. A save is one atomic `spreadsheets.batchUpdate`. Small app settings (such as the calendar ID) live in the root folder's `appProperties`, so they follow the therapist across devices.
 - **Local folder:** same layout with `pacjent.xlsx`; Chrome/Edge desktop only. Kept for testing and offline use.
@@ -97,7 +112,10 @@ The access token (valid about an hour) is kept in the tab's `sessionStorage` (`p
 ## Product decisions in force
 
 - Home page is the calendar; the patient list is the tab next to it. The topbar 📅 button returns home.
-- Sidebar: the client's 10 items in her order, text only (icons only when the sidebar narrows in the visit form), plus "Kalendarz" for the selected patient.
+- Sidebar, text only (icons only when it narrows in the visit form): "+ Nowa wizyta", Historia wizyt, Kalendarz, then the seven visit extracts in the client's order. The extracts are read-only: data is entered only in a visit (owner's decision, October 2026).
+- "Dane identyfikacyjne" is not in the sidebar. Clicking the patient's name on the top bar opens it (`#/patient-data`).
+- Tests and files always belong to a visit. Something that arrives between appointments (a scan by email) goes into a "Kontakt mailowy" or "Notatka administracyjna" visit.
+- Notifications appear bottom-right, so they never cover the top bar.
 - Six visit types; only `first_meeting` opens the full interview form.
 - No "Save" buttons; autosave everywhere. Modals only for confirmations. The one exception is booking: an appointment is created by an explicit "Umów wizytę".
 - Visit form: filled fields read as a finished note; click to edit; one entry in edit at a time; leaving returns it to read mode. Section headings stay visually quiet.
@@ -109,7 +127,7 @@ The access token (valid about an hour) is kept in the tab's `sessionStorage` (`p
 
 ## Not done yet
 
-- **Zalecenia:** the page still lists standalone records and nothing in the visit form creates them. Waiting for a product decision on where they come from.
+- **Attachments:** files can be added and removed in a visit but not renamed, and a file "bez wizyty" cannot be assigned to a visit afterwards.
 - **ICD-10:** dictionary has about 80 codes; the client wants all of them. `extendIcd10Dict()` exists; a full list still has to be sourced and loaded.
 - **Calendar:** Google Meet links for online sessions (wanted later); recurring appointments.
 - **Deferred by the client:** closing a visit and required fields; marking fields as more / less important.

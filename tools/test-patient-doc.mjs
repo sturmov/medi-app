@@ -7,7 +7,8 @@
 //   1. czytelny opis wizyty zawiera każde pole i nic nie wpada do „Pozostałe",
 //   2. dokument pacjenta wraca identyczny po zapisie do XLSX i odczycie,
 //   3. cięcie dokumentu na komórki nie psuje emoji ani spacji,
-//   4. osie czasu (leki, rozpoznania, parametry, plan) widzą dane z wizyt.
+//   4. wyciągi (leki, rozpoznania, parametry, plan, zalecenia, testy, dokumenty)
+//      widzą dane z wizyt — i każdy rekord wie, z której wizyty pochodzi.
 // ============================================================================
 
 import assert from 'node:assert/strict';
@@ -40,6 +41,8 @@ function fillVisit(mode, type, id) {
             const key = section.id + '.' + f.id;
             const opts = (f.input && f.input.options) || [];
             if (t === 'header' || t === 'link-view' || t === 'inline-meds' || t === 'inline-diagnoses') continue;
+            // Testy i dokumenty żyją w `data` wizyty (niżej), ale muszą być w jej opisie.
+            if (t === 'inline-tests' || t === 'inline-docs') { expectLabels.push(f.label); continue; }
             if (t === 'uzywki-special') {
                 raw[section.id + '_u_2'] = true;
                 raw[section.id + '_u_2_i'] = 'Regularnie';
@@ -63,7 +66,10 @@ function fillVisit(mode, type, id) {
             data: {
                 _raw: raw,
                 meds: [{ name: 'Zoloft', substance: 'Sertralina', group: 'Leki przeciwdepresyjne', dose: '50', unit: 'mg/d', maxDose: '200 mg/d' }],
-                diagnoses: [{ code: 'F32.1', description: 'Epizod depresyjny umiarkowany' }]
+                diagnoses: [{ code: 'F32.1', description: 'Epizod depresyjny umiarkowany' }],
+                tests: [{ id: 'T-' + id, code: 'PHQ-9', name: 'Kwestionariusz depresji (PHQ-9)', score: 14,
+                          interpretation: 'Umiarkowana depresja', answers: { q1: '2', q9: '1' }, redFlag: true }],
+                docs: [{ id: 'file-' + id, name: 'skierowanie ' + id + '.pdf', size: 20480 }]
             }
         },
         expectLabels
@@ -113,6 +119,19 @@ check('leki, rozpoznania i używki są częścią opisu wizyty', () => {
     assert.equal(alkohol.notes, 'weekendy');
     assert.ok(all.some((f) => f.label === VISIT_DICT.UZYWKI_11[5] && f.notes));
 });
+check('wyniki testów i dołączone pliki są częścią opisu wizyty (każdego typu)', () => {
+    for (const sample of [first, next]) {
+        const all = D.describeVisit(sample.visit).sections.flatMap((s) => s.fields);
+        assert.ok(all.some((f) => f.value === 'PHQ-9 — wynik 14 · Umiarkowana depresja · czerwona flaga'), 'test w opisie');
+        assert.ok(all.some((f) => f.value === 'skierowanie ' + sample.visit.id + '.pdf'), 'plik w opisie');
+        assert.ok(all.some((f) => f.label === 'Zalecenia' && /Tekst pola „Zalecenia"/.test(f.value)), 'zalecenia w opisie');
+    }
+    const field = (type) => ({ id: 'x', input: { type } });
+    assert.equal(D.isFieldFilled('testy', field('inline-tests'), {}, { tests: [] }), false);
+    assert.equal(D.isFieldFilled('testy', field('inline-tests'), {}, first.visit.data), true);
+    assert.equal(D.isFieldFilled('dokumenty', field('inline-docs'), {}, {}), false);
+    assert.equal(D.isFieldFilled('dokumenty', field('inline-docs'), {}, first.visit.data), true);
+});
 check('pole z samą uwagą liczy się jako wypełnione', () => {
     const field = { id: 'sen', input: { type: 'radio' } };
     assert.equal(D.isFieldFilled('somatyczne', field, { 'somatyczne.sen.__notes': 'budzi się o 3' }, {}), true);
@@ -133,6 +152,19 @@ check('leki / rozpoznania / parametry / plan — od najnowszej wizyty', () => {
     assert.equal(plan.length, 2);
     assert.match(plan[0].ustalenia, /Ustalenia i plan leczenia/);
 });
+check('zalecenia / testy / dokumenty — rekord niesie wizytę, z której pochodzi', () => {
+    const visits = [first.visit, next.visit, { id: 'V3', type: 'email_contact', date: '2026-10-25', data: { _raw: {} } }];
+    const zalecenia = D.recommendationsTimeline(visits);
+    assert.deepEqual(zalecenia.map((e) => e.visit.id), ['V2', 'V1'], 'pusta wizyta nie daje rekordu');
+    assert.match(zalecenia[0].text, /Tekst pola „Zalecenia"/);
+    const testy = D.testsTimeline(visits);
+    assert.deepEqual(testy.map((e) => [e.visit.id, e.visit.date, e.test.code]), [['V2', '2026-10-20', 'PHQ-9'], ['V1', '2026-10-06', 'PHQ-9']]);
+    const pliki = D.documentsTimeline(visits);
+    assert.deepEqual(pliki.map((e) => [e.visit.id, e.doc.id]), [['V2', 'file-V2'], ['V1', 'file-V1']]);
+    // wizyta zapisana przed tą zmianą (bez `tests` / `docs`) niczego nie psuje
+    assert.deepEqual(D.testsTimeline([{ id: 'old', date: '2026-01-01', data: { _raw: {}, meds: [], diagnoses: [] } }]), []);
+    assert.deepEqual(D.documentsTimeline([{ id: 'old', date: '2026-01-01' }]), []);
+});
 
 console.log('\nDokument pacjenta');
 const doc = buildPatientDoc(state, 'P900');
@@ -152,9 +184,29 @@ console.log('\nArkusz (XLSX = ten sam układ co Google Sheets)');
 const tabs = buildTabs(doc);
 check('zakładki czytelne + ukryta zakładka danych', () => {
     assert.deepEqual(tabs.map((t) => t.title),
-        ['Pacjent', 'Wizyty', 'Leki', 'Diagnozy', 'Parametry', 'Plan leczenia', 'Zalecenia', 'Testy', DATA_TAB]);
+        ['Pacjent', 'Wizyty', 'Leki', 'Diagnozy', 'Parametry', 'Plan leczenia', 'Zalecenia', 'Testy', 'Dokumenty', DATA_TAB]);
     assert.equal(tabs.at(-1).hidden, true);
     for (const t of tabs) for (const r of t.rows) assert.equal(r.length, t.columns.length, t.title);
+});
+check('zakładki Zalecenia, Testy i Dokumenty są wyciągiem z wizyt; dawne rekordy mają dopisek „(bez wizyty)"', () => {
+    const tab = (title) => tabs.find((t) => t.title === title);
+    for (const title of ['Zalecenia', 'Testy', 'Dokumenty']) {
+        assert.deepEqual(tab(title).columns.slice(0, 2).map((c) => c.label), ['Data wizyty', 'Typ wizyty'], title);
+    }
+    const zalecenia = tab('Zalecenia').rows;
+    assert.deepEqual(zalecenia.map((r) => r.slice(0, 2)),
+        [['2026-10-20', 'Kolejne spotkanie'], ['2026-10-06', '1sze spotkanie'], ['2026-10-06', '(bez wizyty)']]);
+    assert.equal(zalecenia[2][2], 'Higiena snu: stała pora');
+    const testy = tab('Testy').rows;
+    assert.deepEqual(testy.map((r) => [r[0], r[1], r[2], r[4], r[6]]), [
+        ['2026-10-20', 'Kolejne spotkanie', 'PHQ-9', 14, 'TAK'],
+        ['2026-10-06', '1sze spotkanie', 'PHQ-9', 14, 'TAK'],
+        ['2026-10-06', '(bez wizyty)', 'PHQ-9', 14, '']
+    ]);
+    assert.deepEqual(tab('Dokumenty').rows, [
+        ['2026-10-20', 'Kolejne spotkanie', 'skierowanie V2.pdf'],
+        ['2026-10-06', '1sze spotkanie', 'skierowanie V1.pdf']
+    ]);
 });
 check('zakładka Pacjent ma adres w trzech polach', () => {
     const rows = tabs[0].rows.map((r) => r[1] + '=' + r[2]);

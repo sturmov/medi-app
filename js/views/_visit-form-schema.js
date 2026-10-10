@@ -41,6 +41,7 @@
 //             'select' | 'multi-select' | 'radio' | 'checkbox-group' |
 //             'tag-input-icd10' | 'uzywki-special' | 'link-view' |
 //             'inline-diagnoses' | 'inline-meds'    (NOWE 2026-06-13)
+//             'inline-tests' | 'inline-docs'        (2026-10: testy i pliki w wizycie)
 //   notes      - true/false — czy slot uwag widoczny (domyślnie true)
 // ============================================================================
 
@@ -269,14 +270,15 @@ export const VISIT_FORM_SCHEMA = [
     },
 
     // ---------------------------------------------------------------------
-    // 2.13 Testy przesiewowe (⬆ first, prosty placeholder)
+    // 2.13 Testy — uruchamiane z wizyty (każdego typu); wynik należy do wizyty,
+    //      a zakładka „Testy" jest wyciągiem wyników ze wszystkich wizyt.
     // ---------------------------------------------------------------------
     {
         id: 'testy',
-        title: 'Testy przesiewowe',        onlyIn: 'first',
+        title: 'Testy',
         sectionComment: true,
         subfields: [
-            { id: 'testyLink', label: 'Wyniki testów', input: { type: 'link-view', ref: '#/tests' }, notes: false }
+            { id: 'wyniki', label: 'Wyniki testów', input: { type: 'inline-tests' }, notes: false }
         ]
     },
 
@@ -323,6 +325,30 @@ export const VISIT_FORM_SCHEMA = [
             { id: 'kontrolna',        label: 'Wizyta kontrolna',                          input: { type: 'select', options: VISIT_DICT.KONTROLNA_TERMIN } },
             { id: 'ewaluacja',        label: 'Ewaluacja',                                 input: { type: 'textarea' }, notes: false },
             { id: 'dodatkowe',        label: 'Informacje dodatkowe i zabezpieczenia',     onlyIn: 'first', input: { type: 'textarea' }, notes: false }
+        ]
+    },
+
+    // ---------------------------------------------------------------------
+    // 2.17 Zalecenia — zakładka „Zalecenia" jest wyciągiem tego pola z wizyt.
+    // ---------------------------------------------------------------------
+    {
+        id: 'zalecenia',
+        title: 'Zalecenia',
+        subfields: [
+            { id: 'tresc', label: 'Zalecenia', input: { type: 'textarea' }, notes: false }
+        ]
+    },
+
+    // ---------------------------------------------------------------------
+    // 2.18 Dokumenty — pliki dołączone do tej wizyty (skierowania, wyniki
+    //      badań, skany). Leżą w folderze `dokumenty/` pacjenta; wizyta pamięta,
+    //      które są jej. Zakładka „Dokumenty" jest wyciągiem ze wszystkich wizyt.
+    // ---------------------------------------------------------------------
+    {
+        id: 'dokumenty',
+        title: 'Dokumenty',
+        subfields: [
+            { id: 'pliki', label: 'Dokumenty', input: { type: 'inline-docs' }, notes: false }
         ]
     }
 ];

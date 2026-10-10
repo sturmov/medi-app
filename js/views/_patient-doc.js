@@ -7,9 +7,9 @@
 //     format: 'psychoapp-patient', version: 2, savedAt: ISO,
 //     patient:         { id, imie, nazwisko, … },
 //     visits:          [{ id, date, time, type, paid, duration, summary,
-//                         data: { _raw, meds, diagnoses } }],
-//     recommendations: [...],
-//     tests:           [...]
+//                         data: { _raw, meds, diagnoses, tests, docs } }],
+//     recommendations: [...],   // tylko dawne rekordy „bez wizyty" — nowe zalecenia
+//     tests:           [...]    // i wyniki testów są częścią wizyty (visit.data)
 //   }
 //
 // W arkuszu pacjenta dokument leży w zakładce `_dane` (JSON), a pozostałe
@@ -64,7 +64,7 @@ export function parsePatientDoc(input) {
         patient: Object.assign({}, doc.patient, { id: pid, kodPacjenta: pid }),
         visits: arr(doc.visits).map((v) => Object.assign({}, v, {
             patientId: pid,
-            data: Object.assign({ _raw: {}, meds: [], diagnoses: [] }, v.data || {})
+            data: Object.assign({ _raw: {}, meds: [], diagnoses: [], tests: [], docs: [] }, v.data || {})
         })),
         recommendations: arr(doc.recommendations).map((r) => Object.assign({}, r, { patientId: pid })),
         tests: arr(doc.tests).map((t) => Object.assign({}, t, { patientId: pid }))

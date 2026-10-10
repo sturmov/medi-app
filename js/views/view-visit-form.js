@@ -3,7 +3,8 @@
 //
 // STAN FORMULARZA (jedno źródło prawdy, w pamięci):
 //   raw   — płaska mapa wartości pól (`sekcja.pole`), patrz `_visit-describe.js`
-//   data  — { meds: [...], diagnoses: [...] } (leki i rozpoznania TEJ wizyty)
+//   data  — { meds, diagnoses, tests, docs }: leki, rozpoznania, wyniki testów
+//           i załączniki TEJ wizyty
 //
 //   Każde zdarzenie `input`/`change` NATYCHMIAST przenosi wartości z kontrolek
 //   edytowanego akapitu do `raw`. Zapis do Store jest opóźniony (400 ms), ale
@@ -25,8 +26,11 @@ import { searchIcd10, findIcd10ByCode } from './_icd10-dict.js';
 import { searchMeds } from './_meds-dict.js';
 import { openConfirm } from './_modal.js';
 import { createFormToolbar } from './_form-toolbar.js';
-import { el } from './_dom.js';
+import { el, toast } from './_dom.js';
 import { patchAppointment, unlinkVisitFromAppointment } from './_calendar-api.js';
+import { listAvailableTests } from './_tests-catalog.js';
+import { attachmentsAvailable, uploadAttachments, removeAttachment, openAttachment } from './_attachments.js';
+import { iconForFile, formatSize } from './_documents-store.js';
 import {
     visitMode, fieldKey, isBlank, listOf,
     isFieldFilled, fieldText, uzywkiEntries,
@@ -498,6 +502,183 @@ function editMeds(ctx) {
 }
 
 /* ==========================================================================
+   Testy tej wizyty
+   - wynik powstaje w osobnym widoku testu (pełny ekran, pacjent może wypełniać
+     sam) i wraca tutaj jako część wizyty,
+   - zakładka „Testy" w menu to wyciąg tych wyników ze wszystkich wizyt.
+   ========================================================================== */
+function editTests(ctx) {
+    const wrap = el('div', { class: 'psy-vf__inline-tests' });
+    const list = el('div', { class: 'psy-vf__inline-list' });
+
+    function renderList() {
+        list.innerHTML = '';
+        const items = ctx.data.tests;
+        if (!items.length) {
+            list.appendChild(el('div', { class: 'psy-vf__inline-meds__empty' }, ['Brak testów w tej wizycie.']));
+        }
+        items.forEach((t) => {
+            list.appendChild(el('div', { class: 'psy-vf__inline-list__row' }, [
+                el('strong', { class: 'psy-vf__inline-list__main' }, [t.code || 'test']),
+                el('span', { class: 'psy-vf__inline-list__value' }, ['wynik ' + (isBlank(t.score) ? '?' : t.score)]),
+                el('span', { class: 'psy-vf__inline-list__rest' }, [(t.redFlag ? '🚨 ' : '') + (t.interpretation || '')]),
+                el('button', {
+                    type: 'button',
+                    class: 'psy-vf__inline-meds__remove',
+                    title: 'Usuń wynik',
+                    onclick: async () => {
+                        const ok = await openConfirm({
+                            title: 'Usunąć wynik testu?',
+                            message: 'Wynik testu „' + (t.code || '') + '" zostanie usunięty z tej wizyty.',
+                            confirmLabel: 'Usuń',
+                            variant: 'danger'
+                        });
+                        if (!ok) return;
+                        const at = items.indexOf(t);
+                        if (at >= 0) items.splice(at, 1);
+                        ctx.changed();
+                        renderList();
+                    }
+                }, ['✕'])
+            ]));
+        });
+    }
+
+    const run = el('div', { class: 'psy-vf__inline-run' }, [
+        el('span', { class: 'psy-vf__inline-run__label' }, ['Uruchom test:'])
+    ]);
+    for (const t of listAvailableTests()) {
+        run.appendChild(el('button', {
+            type: 'button',
+            class: 'btn btn--secondary btn--sm',
+            dataset: { testCode: t.code },
+            title: t.name + ' · ' + t.questions + ' pytań',
+            onclick: () => {
+                // Test otwiera się w osobnym widoku — wizyta musi już istnieć, żeby wynik miał dokąd wrócić.
+                const visitId = ctx.ensureVisit();
+                if (!visitId) return;
+                window.location.hash = '#/tests/run/' + encodeURIComponent(t.code) + '?visit=' + encodeURIComponent(visitId);
+            }
+        }, [t.code]));
+    }
+
+    renderList();
+    wrap.appendChild(list);
+    wrap.appendChild(run);
+    return wrap;
+}
+
+/* ==========================================================================
+   Dokumenty tej wizyty (skierowania, wyniki badań, skany)
+   - plik trafia do folderu `dokumenty/` pacjenta; wizyta pamięta, że jest jej,
+   - usunięcie z wizyty usuwa plik z magazynu (na Dysku Google: do Kosza).
+   ========================================================================== */
+function editDocs(ctx) {
+    const wrap = el('div', { class: 'psy-vf__inline-docs' });
+    const list = el('div', { class: 'psy-vf__inline-list' });
+    const status = el('div', { class: 'psy-new-hint psy-vf__inline-docs__status' });
+
+    function renderList() {
+        list.innerHTML = '';
+        const items = ctx.data.docs;
+        if (!items.length) {
+            list.appendChild(el('div', { class: 'psy-vf__inline-meds__empty' }, ['Brak dokumentów w tej wizycie.']));
+        }
+        items.forEach((d) => {
+            list.appendChild(el('div', { class: 'psy-vf__inline-list__row' }, [
+                el('span', { 'aria-hidden': 'true' }, [iconForFile(d.name || '')]),
+                el('a', {
+                    href: '#',
+                    class: 'psy-vf__inline-list__main psy-vf__inline-docs__link',
+                    title: 'Otwórz plik',
+                    onclick: (ev) => { ev.preventDefault(); openAttachment(ctx.patientId, d); }
+                }, [d.name || '(plik bez nazwy)']),
+                el('span', { class: 'psy-vf__inline-list__rest' }, [d.size ? formatSize(d.size) : '']),
+                el('button', {
+                    type: 'button',
+                    class: 'psy-vf__inline-meds__remove',
+                    title: 'Usuń plik',
+                    onclick: async () => {
+                        const ok = await openConfirm({
+                            title: 'Usunąć plik?',
+                            message: 'Plik „' + (d.name || '') + '" zostanie usunięty z tej wizyty i z folderu pacjenta.',
+                            confirmLabel: 'Usuń',
+                            variant: 'danger'
+                        });
+                        if (!ok) return;
+                        try {
+                            await removeAttachment(ctx.patientId, d);
+                        } catch (e) {
+                            // Plik zostaje w folderze — w „Dokumentach" będzie widoczny jako „bez wizyty".
+                            toast('warning', 'Pliku nie udało się usunąć z magazynu', String(e && e.message || e));
+                        }
+                        const at = items.indexOf(d);
+                        if (at >= 0) items.splice(at, 1);
+                        ctx.changed();
+                        ctx.ensureVisit();      // pliku już nie ma — wizyta od razu przestaje go wskazywać
+                        renderList();
+                        ctx.redraw();
+                    }
+                }, ['✕'])
+            ]));
+        });
+    }
+
+    async function add(files) {
+        if (!files.length) return;
+        status.textContent = '⏳ Wgrywanie' + (files.length === 1 ? ': ' + files[0].name : ' plików: ' + files.length) + '…';
+        const { added, failed } = await uploadAttachments(ctx.patientId, files);
+        status.textContent = failed.length ? '⚠ Nie udało się wgrać: ' + failed.join(', ') : '';
+        if (added.length) {
+            ctx.data.docs.push(...added);
+            ctx.changed();
+            ctx.ensureVisit();      // plik już leży w magazynie — wizyta od razu zapisuje, że jest jej
+        }
+        renderList();
+        ctx.redraw();       // akapit mógł zostać zamknięty, zanim wgrywanie się skończyło
+    }
+
+    renderList();
+    wrap.appendChild(list);
+
+    if (!attachmentsAvailable()) {
+        wrap.appendChild(el('div', { class: 'psy-new-hint' }, [
+            'Załączniki wymagają podłączonego magazynu (Dysk Google albo folder na komputerze) — '
+            + 'w trybie demo nie ma gdzie przechowywać plików.'
+        ]));
+        return wrap;
+    }
+
+    // `transient`: wybór pliku nie jest jeszcze zmianą notatki (staje się nią po wgraniu).
+    const fileInput = el('input', {
+        type: 'file', multiple: true, style: { display: 'none' }, dataset: { transient: '1' },
+        onchange: (ev) => {
+            const files = Array.from(ev.target.files || []);
+            ev.target.value = '';
+            add(files);
+        }
+    });
+    wrap.appendChild(el('div', { class: 'psy-vf__inline-run' }, [
+        el('button', {
+            type: 'button', class: 'btn btn--secondary btn--sm', dataset: { action: 'attach' },
+            onclick: () => fileInput.click()
+        }, ['📎 Dodaj plik']),
+        el('span', { class: 'psy-new-hint' }, ['albo przeciągnij plik tutaj · PDF, zdjęcia, DOCX…']),
+        fileInput
+    ]));
+    wrap.appendChild(status);
+
+    wrap.addEventListener('dragover', (ev) => { ev.preventDefault(); wrap.classList.add('psy-vf__inline-docs--dragover'); });
+    wrap.addEventListener('dragleave', () => wrap.classList.remove('psy-vf__inline-docs--dragover'));
+    wrap.addEventListener('drop', (ev) => {
+        ev.preventDefault();
+        wrap.classList.remove('psy-vf__inline-docs--dragover');
+        add(Array.from((ev.dataTransfer && ev.dataTransfer.files) || []));
+    });
+    return wrap;
+}
+
+/* ==========================================================================
    Kontrolka wg typu pola
    ========================================================================== */
 function editControl(sectionId, field, raw, ctx) {
@@ -517,6 +698,8 @@ function editControl(sectionId, field, raw, ctx) {
         case 'uzywki-special':  return editUzywki(sectionId, raw);
         case 'inline-diagnoses': return editDiagnoses(ctx);
         case 'inline-meds':     return editMeds(ctx);
+        case 'inline-tests':    return editTests(ctx);
+        case 'inline-docs':     return editDocs(ctx);
         default:
             return el('div', { class: 'psy-new-hint' }, ['(nieobsługiwany typ pola: ' + input.type + ')']);
     }
@@ -540,8 +723,31 @@ function readLines(lines) {
         lines.map((parts) => el('div', {}, parts)));
 }
 
-function readField(sectionId, field, raw, data) {
+function readField(sectionId, field, raw, data, ctx) {
     const type = (field.input && field.input.type) || 'textarea';
+
+    if (type === 'inline-tests') {
+        if (!data.tests.length) return readEmpty();
+        return readLines(data.tests.map((t) => [
+            el('strong', {}, [t.code || 'test']),
+            ' — wynik ' + (isBlank(t.score) ? '?' : t.score),
+            t.interpretation ? el('span', { class: 'psy-new-hint' }, [' · ' + (t.redFlag ? '🚨 ' : '') + t.interpretation]) : null
+        ]));
+    }
+    if (type === 'inline-docs') {
+        if (!data.docs.length) return readEmpty();
+        // Link w treści działa normalnie (nie przełącza akapitu w edycję) — otwiera plik.
+        return readLines(data.docs.map((d) => [
+            iconForFile(d.name || '') + ' ',
+            el('a', {
+                href: '#',
+                class: 'psy-vf__inline-docs__link',
+                title: 'Otwórz plik',
+                onclick: (ev) => { ev.preventDefault(); openAttachment(ctx.patientId, d); }
+            }, [d.name || '(plik bez nazwy)']),
+            d.size ? el('span', { class: 'psy-new-hint' }, [' · ' + formatSize(d.size)]) : null
+        ]));
+    }
 
     if (type === 'inline-diagnoses') {
         if (!data.diagnoses.length) return readEmpty();
@@ -617,7 +823,8 @@ function messageView(title, children) {
 /* ==========================================================================
    GŁÓWNY EXPORT
    @param {object} opts — { isNew?, typeId?, visitId?,
-                            date?, time?, eventId?, paid? }  ← gdy notatka powstaje z terminu w kalendarzu
+                            date?, time?, eventId?, paid?,   ← gdy notatka powstaje z terminu w kalendarzu
+                            focus? }                         ← akapit do pokazania (`sekcja::pole`)
    ========================================================================== */
 export function renderVisitForm(opts = {}) {
     const patient = Store.state.currentPatient;
@@ -641,7 +848,9 @@ export function renderVisitForm(opts = {}) {
     const raw = Object.assign({}, (visit && visit.data && visit.data._raw) || {});
     const data = {
         meds: clone(visit && visit.data && visit.data.meds),
-        diagnoses: clone(visit && visit.data && visit.data.diagnoses)
+        diagnoses: clone(visit && visit.data && visit.data.diagnoses),
+        tests: clone(visit && visit.data && visit.data.tests),
+        docs: clone(visit && visit.data && visit.data.docs)
     };
     // Nowa wizyta: data domyślnie dzisiejsza (zapisze się przy pierwszej zmianie).
     if (!visit && isBlank(raw['visitData.data'])) raw['visitData.data'] = opts.date || todayISO();
@@ -672,7 +881,14 @@ export function renderVisitForm(opts = {}) {
         return { id: section.id, title: section.title, fields: out };
     });
 
-    const ctx = { data, changed: () => markDirty() };
+    const ctx = {
+        data,
+        patientId: patient.id,
+        changed: () => markDirty(),
+        redraw: () => toolbar.redraw(),
+        /** Zapisuje wizytę od razu, bez czekania 400 ms (także jeszcze pustą) i zwraca jej identyfikator. */
+        ensureVisit: () => { dirty = true; persist(); return visitId; }
+    };
 
     function gridFilled(section) {
         return (section.subfields || []).some((sf) => isFieldFilled(section.id, sf, raw, data));
@@ -697,6 +913,8 @@ export function renderVisitForm(opts = {}) {
         }
         if (type === 'inline-meds') return cut(data.meds.map((m) => m.name).join(', '), 80);
         if (type === 'inline-diagnoses') return cut(data.diagnoses.map((d) => d.code).join(', '), 80);
+        if (type === 'inline-tests') return cut(data.tests.map((t) => (t.code || 'test') + ': ' + t.score).join(', '), 80);
+        if (type === 'inline-docs') return cut(data.docs.map((d) => d.name).join(', '), 80);
         if (type === 'uzywki-special') {
             const n = uzywkiEntries(field._groupId, raw).length;
             return n ? n + ' ' + (n === 1 ? 'pozycja' : (n < 5 ? 'pozycje' : 'pozycji')) : '';
@@ -715,7 +933,7 @@ export function renderVisitForm(opts = {}) {
             : editControl(field._groupId, field, raw, ctx)),
         renderRead: (field) => (field.id === '__grid'
             ? readGrid(field.section, raw, data)
-            : readField(field._groupId, field, raw, data)),
+            : readField(field._groupId, field, raw, data, ctx)),
         groupPreview: (group) => {
             if (group.id !== 'visitData') return '';
             const s = String(raw['visitData.powod'] || '').trim();
@@ -725,7 +943,8 @@ export function renderVisitForm(opts = {}) {
         showNotes: (field) => {
             if (field.notes === false) return false;
             const t = field.input && field.input.type;
-            return !['textarea', 'compact-grid', 'uzywki-special', 'inline-meds', 'inline-diagnoses', 'link-view'].includes(t);
+            return !['textarea', 'compact-grid', 'uzywki-special', 'inline-meds', 'inline-diagnoses',
+                'inline-tests', 'inline-docs', 'link-view'].includes(t);
         },
         notesValue: (field) => raw[fieldKey(field._groupId, field.id) + '.__notes'] || ''
     });
@@ -737,7 +956,11 @@ export function renderVisitForm(opts = {}) {
         dirty = false;
 
         const date = isBlank(raw['visitData.data']) ? ((visit && visit.date) || todayISO()) : raw['visitData.data'];
-        const payload = { _raw: Object.assign({}, raw), meds: clone(data.meds), diagnoses: clone(data.diagnoses) };
+        const payload = {
+            _raw: Object.assign({}, raw),
+            meds: clone(data.meds), diagnoses: clone(data.diagnoses),
+            tests: clone(data.tests), docs: clone(data.docs)
+        };
         const summary = visitSummary({ data: payload });
 
         if (!visitId) {
@@ -798,8 +1021,12 @@ export function renderVisitForm(opts = {}) {
         onclick: async () => {
             const ok = await openConfirm({
                 title: 'Usunąć wizytę?',
-                message: 'Wizyta zostanie trwale usunięta razem z wpisanymi w niej lekami i rozpoznaniami. '
-                    + 'Operacji nie da się cofnąć.',
+                message: 'Wizyta zostanie trwale usunięta razem z tym, co w niej wpisano: lekami, rozpoznaniami, '
+                    + 'zaleceniami i wynikami testów. Operacji nie da się cofnąć.'
+                    + (data.docs.length
+                        ? ' Dołączone pliki (' + data.docs.length + ') zostają w folderze pacjenta — '
+                            + 'w „Dokumentach" będą oznaczone „bez wizyty".'
+                        : ''),
                 confirmLabel: 'Usuń',
                 variant: 'danger'
             });
@@ -842,6 +1069,9 @@ export function renderVisitForm(opts = {}) {
         ]),
         toolbar
     ]);
+
+    // Powrót np. z testu: pokaż akapit, którego dotyczył (widok jest już wtedy na ekranie).
+    if (opts.focus) setTimeout(() => toolbar.scrollToField(opts.focus), 0);
 
     // Kontroler woła to przed zdjęciem widoku z ekranu (zmiana trasy).
     root.psyTeardown = () => {
