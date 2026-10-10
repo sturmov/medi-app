@@ -128,6 +128,24 @@
     color: #6B7280;
 }
 
+/* Kropka sekcji — ta sama co przy polach: pusta, a zielona, gdy którekolwiek
+   pole sekcji jest wypełnione (prośba klientki). Stoi na linii tekstu, więc
+   przy nazwie złamanej na dwie linie zostaje przy pierwszej. */
+.psy-form-toolbar__group-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #FFFFFF;
+    border: 1.5px solid #D1D5DB;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+.psy-form-toolbar__group-title--filled .psy-form-toolbar__group-dot {
+    background: #10B981;
+    border-color: #059669;
+}
+
 /* `flex-basis: 0`: długa nazwa łamie się wewnątrz siebie, a licznik zostaje
    w pierwszej linii (przy `auto` zawijanie nagłówka zrzucało go pod nazwę). */
 .psy-form-toolbar__group-name {
@@ -140,7 +158,7 @@
    pokazuje początek pola „Powód zgłoszenia"). Mała, szara czcionka. */
 .psy-form-toolbar__group-preview {
     flex-basis: 100%;
-    padding: 2px 0 0 16px;     /* indent pod chevronem */
+    padding: 2px 0 0 29px;     /* wcięcie: pod nazwą sekcji (za strzałką i kropką) */
     font-size: 10.5px;
     font-weight: 400;
     color: #94A3B8;

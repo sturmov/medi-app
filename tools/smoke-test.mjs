@@ -334,6 +334,9 @@ async function scenarioDemo(origin) {
                     counts: Object.fromEntries(titles.map((t) => [
                         t.querySelector('.psy-form-toolbar__group-name').textContent,
                         t.querySelector('.psy-form-toolbar__group-count').textContent])),
+                    // sekcje z zieloną kropką (kolor faktycznie narysowany, nie sama klasa)
+                    green: titles.filter((t) => getComputedStyle(t.querySelector('.psy-form-toolbar__group-dot')).backgroundColor === 'rgb(16, 185, 129)')
+                        .map((t) => t.querySelector('.psy-form-toolbar__group-name').textContent),
                     fits: nav.scrollHeight <= nav.clientHeight };`);
             const open = await state();
             assert.match(open.toggle, /Zwiń do listy sekcji/);
@@ -343,6 +346,22 @@ async function scenarioDemo(origin) {
             assert.equal(open.counts['Dane wizyty'], '1/1');
             assert.equal(open.counts['Status psychiczny'], '0/22');
             assert.equal(open.fits, false);
+            // kropka przy sekcji: zielona dokładnie tam, gdzie coś wpisano
+            const withContent = Object.entries(open.counts).filter(([, c]) => !c.startsWith('0/')).map(([name]) => name);
+            assert.deepEqual(open.green, withContent);
+            assert.equal(open.green.length, 10);
+            assert.ok(open.green.includes('Wywiad — aktualne objawy') && !open.green.includes('Status psychiczny'));
+
+            // kropka sekcji zapala się od razu po wpisaniu pierwszego pola i gaśnie po jego wyczyszczeniu
+            await b.click(`__t.nav('kontekst::czasWolny')`);
+            await b.click(`__t.ctl('kontekst::czasWolny', 'input[type="checkbox"]')`);
+            let live = await state();
+            assert.ok(live.green.includes('Tło / kontekst funkcjonowania'), 'kropka sekcji po pierwszym wpisie');
+            assert.equal(live.counts['Tło / kontekst funkcjonowania'], '1/7');
+            await b.click(`__t.ctl('kontekst::czasWolny', 'input[type="checkbox"]')`);
+            live = await state();
+            assert.ok(!live.green.includes('Tło / kontekst funkcjonowania'), 'kropka sekcji gaśnie, gdy sekcja znów jest pusta');
+            await b.key('Escape');
 
             await b.click('[data-action="toggle-sections"]');
             const closed = await state();
@@ -350,6 +369,7 @@ async function scenarioDemo(origin) {
             assert.deepEqual([closed.sections, closed.fields], [19, 0]);
             assert.equal(closed.fits, true, 'cała lista sekcji mieści się bez przewijania');
             assert.deepEqual(closed.counts, open.counts);
+            assert.deepEqual(closed.green, open.green, 'kropki widać także na zwiniętej liście sekcji');
             await b.screenshot(path.join(SHOTS, 'demo-07-lista-sekcji.png'));
 
             // jedna sekcja rozwinięta ręcznie, potem wszystko z powrotem

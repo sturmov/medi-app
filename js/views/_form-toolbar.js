@@ -4,8 +4,9 @@
 // LEWA kolumna: wszystkie pola pogrupowane w sekcje, z kropką wypełnienia
 //   i podglądem wartości. Klik pola → akapit pojawia się po prawej w trybie
 //   edycji (w kolejności schematu, nie na końcu). Sekcje są domyślnie
-//   rozwinięte; nagłówek sekcji pokazuje „wypełnione / wszystkie", a przełącznik
-//   u góry zwija wszystko do samej listy sekcji (i z powrotem).
+//   rozwinięte; nagłówek sekcji ma kropkę (zieloną, gdy którekolwiek jej pole
+//   jest wypełnione) i licznik „wypełnione / wszystkie", a przełącznik u góry
+//   zwija wszystko do samej listy sekcji (i z powrotem).
 //
 // PRAWA kolumna: dziennik — tylko pola, które mają treść (plus to, które
 //   właśnie jest edytowane). Każdy akapit ma dwa stany:
@@ -141,6 +142,8 @@ export function createFormToolbar(opts) {
             }, [
                 el('span', { class: 'psy-form-toolbar__group-chevron', 'aria-hidden': 'true' },
                     [collapsed ? '▸' : '▾']),
+                // ta sama kropka co przy polach: zielona, gdy w sekcji jest cokolwiek wpisane
+                el('span', { class: 'psy-form-toolbar__group-dot', 'aria-hidden': 'true' }),
                 el('span', { class: 'psy-form-toolbar__group-name' }, [g.title || ''])
             ]);
             const count = el('span', { class: 'psy-form-toolbar__group-count' });
@@ -190,6 +193,7 @@ export function createFormToolbar(opts) {
             const filled = fields.filter((f) => isFilled(f, values)).length;
             count.textContent = filled + '/' + fields.length;
             count.title = 'Wypełnione pola: ' + filled + ' z ' + fields.length;
+            count.parentElement.classList.toggle('psy-form-toolbar__group-title--filled', filled > 0);
             count.classList.toggle('psy-form-toolbar__group-count--some', filled > 0);
         }
         for (const f of flat) {
